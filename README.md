@@ -39,7 +39,6 @@ A GPU-first cross-platform UI framework in Rust, built on `wgpu` and `winit`.
 
 - **Desktop**: Windows, macOS, Linux (Vulkan/Metal/DX12)
 - **Web**: WebAssembly + WebGPU (see `counter` example)
-- **Apple Native**: AppKit/UIKit widget integration via `spark-native-apple`
 
 ## Crates
 
@@ -94,9 +93,6 @@ cargo run -p triangle --release
 
 # Run the counter example
 cargo run -p counter --release
-
-# Run native Apple widget demo (macOS/iOS only)
-cargo run -p native-demo --release
 ```
 
 ### WebAssembly

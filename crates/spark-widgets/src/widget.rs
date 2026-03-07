@@ -143,23 +143,4 @@ pub trait Widget {
         let _ = ctx;
         None
     }
-
-    /// Check if this widget is a native widget (rendered by the platform).
-    /// Default implementation returns false.
-    fn is_native(&self) -> bool {
-        false
-    }
-
-    /// Register this widget as a native widget with the given registration callback.
-    /// The callback should be called with the widget ID and native view handle.
-    /// Default implementation does nothing (for non-native widgets).
-    #[cfg(any(target_os = "macos", target_os = "ios"))]
-    fn register_native(&self, _widget_id: WidgetId, _register: &mut dyn FnMut(WidgetId, *mut std::ffi::c_void)) {
-        // Default: do nothing
-    }
-    
-    #[cfg(not(any(target_os = "macos", target_os = "ios")))]
-    fn register_native(&self, _widget_id: WidgetId, _register: &mut dyn FnMut(WidgetId, *mut std::ffi::c_void)) {
-        // Default: do nothing
-    }
 }

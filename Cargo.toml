@@ -6,11 +6,9 @@ members = [
     "crates/spark-text",
     "crates/spark-input",
     "crates/spark-widgets",
-    "crates/spark-native-apple",
     "crates/spark",
     "examples/triangle",
     "examples/demo",
-    "examples/native-demo",
     "examples/layout",
     "examples/kitchen-sink",
 ]
@@ -54,7 +52,6 @@ spark-layout = { path = "crates/spark-layout" }
 spark-text = { path = "crates/spark-text" }
 spark-input = { path = "crates/spark-input" }
 spark-widgets = { path = "crates/spark-widgets" }
-spark-native-apple = { path = "crates/spark-native-apple" }
 
 # Web dependencies (add to workspace.dependencies for individual crates)
 wasm-bindgen = "0.2"

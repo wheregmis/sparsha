@@ -106,32 +106,7 @@ cargo run -p demo --release
 
 ---
 
-### 5. Native Demo
-**Path:** `examples/native-demo`
-**Level:** Advanced
-**Topics:** Native integration, Platform-specific widgets
-
-Demonstrates integration with native platform widgets and platform-specific features.
-
-**What you'll learn:**
-- Native widget integration
-- Platform-specific APIs
-- Mixing Spark and native UI
-- Platform capabilities
-
-**Run:**
-```bash
-cargo run -p native-demo --release
-```
-
-**Platform support:**
-- macOS: Native NSButton, NSTextField, etc.
-- Windows: Native Win32 controls
-- Linux: Native GTK widgets
-
----
-
-### 6. Kitchen Sink
+### 5. Kitchen Sink
 **Path:** `examples/kitchen-sink`
 **Level:** Advanced
 **Topics:** All features, Complex patterns, Best practices
@@ -162,7 +137,6 @@ cargo run -p kitchen-sink --release
   - Animation gallery
   - Form handling
   - Data visualization
-  - Native integration
 - Production-ready code patterns
 - Accessibility best practices
 - Performance optimizations
@@ -177,8 +151,7 @@ We recommend exploring the examples in this order:
 2. **Counter** - Learn state management and widgets
 3. **Layout Gallery** - Master the layout system
 4. **Demo** - Explore the widget library
-5. **Native Demo** - Learn platform integration
-6. **Kitchen Sink** - Study complex patterns and best practices
+5. **Kitchen Sink** - Study complex patterns and best practices
 
 ## Building All Examples
 
@@ -217,7 +190,6 @@ cargo check --workspace
 ### Platform-Specific Notes
 
 **macOS:**
-- Native widgets require macOS 10.15+
 - Metal backend is used for rendering
 
 **Windows:**
@@ -226,7 +198,6 @@ cargo check --workspace
 
 **Linux:**
 - Vulkan backend is used
-- GTK3+ required for native widgets
 
 ## Contributing
 
@@ -258,16 +229,12 @@ cargo update
 
 - Ensure your graphics drivers are up to date
 - Check that your platform supports the required graphics APIs
-- Verify native widget dependencies are installed (Linux)
+- Ensure required system libraries are installed for your platform
 
 ### Platform-Specific Issues
 
 **Linux:**
-```bash
-# Install required dependencies
-sudo apt-get install libgtk-3-dev  # Debian/Ubuntu
-sudo dnf install gtk3-devel        # Fedora
-```
+- Ensure Vulkan development libraries are installed for your distribution if needed.
 
 **macOS:**
 - Ensure Xcode Command Line Tools are installed:

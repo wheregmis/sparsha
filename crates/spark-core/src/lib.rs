@@ -13,6 +13,9 @@ pub use types::{Color, GlobalUniforms, Point, Rect};
 pub use vertex::{GlyphInstance, ShapeInstance, Vertex2D};
 pub use wgpu_init::{init_wgpu, SurfaceState};
 
+#[cfg(not(target_arch = "wasm32"))]
+pub use wgpu_init::init_wgpu_headless;
+
 // Re-export wgpu and glam for convenience
 pub use glam;
 pub use wgpu;

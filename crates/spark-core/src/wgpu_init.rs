@@ -66,6 +66,41 @@ pub async fn init_wgpu<'a>(window: &'a dyn Window) -> (Device, Queue, SurfaceSta
     (device, queue, state)
 }
 
+/// Initialize wgpu without a window (headless). For testing and offscreen rendering.
+/// Returns (Device, Queue). Not available on wasm32 (adapter requires a surface there).
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn init_wgpu_headless() -> (Device, Queue) {
+    let backends = Backends::PRIMARY;
+
+    let instance = Instance::new(&InstanceDescriptor {
+        backends,
+        ..Default::default()
+    });
+
+    let adapter = instance
+        .request_adapter(&RequestAdapterOptions {
+            power_preference: PowerPreference::HighPerformance,
+            force_fallback_adapter: false,
+            compatible_surface: None,
+        })
+        .await
+        .expect("headless adapter");
+
+    adapter
+        .request_device(
+            &DeviceDescriptor {
+                label: Some("headless device"),
+                required_features: Features::empty(),
+                required_limits: Limits::default(),
+                memory_hints: Default::default(),
+                experimental_features: Default::default(),
+                trace: Default::default(),
+            },
+        )
+        .await
+        .expect("headless device")
+}
+
 impl<'a> SurfaceState<'a> {
     pub fn resize(&mut self, device: &Device, width: u32, height: u32) {
         self.size = PhysicalSize::new(width, height);

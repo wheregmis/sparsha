@@ -45,6 +45,15 @@ impl GlyphKey {
     }
 }
 
+/// Bitmap data for inserting a glyph into the atlas.
+pub struct GlyphBitmap<'a> {
+    pub width: u32,
+    pub height: u32,
+    pub offset_x: i32,
+    pub offset_y: i32,
+    pub data: &'a [u8],
+}
+
 /// A simple shelf-based atlas packer.
 struct ShelfPacker {
     width: u32,
@@ -164,12 +173,16 @@ impl GlyphAtlas {
         &mut self,
         queue: &Queue,
         key: GlyphKey,
-        width: u32,
-        height: u32,
-        offset_x: i32,
-        offset_y: i32,
-        data: &[u8],
+        bitmap: GlyphBitmap<'_>,
     ) -> Option<CachedGlyph> {
+        let GlyphBitmap {
+            width,
+            height,
+            offset_x,
+            offset_y,
+            data,
+        } = bitmap;
+
         // Skip empty glyphs (like spaces)
         if width == 0 || height == 0 {
             let glyph = CachedGlyph {

@@ -134,6 +134,11 @@ impl Button {
         self
     }
 
+    /// Current visual state (for tests and debugging).
+    pub fn state(&self) -> ButtonState {
+        self.state
+    }
+
     fn current_background(&self) -> Color {
         match self.state {
             ButtonState::Normal => self.style.background,
@@ -291,6 +296,151 @@ impl Widget for Button {
             w + self.style.padding_h * 2.0,
             h + self.style.padding_v * 2.0,
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::test_helpers::{
+        layout_bounds, mock_event_context, pointer_down_at, pointer_move_at, pointer_up_at,
+    };
+    use spark_input::{FocusManager, InputEvent, Key, KeyboardEvent, NamedKey};
+    use spark_layout::LayoutTree;
+
+    fn button_bounds() -> (f32, f32, f32, f32) {
+        (0.0, 0.0, 100.0, 40.0)
+    }
+
+    #[test]
+    fn state_transition_pointer_move_inside_then_hovered() {
+        let mut button = Button::new("OK");
+        let (x, y, w, h) = button_bounds();
+        let layout = layout_bounds(x, y, w, h);
+        let layout_tree = LayoutTree::new();
+        let mut focus = FocusManager::new();
+        button.set_id(Default::default());
+
+        let mut ctx = mock_event_context(
+            layout,
+            &layout_tree,
+            &mut focus,
+            button.id(),
+            false,
+        );
+        let inside = (x + w / 2.0, y + h / 2.0);
+        let _ = button.event(&mut ctx, &pointer_move_at(inside.0, inside.1));
+        assert_eq!(button.state(), ButtonState::Hovered);
+    }
+
+    #[test]
+    fn state_transition_pointer_move_outside_then_normal() {
+        let mut button = Button::new("OK");
+        let (x, y, w, h) = button_bounds();
+        let layout = layout_bounds(x, y, w, h);
+        let layout_tree = LayoutTree::new();
+        let mut focus = FocusManager::new();
+        button.set_id(Default::default());
+
+        let mut ctx = mock_event_context(
+            layout,
+            &layout_tree,
+            &mut focus,
+            button.id(),
+            false,
+        );
+        let _ = button.event(&mut ctx, &pointer_move_at(x + w / 2.0, y + h / 2.0));
+        assert_eq!(button.state(), ButtonState::Hovered);
+        let _ = button.event(&mut ctx, &pointer_move_at(-10.0, -10.0));
+        assert_eq!(button.state(), ButtonState::Normal);
+    }
+
+    #[test]
+    fn click_flow_down_inside_capture_then_up_fires_click() {
+        let clicked = Arc::new(AtomicBool::new(false));
+        let clicked_clone = Arc::clone(&clicked);
+        let mut button = Button::new("OK").on_click(move || clicked_clone.store(true, Ordering::SeqCst));
+        let (x, y, w, h) = button_bounds();
+        let layout = layout_bounds(x, y, w, h);
+        let layout_tree = LayoutTree::new();
+        let mut focus = FocusManager::new();
+        button.set_id(Default::default());
+
+        let mut ctx = mock_event_context(
+            layout,
+            &layout_tree,
+            &mut focus,
+            button.id(),
+            false,
+        );
+        let inside = (x + w / 2.0, y + h / 2.0);
+
+        let r = button.event(&mut ctx, &pointer_down_at(inside.0, inside.1));
+        assert_eq!(button.state(), ButtonState::Pressed);
+        crate::assert_event_response!(r, handled: true, repaint: true, capture_pointer: true);
+
+        let r = button.event(&mut ctx, &pointer_up_at(inside.0, inside.1));
+        assert!(clicked.load(Ordering::SeqCst));
+        assert_eq!(button.state(), ButtonState::Hovered);
+        crate::assert_event_response!(r, handled: true, repaint: true, release_pointer: true);
+    }
+
+    #[test]
+    fn disabled_button_ignores_events() {
+        let mut button = Button::new("OK").disabled(true);
+        let (x, y, w, h) = button_bounds();
+        let layout = layout_bounds(x, y, w, h);
+        let layout_tree = LayoutTree::new();
+        let mut focus = FocusManager::new();
+        button.set_id(Default::default());
+
+        let mut ctx = mock_event_context(
+            layout,
+            &layout_tree,
+            &mut focus,
+            button.id(),
+            false,
+        );
+        let inside = (x + w / 2.0, y + h / 2.0);
+        let r = button.event(&mut ctx, &pointer_move_at(inside.0, inside.1));
+        assert_eq!(button.state(), ButtonState::Disabled);
+        assert!(!r.handled && !r.repaint);
+
+        let r = button.event(&mut ctx, &pointer_down_at(inside.0, inside.1));
+        assert_eq!(button.state(), ButtonState::Disabled);
+        assert!(!r.handled);
+    }
+
+    #[test]
+    fn keyboard_activate_with_focus_fires_click() {
+        let clicked = Arc::new(AtomicBool::new(false));
+        let clicked_clone = Arc::clone(&clicked);
+        let mut button = Button::new("OK").on_click(move || clicked_clone.store(true, Ordering::SeqCst));
+        let (x, y, w, h) = button_bounds();
+        let layout = layout_bounds(x, y, w, h);
+        let layout_tree = LayoutTree::new();
+        let mut focus = FocusManager::new();
+        focus.set_focus(button.id());
+
+        let mut ctx = mock_event_context(
+            layout,
+            &layout_tree,
+            &mut focus,
+            button.id(),
+            false,
+        );
+        let event = InputEvent::KeyDown {
+            event: KeyboardEvent {
+                key: Key::Named(NamedKey::Enter),
+                ..Default::default()
+            },
+        };
+        let r = button.event(&mut ctx, &event);
+        assert!(clicked.load(Ordering::SeqCst));
+        assert!(r.handled);
     }
 }
 

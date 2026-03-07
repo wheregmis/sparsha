@@ -19,3 +19,6 @@ pub use widget::{EventResponse, Widget};
 // Re-export layout types for convenience
 pub use spark_layout::{styles, taffy, WidgetId};
 
+#[cfg(test)]
+mod test_helpers;
+

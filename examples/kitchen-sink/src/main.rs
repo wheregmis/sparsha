@@ -103,9 +103,11 @@ fn build_sidebar() -> Container {
                         .color(Color::WHITE),
                 )
                 .child(
-                    Text::new("Body text example that might wrap if it is too long for the sidebar.")
-                        .size(16.0)
-                        .color(Color::from_hex(0xE2E8F0)),
+                    Text::new(
+                        "Body text example that might wrap if it is too long for the sidebar.",
+                    )
+                    .size(16.0)
+                    .color(Color::from_hex(0xE2E8F0)),
                 )
                 .child(
                     Text::new("Small caption text")
@@ -117,18 +119,16 @@ fn build_sidebar() -> Container {
 
 /// Main content area with scrollable sections
 fn build_main_area() -> Scroll {
-    Scroll::new()
-        .vertical()
-        .content(
-            Container::new()
-                .column()
-                .gap(32.0)
-                .padding(32.0)
-                .flex_grow(1.0)
-                .child(build_input_section())
-                .child(build_container_section())
-                .child(build_scroll_section()),
-        )
+    Scroll::new().vertical().content(
+        Container::new()
+            .column()
+            .gap(32.0)
+            .padding(32.0)
+            .flex_grow(1.0)
+            .child(build_input_section())
+            .child(build_container_section())
+            .child(build_scroll_section()),
+    )
 }
 
 /// Input fields section
@@ -174,11 +174,7 @@ fn build_container_section() -> Container {
                                 .padding(16.0)
                                 .background(Color::from_hex(0x8B5CF6).with_alpha(0.3))
                                 .corner_radius(8.0)
-                                .child(
-                                    Text::new("Level 3")
-                                        .size(14.0)
-                                        .color(Color::WHITE),
-                                ),
+                                .child(Text::new("Level 3").size(14.0).color(Color::WHITE)),
                         ),
                 ),
         )
@@ -186,9 +182,7 @@ fn build_container_section() -> Container {
 
 /// Scrollable content section
 fn build_scroll_section() -> Container {
-    let mut scroll_content = Container::new()
-        .column()
-        .gap(8.0);
+    let mut scroll_content = Container::new().column().gap(8.0);
 
     // Add 20 list items
     for i in 0..20 {
@@ -203,7 +197,7 @@ fn build_scroll_section() -> Container {
                 })
                 .corner_radius(4.0)
                 .child(
-                    Text::new(&format!("Item {}", i + 1))
+                    Text::new(format!("Item {}", i + 1))
                         .size(14.0)
                         .color(Color::WHITE),
                 ),
@@ -214,12 +208,7 @@ fn build_scroll_section() -> Container {
         "Scrollable Area",
         Container::new()
             .height(300.0)
-            .child(
-                Scroll::new()
-                    .vertical()
-                    .fill()
-                    .content(scroll_content)
-            ),
+            .child(Scroll::new().vertical().fill().content(scroll_content)),
     )
 }
 
@@ -231,11 +220,6 @@ fn section(title: &str, content: Container) -> Container {
         .padding(24.0)
         .background(Color::from_hex(0x1E293B))
         .corner_radius(12.0)
-        .child(
-            Text::new(title)
-                .size(18.0)
-                .bold()
-                .color(Color::WHITE),
-        )
+        .child(Text::new(title).size(18.0).bold().color(Color::WHITE))
         .child(content)
 }

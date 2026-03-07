@@ -457,23 +457,21 @@ impl Widget for Scroll {
         self.update_content_size(ctx.layout_tree);
 
         match event {
-            InputEvent::Scroll { delta, pos } => {
-                if ctx.contains(*pos) {
-                    match self.direction {
-                        ScrollDirection::Vertical => {
-                            self.offset_y -= delta.y * 20.0;
-                        }
-                        ScrollDirection::Horizontal => {
-                            self.offset_x -= delta.x * 20.0;
-                        }
-                        ScrollDirection::Both => {
-                            self.offset_x -= delta.x * 20.0;
-                            self.offset_y -= delta.y * 20.0;
-                        }
+            InputEvent::Scroll { delta, pos } if ctx.contains(*pos) => {
+                match self.direction {
+                    ScrollDirection::Vertical => {
+                        self.offset_y -= delta.y * 20.0;
                     }
-                    self.clamp_offset(bounds);
-                    return EventResponse::handled();
+                    ScrollDirection::Horizontal => {
+                        self.offset_x -= delta.x * 20.0;
+                    }
+                    ScrollDirection::Both => {
+                        self.offset_x -= delta.x * 20.0;
+                        self.offset_y -= delta.y * 20.0;
+                    }
                 }
+                self.clamp_offset(bounds);
+                return EventResponse::handled();
             }
             InputEvent::PointerMove { pos } => {
                 if let Some(scrollbar) = self.scrollbar_rect(bounds) {

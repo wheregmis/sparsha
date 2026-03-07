@@ -1,6 +1,6 @@
 //! Text shaping and layout system using Parley.
 
-use crate::atlas::{CachedGlyph, GlyphAtlas, GlyphKey};
+use crate::atlas::{CachedGlyph, GlyphAtlas, GlyphBitmap, GlyphKey};
 use parley::{
     fontique::Blob,
     layout::{Alignment, GlyphRun, PositionedLayoutItem},
@@ -291,7 +291,7 @@ impl TextSystem {
             let y = run_y - glyph.y;
 
             // Create glyph key for caching
-            let key = GlyphKey::new(font_hash, glyph_id as u32, font_size);
+            let key = GlyphKey::new(font_hash, glyph_id, font_size);
 
             let cached = if let Some(cached) = self.atlas.get(&key) {
                 *cached
@@ -326,11 +326,13 @@ impl TextSystem {
                         let cached = self.atlas.insert(
                             queue,
                             key,
-                            img.placement.width,
-                            img.placement.height,
-                            img.placement.left,
-                            img.placement.top,
-                            &img.data,
+                            GlyphBitmap {
+                                width: img.placement.width,
+                                height: img.placement.height,
+                                offset_x: img.placement.left,
+                                offset_y: img.placement.top,
+                                data: &img.data,
+                            },
                         );
 
                         match cached {
@@ -424,5 +426,62 @@ impl TextSystem {
         layout.break_all_lines(max_width);
 
         (layout.width(), layout.height())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use spark_core::GlyphInstance;
+
+    #[test]
+    fn text_style_default() {
+        let style = TextStyle::default();
+        assert_eq!(style.family, "system-ui");
+        assert_eq!(style.font_size, 16.0);
+        assert!((style.line_height - 1.2).abs() < 1e-5);
+        assert_eq!(style.color, Color::BLACK);
+        assert!(!style.bold);
+        assert!(!style.italic);
+    }
+
+    #[test]
+    fn text_style_builder() {
+        let style = TextStyle::default()
+            .with_size(24.0)
+            .with_color(Color::RED)
+            .with_family("Inter")
+            .bold()
+            .italic();
+        assert_eq!(style.font_size, 24.0);
+        assert_eq!(style.color, Color::RED);
+        assert_eq!(style.family, "Inter");
+        assert!(style.bold);
+        assert!(style.italic);
+    }
+
+    #[test]
+    fn shaped_text_default_and_is_empty() {
+        let st = ShapedText::default();
+        assert!(st.glyphs.is_empty());
+        assert_eq!(st.width, 0.0);
+        assert_eq!(st.height, 0.0);
+        assert!(st.is_empty());
+    }
+
+    #[test]
+    fn shaped_text_with_glyph_not_empty() {
+        let mut st = ShapedText::default();
+        st.glyphs.push(GlyphInstance {
+            pos: [0.0, 0.0],
+            size: [10.0, 12.0],
+            uv_pos: [0.0, 0.0],
+            uv_size: [0.1, 0.1],
+            color: [0.0, 0.0, 0.0, 1.0],
+        });
+        st.width = 10.0;
+        st.height = 12.0;
+        assert!(!st.is_empty());
+        assert_eq!(st.glyphs.len(), 1);
     }
 }

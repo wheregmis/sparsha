@@ -38,7 +38,7 @@ A GPU-first cross-platform UI framework in Rust, built on `wgpu` and `winit`.
 ## Platform Support
 
 - **Desktop**: Windows, macOS, Linux (Vulkan/Metal/DX12)
-- **Web**: WebAssembly + WebGPU (see `counter` example)
+- **Web**: WebAssembly + WebGPU
 
 ## Crates
 
@@ -85,21 +85,7 @@ fn main() {
 ## Try It
 
 ```bash
-# Run the demo
-cargo run -p demo --release
-
-# Run the original triangle example
-cargo run -p triangle --release
-
-# Run the counter example
-cargo run -p counter --release
-```
-
-### WebAssembly
-
-```bash
-# Build the counter example for WebAssembly
-cargo build -p counter --release --target wasm32-unknown-unknown
+cargo run -p kitchen-sink --release
 ```
 
 ## Frame Loop

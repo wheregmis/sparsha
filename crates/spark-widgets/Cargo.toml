@@ -14,3 +14,11 @@ taffy = { workspace = true }
 log = { workspace = true }
 glam = { workspace = true }
 wgpu = { workspace = true }
+
+[dev-dependencies]
+spark-core = { path = "../spark-core" }
+spark-input = { path = "../spark-input" }
+spark-layout = { path = "../spark-layout" }
+spark-render = { path = "../spark-render" }
+spark-text = { path = "../spark-text" }
+pollster = { workspace = true }

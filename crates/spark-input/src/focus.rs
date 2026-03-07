@@ -109,3 +109,73 @@ impl FocusManager {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use spark_layout::{styles, LayoutTree};
+
+    fn two_widget_ids() -> (WidgetId, WidgetId) {
+        let mut tree = LayoutTree::new();
+        let a = tree.new_leaf(styles::fixed(10.0, 10.0));
+        let b = tree.new_leaf(styles::fixed(10.0, 10.0));
+        (a, b)
+    }
+
+    #[test]
+    fn focus_manager_new() {
+        let fm = FocusManager::new();
+        assert!(fm.focused().is_none());
+        assert_eq!(fm.focusable_count(), 0);
+    }
+
+    #[test]
+    fn focus_set_and_clear() {
+        let (a, _) = two_widget_ids();
+        let mut fm = FocusManager::new();
+        fm.set_focus(a);
+        assert_eq!(fm.focused(), Some(a));
+        assert!(fm.has_focus(a));
+        fm.clear_focus();
+        assert!(fm.focused().is_none());
+    }
+
+    #[test]
+    fn focus_next_wraps() {
+        let (a, b) = two_widget_ids();
+        let mut fm = FocusManager::new();
+        fm.register_focusable(a);
+        fm.register_focusable(b);
+        assert_eq!(fm.focusable_count(), 2);
+        fm.focus_next();
+        assert_eq!(fm.focused(), Some(a));
+        fm.focus_next();
+        assert_eq!(fm.focused(), Some(b));
+        fm.focus_next();
+        assert_eq!(fm.focused(), Some(a));
+    }
+
+    #[test]
+    fn focus_previous_wraps() {
+        let (a, b) = two_widget_ids();
+        let mut fm = FocusManager::new();
+        fm.register_focusable(a);
+        fm.register_focusable(b);
+        fm.focus_previous();
+        assert_eq!(fm.focused(), Some(b));
+        fm.focus_previous();
+        assert_eq!(fm.focused(), Some(a));
+    }
+
+    #[test]
+    fn unregister_clears_focus() {
+        let (a, b) = two_widget_ids();
+        let mut fm = FocusManager::new();
+        fm.register_focusable(a);
+        fm.register_focusable(b);
+        fm.set_focus(a);
+        fm.unregister_focusable(a);
+        assert!(fm.focused().is_none());
+        assert_eq!(fm.focusable_count(), 1);
+    }
+}
+

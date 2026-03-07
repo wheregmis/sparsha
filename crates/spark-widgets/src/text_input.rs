@@ -7,6 +7,9 @@ use spark_layout::WidgetId;
 use spark_text::TextStyle;
 use taffy::prelude::*;
 
+/// Callback type for text change and submit handlers.
+type TextInputCallback = Box<dyn FnMut(&str) + Send + Sync>;
+
 /// Style configuration for text input.
 #[derive(Clone, Debug)]
 pub struct TextInputStyle {
@@ -49,8 +52,8 @@ pub struct TextInput {
     style: TextInputStyle,
     cursor_pos: usize,
     selection_start: Option<usize>,
-    on_change: Option<Box<dyn FnMut(&str) + Send + Sync>>,
-    on_submit: Option<Box<dyn FnMut(&str) + Send + Sync>>,
+    on_change: Option<TextInputCallback>,
+    on_submit: Option<TextInputCallback>,
 }
 
 impl TextInput {
@@ -111,6 +114,7 @@ impl TextInput {
         self.fire_change();
     }
 
+    #[allow(dead_code)]
     fn insert_str(&mut self, s: &str) {
         self.delete_selection();
         self.value.insert_str(self.cursor_pos, s);

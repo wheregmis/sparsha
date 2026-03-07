@@ -345,3 +345,92 @@ pub mod styles {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use taffy::prelude::{
+        AlignItems, Dimension, Display, FlexDirection, JustifyContent, LengthPercentage,
+        LengthPercentageAuto,
+    };
+
+    #[test]
+    fn layout_tree_new_root_none() {
+        let tree = LayoutTree::new();
+        assert!(tree.root().is_none());
+    }
+
+    #[test]
+    fn layout_tree_one_leaf_get_layout() {
+        let mut tree = LayoutTree::new();
+        let leaf = tree.new_leaf(styles::fixed(100.0, 50.0));
+        tree.set_root(leaf);
+        tree.compute_layout(200.0, 200.0);
+        let layout = tree.get_layout(leaf).unwrap();
+        assert_eq!(layout.bounds.x, 0.0);
+        assert_eq!(layout.bounds.y, 0.0);
+        assert_eq!(layout.bounds.width, 100.0);
+        assert_eq!(layout.bounds.height, 50.0);
+        let abs = tree.get_absolute_layout(leaf).unwrap();
+        assert_eq!(abs.bounds.x, 0.0);
+        assert_eq!(abs.bounds.y, 0.0);
+        assert_eq!(abs.bounds.width, 100.0);
+        assert_eq!(abs.bounds.height, 50.0);
+    }
+
+    #[test]
+    fn layout_tree_two_nodes_traverse() {
+        let mut tree = LayoutTree::new();
+        let child = tree.new_leaf(styles::fixed(50.0, 25.0));
+        let root_style = styles::with_padding(styles::flex_column(), 10.0);
+        let root = tree.new_with_children(root_style, &[child]);
+        tree.set_root(root);
+        tree.compute_layout(200.0, 200.0);
+        let child_layout = tree.get_layout(child).unwrap();
+        assert_eq!(child_layout.bounds.width, 50.0);
+        assert_eq!(child_layout.bounds.height, 25.0);
+        let mut count = 0;
+        tree.traverse(|_id, _layout, _depth| count += 1);
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn styles_flex_column_row() {
+        let col = styles::flex_column();
+        assert_eq!(col.display, Display::Flex);
+        assert_eq!(col.flex_direction, FlexDirection::Column);
+        let row = styles::flex_row();
+        assert_eq!(row.display, Display::Flex);
+        assert_eq!(row.flex_direction, FlexDirection::Row);
+    }
+
+    #[test]
+    fn styles_fixed_fill() {
+        let s = styles::fixed(120.0, 60.0);
+        assert_eq!(s.size.width, Dimension::length(120.0));
+        assert_eq!(s.size.height, Dimension::length(60.0));
+        let f = styles::fill();
+        assert_eq!(f.size.width, Dimension::percent(1.0));
+        assert_eq!(f.size.height, Dimension::percent(1.0));
+    }
+
+    #[test]
+    fn styles_with_padding_margin_gap() {
+        let base = styles::flex_column();
+        let s = styles::with_padding(base, 10.0);
+        assert_eq!(s.padding.left, LengthPercentage::length(10.0));
+        assert_eq!(s.padding.right, LengthPercentage::length(10.0));
+        let s2 = styles::with_margin(styles::flex_row(), 5.0);
+        assert_eq!(s2.margin.left, LengthPercentageAuto::length(5.0));
+        let s3 = styles::with_gap(styles::flex_column(), 8.0);
+        assert_eq!(s3.gap.width, LengthPercentage::length(8.0));
+        assert_eq!(s3.gap.height, LengthPercentage::length(8.0));
+    }
+
+    #[test]
+    fn styles_centered() {
+        let s = styles::centered(styles::flex_column());
+        assert_eq!(s.justify_content, Some(JustifyContent::Center));
+        assert_eq!(s.align_items, Some(AlignItems::Center));
+    }
+}
+

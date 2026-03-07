@@ -88,7 +88,7 @@ pub mod shortcuts {
     use super::*;
 
     fn is_char(event: &KeyboardEvent, ch: char) -> bool {
-        matches!(&event.key, Key::Character(s) if s.chars().next() == Some(ch.to_ascii_lowercase()) || s.chars().next() == Some(ch.to_ascii_uppercase()))
+        matches!(&event.key, Key::Character(s) if s.starts_with(ch.to_ascii_lowercase()) || s.starts_with(ch.to_ascii_uppercase()))
     }
 
     /// Check if this is Ctrl+C (copy).

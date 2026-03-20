@@ -87,6 +87,8 @@ impl App {
     }
 
     /// Run the application with the given root widget.
+    ///
+    /// On web targets this returns after registering the app with the browser event loop.
     #[cfg(target_arch = "wasm32")]
     pub fn run<F>(self, build_ui: F)
     where
@@ -376,6 +378,7 @@ impl<F: FnOnce() -> Box<dyn Widget>> winit::application::ApplicationHandler for 
         #[cfg(target_arch = "wasm32")]
         {
             use winit::platform::web::WindowAttributesWeb;
+            // Ensure the web canvas is attached to the document body automatically.
             window_attributes = window_attributes.with_platform_attributes(Box::new(
                 WindowAttributesWeb::default().with_append(true),
             ));

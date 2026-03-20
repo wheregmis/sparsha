@@ -1,8 +1,5 @@
 //! Web platform support for WASM/WebGPU.
 
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::prelude::*;
-
 /// Initialize the web platform (call this before App::run on web).
 #[cfg(target_arch = "wasm32")]
 pub fn init_web() {

@@ -4,7 +4,9 @@ use crate::atlas::{CachedGlyph, GlyphAtlas, GlyphBitmap, GlyphKey};
 use parley::{
     fontique::Blob,
     layout::{Alignment, GlyphRun, PositionedLayoutItem},
-    style::{FontFamily, FontStack, FontStyle, FontWeight, GenericFamily, LineHeight, StyleProperty},
+    style::{
+        FontFamily, FontStack, FontStyle, FontWeight, GenericFamily, LineHeight, StyleProperty,
+    },
     FontContext, Layout, LayoutContext,
 };
 use spark_core::{Color, GlyphInstance};
@@ -103,31 +105,36 @@ pub struct TextSystem {
     font_cx: FontContext,
     layout_cx: LayoutContext<[u8; 4]>,
     scale_cx: ScaleContext,
-    atlas: GlyphAtlas,
+    atlas: Option<GlyphAtlas>,
 }
 
 impl TextSystem {
     /// Create a new text system.
     pub fn new(device: &Device) -> Self {
+        let mut system = Self::new_headless();
+        system.ensure_atlas(device);
+        system
+    }
+
+    /// Create a text system that can measure text without initializing GPU resources.
+    pub fn new_headless() -> Self {
         let mut font_cx = FontContext::new();
-        
+
         // Register embedded Inter fonts
         let regular_blob = Blob::new(std::sync::Arc::new(INTER_REGULAR.to_vec()));
         let bold_blob = Blob::new(std::sync::Arc::new(INTER_BOLD.to_vec()));
-        
+
         font_cx.collection.register_fonts(regular_blob, None);
         font_cx.collection.register_fonts(bold_blob, None);
-        
-        
+
         let layout_cx = LayoutContext::new();
         let scale_cx = ScaleContext::new();
-        let atlas = GlyphAtlas::new(device, 1024, 1024);
 
         Self {
             font_cx,
             layout_cx,
             scale_cx,
-            atlas,
+            atlas: None,
         }
     }
 
@@ -142,8 +149,14 @@ impl TextSystem {
     }
 
     /// Get the glyph atlas.
-    pub fn atlas(&self) -> &GlyphAtlas {
-        &self.atlas
+    pub fn atlas(&self) -> Option<&GlyphAtlas> {
+        self.atlas.as_ref()
+    }
+
+    fn ensure_atlas(&mut self, device: &Device) {
+        if self.atlas.is_none() {
+            self.atlas = Some(GlyphAtlas::new(device, 1024, 1024));
+        }
     }
 
     /// Shape and position text for rendering.
@@ -158,6 +171,7 @@ impl TextSystem {
         if text.is_empty() {
             return ShapedText::default();
         }
+        self.ensure_atlas(device);
 
         // Build layout with Parley
         let mut builder = self
@@ -169,7 +183,7 @@ impl TextSystem {
         builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(
             style.line_height,
         )));
-        
+
         // Use embedded Inter font with fallback to system sans-serif
         builder.push_default(StyleProperty::FontStack(FontStack::List(
             vec![
@@ -206,14 +220,18 @@ impl TextSystem {
         for line in layout.lines() {
             for item in line.items() {
                 if let PositionedLayoutItem::GlyphRun(glyph_run) = item {
+                    let mut reset_atlas = false;
                     self.render_glyph_run(
-                        device,
                         queue,
                         &glyph_run,
                         &mut glyphs,
                         &mut min_y,
                         &mut max_y,
+                        &mut reset_atlas,
                     );
+                    if reset_atlas {
+                        self.atlas = Some(GlyphAtlas::new(device, 2048, 2048));
+                    }
                 }
             }
         }
@@ -246,17 +264,17 @@ impl TextSystem {
 
     fn render_glyph_run(
         &mut self,
-        device: &Device,
         queue: &Queue,
         glyph_run: &GlyphRun<'_, [u8; 4]>,
         glyphs: &mut Vec<GlyphInstance>,
         min_y: &mut f32,
         max_y: &mut f32,
+        reset_atlas: &mut bool,
     ) {
         let run = glyph_run.run();
         let font = run.font();
         let font_size = run.font_size();
-        
+
         // Convert brush color from [u8; 4] back to [f32; 4] for GlyphInstance
         let brush = glyph_run.style().brush;
         let color = [
@@ -293,7 +311,11 @@ impl TextSystem {
             // Create glyph key for caching
             let key = GlyphKey::new(font_hash, glyph_id, font_size);
 
-            let cached = if let Some(cached) = self.atlas.get(&key) {
+            let atlas = self
+                .atlas
+                .as_mut()
+                .expect("glyph atlas should be initialized before shaping");
+            let cached = if let Some(cached) = atlas.get(&key) {
                 *cached
             } else {
                 let glyph_id_u16 = match u16::try_from(glyph_id) {
@@ -323,7 +345,7 @@ impl TextSystem {
 
                 match image {
                     Some(img) => {
-                        let cached = self.atlas.insert(
+                        let cached = atlas.insert(
                             queue,
                             key,
                             GlyphBitmap {
@@ -339,8 +361,8 @@ impl TextSystem {
                             Some(c) => c,
                             None => {
                                 // Atlas full, clear and retry with larger atlas
-                                self.atlas.clear();
-                                self.atlas = GlyphAtlas::new(device, 2048, 2048);
+                                atlas.clear();
+                                *reset_atlas = true;
                                 continue;
                             }
                         }
@@ -403,7 +425,7 @@ impl TextSystem {
         builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(
             style.line_height,
         )));
-        
+
         // Use embedded Inter font with fallback to system sans-serif
         builder.push_default(StyleProperty::FontStack(FontStack::List(
             vec![

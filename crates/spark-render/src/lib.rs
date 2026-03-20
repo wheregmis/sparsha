@@ -5,8 +5,7 @@ mod renderer;
 mod shape_pass;
 mod text_pass;
 
-pub use commands::{DrawCommand, DrawList};
+pub use commands::{DrawCommand, DrawList, TextRun};
 pub use renderer::Renderer;
 pub use shape_pass::ShapePass;
 pub use text_pass::TextPass;
-

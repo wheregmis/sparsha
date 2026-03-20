@@ -41,3 +41,17 @@ cargo check --workspace
 - **Linux:** Vulkan
 
 Ensure graphics drivers and system libraries (e.g. Vulkan on Linux) are installed as needed.
+
+
+## Web (WASM) with Trunk
+
+Kitchen Sink supports WebAssembly via `wasm-bindgen` and can be served with Trunk.
+
+From `examples/kitchen-sink`:
+```bash
+rustup target add wasm32-unknown-unknown
+trunk serve
+```
+
+Then open `http://127.0.0.1:8080`.
+

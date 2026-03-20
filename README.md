@@ -6,7 +6,7 @@ A GPU-first cross-platform UI framework in Rust, built on `wgpu` and `winit`.
 
 - **GPU-Accelerated Rendering** - All rendering uses wgpu with instanced drawing for shapes and text
 - **Flexbox Layout** - Powered by [taffy](https://github.com/DioxusLabs/taffy) for familiar CSS-like layouts
-- **Cross-Platform** - Desktop (Windows, macOS, Linux) and Web (via WebGPU)
+- **Cross-Platform** - Desktop (Windows, macOS, Linux) and Web (via DOM rendering)
 - **Modern Text Rendering** - Using [parley](https://github.com/linebender/parley) + [swash](https://github.com/dfrg/swash) for shaping and rasterization
 - **W3C-Compliant Events** - Using [ui-events](https://github.com/endoli/ui-events) for input handling
 - **Accessibility** - Using [accesskit](https://github.com/AccessKit/accesskit) for native assistive tech
@@ -30,15 +30,15 @@ A GPU-first cross-platform UI framework in Rust, built on `wgpu` and `winit`.
 │                    spark-core                               │
 │     Pipeline<U>, wgpu init, uniform buffers, shaders         │
 ├─────────────────────────────────────────────────────────────┤
-│                    Platform (wgpu + winit)                   │
-│            Desktop (Vulkan/Metal/DX12) | Web (WebGPU)        │
+│                    Platform                                   │
+│      Desktop (wgpu + winit) | Web (DOM + requestAnimationFrame) │
 └─────────────────────────────────────────────────────────────┘
 ```
 
 ## Platform Support
 
 - **Desktop**: Windows, macOS, Linux (Vulkan/Metal/DX12)
-- **Web**: WebAssembly + WebGPU
+- **Web**: WebAssembly + DOM rendering
 
 ## Crates
 
@@ -86,6 +86,13 @@ fn main() {
 
 ```bash
 cargo run -p kitchen-sink --release
+```
+
+For web (WASM + Trunk):
+```bash
+cd examples/kitchen-sink
+rustup target add wasm32-unknown-unknown
+trunk serve
 ```
 
 ## Frame Loop

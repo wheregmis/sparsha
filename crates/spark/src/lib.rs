@@ -19,11 +19,15 @@
 //! }
 //! ```
 
-mod app;
 pub mod accessibility;
+mod app;
 
 #[cfg(target_arch = "wasm32")]
+mod dom_renderer;
+#[cfg(target_arch = "wasm32")]
 mod web;
+#[cfg(target_arch = "wasm32")]
+mod web_app;
 
 pub use app::{App, AppConfig};
 
@@ -49,4 +53,3 @@ pub use spark_layout as layout;
 pub use spark_render as render;
 pub use spark_text as text;
 pub use spark_widgets as widgets;
-

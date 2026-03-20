@@ -1,10 +1,10 @@
 //! Scrollable container widget.
 
 use crate::{EventContext, EventResponse, PaintContext, Widget};
-use std::cell::Cell;
 use spark_core::{Color, Rect};
 use spark_input::InputEvent;
 use spark_layout::WidgetId;
+use std::cell::Cell;
 use taffy::prelude::*;
 use taffy::{Overflow, Point};
 
@@ -293,8 +293,7 @@ impl Scroll {
                 }
 
                 let track_height = viewport.height;
-                let thumb_height =
-                    (viewport.height / content_size.1 * track_height).max(20.0);
+                let thumb_height = (viewport.height / content_size.1 * track_height).max(20.0);
                 let thumb_y = (self.offset_y / (content_size.1 - viewport.height))
                     * (track_height - thumb_height);
 
@@ -423,11 +422,7 @@ impl Widget for Scroll {
                 260.0 * scale_factor,
                 54.0 * scale_factor,
             );
-            ctx.fill_rounded_rect(
-                debug_bg,
-                Color::from_hex(0x0F172A).with_alpha(0.7),
-                6.0,
-            );
+            ctx.fill_rounded_rect(debug_bg, Color::from_hex(0x0F172A).with_alpha(0.7), 6.0);
 
             let text_style = TextStyle::default()
                 .with_size(11.0)

@@ -87,8 +87,8 @@ impl<U: bytemuck::Pod + bytemuck::Zeroable> Pipeline<U> {
         });
 
         // Combine uniform bind group layout with any extra layouts
-        let mut all_layouts: Vec<&BindGroupLayout> = vec![&bind_group_layout];
-        all_layouts.extend(config.extra_bind_group_layouts);
+        let mut all_layouts: Vec<Option<&BindGroupLayout>> = vec![Some(&bind_group_layout)];
+        all_layouts.extend(config.extra_bind_group_layouts.iter().copied().map(Some));
 
         let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some(&format!("{}_layout", config.label)),

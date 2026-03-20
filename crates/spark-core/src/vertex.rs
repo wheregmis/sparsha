@@ -27,10 +27,22 @@ impl Vertex2D {
 
     /// Unit quad vertices (0,0) to (1,1) - for instanced rendering.
     pub const UNIT_QUAD: [Self; 4] = [
-        Self { position: [0.0, 0.0], uv: [0.0, 0.0] },
-        Self { position: [1.0, 0.0], uv: [1.0, 0.0] },
-        Self { position: [1.0, 1.0], uv: [1.0, 1.0] },
-        Self { position: [0.0, 1.0], uv: [0.0, 1.0] },
+        Self {
+            position: [0.0, 0.0],
+            uv: [0.0, 0.0],
+        },
+        Self {
+            position: [1.0, 0.0],
+            uv: [1.0, 0.0],
+        },
+        Self {
+            position: [1.0, 1.0],
+            uv: [1.0, 1.0],
+        },
+        Self {
+            position: [0.0, 1.0],
+            uv: [0.0, 1.0],
+        },
     ];
 
     /// Indices for a unit quad (two triangles).
@@ -125,4 +137,3 @@ impl GlyphInstance {
         }
     }
 }
-

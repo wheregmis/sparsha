@@ -1,19 +1,29 @@
 //! Application runner and main event loop.
 
-use spark_core::{init_wgpu, Color, SurfaceState};
+use spark_core::Color;
+use spark_widgets::Widget;
+
+#[cfg(not(target_arch = "wasm32"))]
+use spark_core::{init_wgpu, SurfaceState};
+#[cfg(not(target_arch = "wasm32"))]
 use spark_input::{FocusManager, InputEvent, PointerButton};
+#[cfg(not(target_arch = "wasm32"))]
 use spark_layout::LayoutTree;
-use spark_render::{DrawList, Renderer};
+#[cfg(not(target_arch = "wasm32"))]
+use spark_render::DrawList;
+#[cfg(not(target_arch = "wasm32"))]
+use spark_render::Renderer;
+#[cfg(not(target_arch = "wasm32"))]
 use spark_text::TextSystem;
-use spark_widgets::{EventContext, PaintContext, Widget};
+#[cfg(not(target_arch = "wasm32"))]
+use spark_widgets::{EventContext, LayoutContext, PaintContext};
+#[cfg(not(target_arch = "wasm32"))]
 use wgpu::{Device, Queue};
+#[cfg(not(target_arch = "wasm32"))]
 use winit::event::WindowEvent;
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
-
-#[cfg(target_arch = "wasm32")]
-use web_time::Instant;
 
 /// Application configuration.
 pub struct AppConfig {
@@ -74,6 +84,7 @@ impl App {
     }
 
     /// Run the application with the given root widget.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn run<F>(self, build_ui: F) -> !
     where
         F: FnOnce() -> Box<dyn Widget> + 'static,
@@ -84,6 +95,17 @@ impl App {
         event_loop.run_app(runner_leaked).unwrap();
         std::process::exit(0);
     }
+
+    /// Run the application with the given root widget.
+    ///
+    /// On web targets this returns after registering the app with the browser event loop.
+    #[cfg(target_arch = "wasm32")]
+    pub fn run<F>(self, build_ui: F)
+    where
+        F: FnOnce() -> Box<dyn Widget> + 'static,
+    {
+        crate::web_app::run_dom_app(self.config, build_ui);
+    }
 }
 
 impl Default for App {
@@ -93,12 +115,14 @@ impl Default for App {
 }
 
 /// Internal application runner that handles the event loop.
+#[cfg(not(target_arch = "wasm32"))]
 struct AppRunner<F: FnOnce() -> Box<dyn Widget>> {
     config: AppConfig,
     build_ui: Option<F>,
     state: Option<AppState>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 struct AppState {
     window: &'static dyn winit::window::Window,
     device: Device,
@@ -117,6 +141,7 @@ struct AppState {
     needs_repaint: bool,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<F: FnOnce() -> Box<dyn Widget>> AppRunner<F> {
     fn new(config: AppConfig, build_ui: F) -> Self {
         Self {
@@ -136,8 +161,11 @@ impl<F: FnOnce() -> Box<dyn Widget>> AppRunner<F> {
         fn add_to_layout(
             widget: &mut dyn Widget,
             tree: &mut LayoutTree,
+            text_system: &mut TextSystem,
             in_scroll: bool,
         ) -> spark_layout::WidgetId {
+            use spark_layout::taffy::Dimension;
+
             let mut style = widget.style();
             if in_scroll {
                 style.flex_shrink = 0.0;
@@ -146,10 +174,33 @@ impl<F: FnOnce() -> Box<dyn Widget>> AppRunner<F> {
             let children_ids: Vec<_> = widget
                 .children_mut()
                 .iter_mut()
-                .map(|child| add_to_layout(child.as_mut(), tree, in_scroll || is_scroll))
+                .map(|child| {
+                    add_to_layout(child.as_mut(), tree, text_system, in_scroll || is_scroll)
+                })
                 .collect();
 
             let id = if children_ids.is_empty() {
+                // Apply intrinsic height for leaf widgets that provide measurement.
+                // This prevents text-like widgets from collapsing to zero height.
+                let mut layout_ctx = LayoutContext {
+                    text: text_system,
+                    max_width: None,
+                    max_height: None,
+                };
+                if let Some((_, measured_height)) = widget.measure(&mut layout_ctx) {
+                    let valid_height = measured_height.is_finite() && measured_height > 0.0;
+                    if valid_height {
+                        let current_min_height = style.min_size.height;
+                        let current_min_height_value = if current_min_height.is_auto() {
+                            0.0
+                        } else {
+                            current_min_height.value()
+                        };
+                        if measured_height > current_min_height_value {
+                            style.min_size.height = Dimension::length(measured_height);
+                        }
+                    }
+                }
                 tree.new_leaf(style)
             } else {
                 tree.new_with_children(style, &children_ids)
@@ -159,7 +210,12 @@ impl<F: FnOnce() -> Box<dyn Widget>> AppRunner<F> {
             id
         }
 
-        let root_id = add_to_layout(state.root_widget.as_mut(), &mut state.layout_tree, false);
+        let root_id = add_to_layout(
+            state.root_widget.as_mut(),
+            &mut state.layout_tree,
+            &mut state.text_system,
+            false,
+        );
         state.layout_tree.set_root(root_id);
 
         // Compute layout
@@ -186,8 +242,6 @@ impl<F: FnOnce() -> Box<dyn Widget>> AppRunner<F> {
         // We need to use raw pointers to pass mutable references through the recursive function
         // This is safe because we control the lifetime and don't alias
         let text_system_ptr = &mut state.text_system as *mut TextSystem;
-        let device_ptr = &state.device as *const Device;
-        let queue_ptr = &state.queue as *const Queue;
 
         #[allow(clippy::too_many_arguments)]
         fn paint_widget(
@@ -197,8 +251,6 @@ impl<F: FnOnce() -> Box<dyn Widget>> AppRunner<F> {
             draw_list: &mut DrawList,
             scale_factor: f32,
             text_system_ptr: *mut TextSystem,
-            device_ptr: *const Device,
-            queue_ptr: *const Queue,
             elapsed_time: f32,
         ) {
             let id = widget.id();
@@ -206,8 +258,6 @@ impl<F: FnOnce() -> Box<dyn Widget>> AppRunner<F> {
             if let Some(layout) = layout_tree.get_absolute_layout(id) {
                 // SAFETY: We control the lifetime and ensure no aliasing within this function
                 let text_system = unsafe { &mut *text_system_ptr };
-                let device = unsafe { &*device_ptr };
-                let queue = unsafe { &*queue_ptr };
 
                 // Scale layout bounds from logical to physical pixels
                 // Layout is computed in logical pixels, but renderer uses physical pixels
@@ -226,8 +276,6 @@ impl<F: FnOnce() -> Box<dyn Widget>> AppRunner<F> {
                     widget_id: id,
                     scale_factor,
                     text_system,
-                    device,
-                    queue,
                     elapsed_time,
                 };
                 widget.paint(&mut ctx);
@@ -241,8 +289,6 @@ impl<F: FnOnce() -> Box<dyn Widget>> AppRunner<F> {
                         ctx.draw_list,
                         scale_factor,
                         text_system_ptr,
-                        device_ptr,
-                        queue_ptr,
                         elapsed_time,
                     );
                 }
@@ -259,8 +305,6 @@ impl<F: FnOnce() -> Box<dyn Widget>> AppRunner<F> {
             &mut state.draw_list,
             state.scale_factor,
             text_system_ptr,
-            device_ptr,
-            queue_ptr,
             elapsed_time,
         );
 
@@ -268,7 +312,9 @@ impl<F: FnOnce() -> Box<dyn Widget>> AppRunner<F> {
     }
 
     fn handle_event(&mut self, event: InputEvent) {
-        let state = self.state.as_mut().unwrap();
+        let Some(state) = self.state.as_mut() else {
+            return;
+        };
 
         // Simple event dispatch - dispatch to all widgets, let them check bounds
         fn dispatch_event(
@@ -351,58 +397,128 @@ impl<F: FnOnce() -> Box<dyn Widget>> AppRunner<F> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<F: FnOnce() -> Box<dyn Widget>> winit::application::ApplicationHandler for AppRunner<F> {
     fn can_create_surfaces(&mut self, event_loop: &dyn winit::event_loop::ActiveEventLoop) {
+        let window_attributes = winit::window::WindowAttributes::default()
+            .with_title(&self.config.title)
+            .with_surface_size(winit::dpi::LogicalSize::new(
+                self.config.width,
+                self.config.height,
+            ));
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            use winit::platform::web::WindowAttributesWeb;
+            // Ensure the web canvas is attached to the document body automatically.
+            window_attributes = window_attributes.with_platform_attributes(Box::new(
+                WindowAttributesWeb::default().with_append(true),
+            ));
+        }
+
         let window = event_loop
-            .create_window(
-                winit::window::WindowAttributes::default()
-                    .with_title(&self.config.title)
-                    .with_surface_size(winit::dpi::LogicalSize::new(
-                        self.config.width,
-                        self.config.height,
-                    )),
-            )
+            .create_window(window_attributes)
             .expect("create window");
 
         let window_leaked: &'static mut Box<dyn winit::window::Window> =
             Box::leak(Box::new(window));
         let window: &'static dyn winit::window::Window = &**window_leaked;
 
-        // Initialize wgpu - use pollster on native, web handles this specially
-        let (device, queue, surface_state) = pollster::block_on(init_wgpu(window));
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let (device, queue, surface_state) =
+                pollster::block_on(init_wgpu(window)).expect("initialize wgpu");
 
-        let renderer = Renderer::new(&device, surface_state.config.format);
-        let text_system = TextSystem::new(&device);
-        let draw_list = DrawList::new();
-        let layout_tree = LayoutTree::new();
-        let focus_manager = FocusManager::new();
+            let renderer = Renderer::new(&device, surface_state.config.format);
+            let text_system = TextSystem::new(&device);
+            let draw_list = DrawList::new();
+            let layout_tree = LayoutTree::new();
+            let focus_manager = FocusManager::new();
 
-        // Build the UI
-        let build_ui = self.build_ui.take().expect("build_ui already called");
-        let root_widget = build_ui();
+            // Build the UI
+            let build_ui = self.build_ui.take().expect("build_ui already called");
+            let root_widget = build_ui();
 
-        let scale_factor = window.scale_factor() as f32;
+            let scale_factor = window.scale_factor() as f32;
 
-        self.state = Some(AppState {
-            window,
-            device,
-            queue,
-            surface_state,
-            renderer,
-            text_system,
-            draw_list,
-            layout_tree,
-            focus_manager,
-            root_widget,
-            start_time: Instant::now(),
-            mouse_pos: glam::Vec2::ZERO,
-            scale_factor,
-            needs_layout: true,
-            needs_repaint: true,
-        });
+            self.state = Some(AppState {
+                window,
+                device,
+                queue,
+                surface_state,
+                renderer,
+                text_system,
+                draw_list,
+                layout_tree,
+                focus_manager,
+                root_widget,
+                start_time: Instant::now(),
+                mouse_pos: glam::Vec2::ZERO,
+                scale_factor,
+                needs_layout: true,
+                needs_repaint: true,
+            });
 
-        // Build initial layout
-        self.build_layout();
+            // Build initial layout
+            self.build_layout();
+            // Trigger the very first frame; some platforms won't emit an initial redraw.
+            if let Some(state) = self.state.as_ref() {
+                state.window.request_redraw();
+            }
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            let build_ui = self.build_ui.take().expect("build_ui already called");
+            let root_widget = build_ui();
+            let scale_factor = window.scale_factor() as f32;
+            let pending = Rc::new(RefCell::new(None));
+            let pending_for_task = Rc::clone(&pending);
+
+            wasm_bindgen_futures::spawn_local(async move {
+                match init_wgpu(window).await {
+                    Ok((device, queue, surface_state)) => {
+                        let renderer = Renderer::new(&device, surface_state.config.format);
+                        let text_system = TextSystem::new(&device);
+                        let draw_list = DrawList::new();
+                        let layout_tree = LayoutTree::new();
+                        let focus_manager = FocusManager::new();
+
+                        *pending_for_task.borrow_mut() = Some(AppState {
+                            window,
+                            device,
+                            queue,
+                            surface_state,
+                            renderer,
+                            text_system,
+                            draw_list,
+                            layout_tree,
+                            focus_manager,
+                            root_widget,
+                            start_time: Instant::now(),
+                            mouse_pos: glam::Vec2::ZERO,
+                            scale_factor,
+                            needs_layout: true,
+                            needs_repaint: true,
+                        });
+
+                        window.request_redraw();
+                    }
+                    Err(err) => {
+                        log::error!("failed to initialize wgpu on web: {err}");
+                        if let Some(window) = web_sys::window() {
+                            if let Some(document) = window.document() {
+                                if let Some(body) = document.body() {
+                                    body.set_inner_html(Self::GPU_ADAPTER_ERROR_HTML);
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            self.pending_init = Some(pending);
+        }
     }
 
     fn window_event(
@@ -538,7 +654,11 @@ impl<F: FnOnce() -> Box<dyn Widget>> winit::application::ApplicationHandler for 
                 }
             }
             WindowEvent::RedrawRequested => {
-                let state = self.state.as_mut().unwrap();
+                if self.state.is_none() {
+                    return;
+                }
+
+                let state = self.state.as_mut().expect("state checked above");
 
                 if state.needs_layout {
                     self.build_layout();
@@ -567,15 +687,24 @@ impl<F: FnOnce() -> Box<dyn Widget>> winit::application::ApplicationHandler for 
                     &state.device,
                     &state.queue,
                     &state.draw_list,
-                    state.text_system.atlas(),
+                    &mut state.text_system,
                 );
 
                 // Get frame
                 let frame = match state.surface_state.surface.get_current_texture() {
-                    Ok(frame) => frame,
-                    Err(_) => {
+                    wgpu::CurrentSurfaceTexture::Success(frame) => frame,
+                    wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
                         state.surface_state.reconfigure(&state.device);
-                        state.surface_state.surface.get_current_texture().unwrap()
+                        frame
+                    }
+                    wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
+                        state.surface_state.reconfigure(&state.device);
+                        return;
+                    }
+                    wgpu::CurrentSurfaceTexture::Timeout
+                    | wgpu::CurrentSurfaceTexture::Occluded
+                    | wgpu::CurrentSurfaceTexture::Validation => {
+                        return;
                     }
                 };
 
@@ -610,7 +739,23 @@ impl<F: FnOnce() -> Box<dyn Widget>> winit::application::ApplicationHandler for 
     }
 
     fn about_to_wait(&mut self, _event_loop: &dyn winit::event_loop::ActiveEventLoop) {
-        // Request redraw for animation
-        // In a real app, you'd only request this when needed
+        #[cfg(target_arch = "wasm32")]
+        if self.state.is_none() {
+            let ready_state = self
+                .pending_init
+                .as_ref()
+                .and_then(|pending| pending.borrow_mut().take());
+            if let Some(state) = ready_state {
+                self.state = Some(state);
+                self.build_layout();
+            }
+        }
+
+        // Keep rendering event-driven: redraw only when something is dirty.
+        if let Some(state) = self.state.as_ref() {
+            if state.needs_layout || state.needs_repaint {
+                state.window.request_redraw();
+            }
+        }
     }
 }

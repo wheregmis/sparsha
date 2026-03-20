@@ -29,19 +29,30 @@ impl Color {
         Self { r, g, b, a }
     }
 
+    #[inline]
+    fn srgb_to_linear(channel: f32) -> f32 {
+        if channel <= 0.04045 {
+            channel / 12.92
+        } else {
+            ((channel + 0.055) / 1.055).powf(2.4)
+        }
+    }
+
     /// Create from hex color (e.g., 0xFF5500 for orange).
+    /// Hex values are interpreted as sRGB and converted to linear RGB.
     pub fn from_hex(hex: u32) -> Self {
-        let r = ((hex >> 16) & 0xFF) as f32 / 255.0;
-        let g = ((hex >> 8) & 0xFF) as f32 / 255.0;
-        let b = (hex & 0xFF) as f32 / 255.0;
+        let r = Self::srgb_to_linear(((hex >> 16) & 0xFF) as f32 / 255.0);
+        let g = Self::srgb_to_linear(((hex >> 8) & 0xFF) as f32 / 255.0);
+        let b = Self::srgb_to_linear((hex & 0xFF) as f32 / 255.0);
         Self::rgb(r, g, b)
     }
 
     /// Create from hex color with alpha (e.g., 0xFF550080 for semi-transparent orange).
+    /// RGB channels are interpreted as sRGB and converted to linear RGB.
     pub fn from_hex_alpha(hex: u32) -> Self {
-        let r = ((hex >> 24) & 0xFF) as f32 / 255.0;
-        let g = ((hex >> 16) & 0xFF) as f32 / 255.0;
-        let b = ((hex >> 8) & 0xFF) as f32 / 255.0;
+        let r = Self::srgb_to_linear(((hex >> 24) & 0xFF) as f32 / 255.0);
+        let g = Self::srgb_to_linear(((hex >> 16) & 0xFF) as f32 / 255.0);
+        let b = Self::srgb_to_linear(((hex >> 8) & 0xFF) as f32 / 255.0);
         let a = (hex & 0xFF) as f32 / 255.0;
         Self::rgba(r, g, b, a)
     }
@@ -95,7 +106,12 @@ impl Rect {
     pub const ZERO: Self = Self::new(0.0, 0.0, 0.0, 0.0);
 
     pub const fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
-        Self { x, y, width, height }
+        Self {
+            x,
+            y,
+            width,
+            height,
+        }
     }
 
     pub fn from_pos_size(pos: Vec2, size: Vec2) -> Self {
@@ -226,6 +242,12 @@ mod tests {
         assert!(green.r.abs() < 1e-5);
         assert!((green.g - 1.0).abs() < 1e-5);
         assert!(green.b.abs() < 1e-5);
+
+        let gray = Color::from_hex(0x808080);
+        // 0x80 in sRGB is ~0.216 in linear space.
+        assert!((gray.r - 0.21586).abs() < 0.01);
+        assert!((gray.g - 0.21586).abs() < 0.01);
+        assert!((gray.b - 0.21586).abs() < 0.01);
     }
 
     #[test]
@@ -320,4 +342,3 @@ mod tests {
         assert!(over.height >= 0.0);
     }
 }
-

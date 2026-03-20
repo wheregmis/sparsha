@@ -24,6 +24,8 @@ pub struct TextInputStyle {
     pub padding_h: f32,
     pub padding_v: f32,
     pub font_size: f32,
+    pub min_width: f32,
+    pub min_height: f32,
 }
 
 impl Default for TextInputStyle {
@@ -40,6 +42,8 @@ impl Default for TextInputStyle {
             padding_h: 12.0,
             padding_v: 8.0,
             font_size: 14.0,
+            min_width: 180.0,
+            min_height: 36.0,
         }
     }
 }
@@ -54,6 +58,7 @@ pub struct TextInput {
     selection_start: Option<usize>,
     on_change: Option<TextInputCallback>,
     on_submit: Option<TextInputCallback>,
+    fill_width: bool,
 }
 
 impl TextInput {
@@ -68,6 +73,7 @@ impl TextInput {
             selection_start: None,
             on_change: None,
             on_submit: None,
+            fill_width: false,
         }
     }
 
@@ -99,6 +105,12 @@ impl TextInput {
     /// Set the style.
     pub fn with_style(mut self, style: TextInputStyle) -> Self {
         self.style = style;
+        self
+    }
+
+    /// Stretch to fill the parent's available width.
+    pub fn fill_width(mut self) -> Self {
+        self.fill_width = true;
         self
     }
 
@@ -228,6 +240,14 @@ impl Widget for TextInput {
 
     fn style(&self) -> Style {
         Style {
+            size: Size {
+                width: if self.fill_width {
+                    percent(1.0)
+                } else {
+                    auto()
+                },
+                height: auto(),
+            },
             padding: Rect {
                 left: length(self.style.padding_h),
                 right: length(self.style.padding_h),
@@ -235,8 +255,8 @@ impl Widget for TextInput {
                 bottom: length(self.style.padding_v),
             },
             min_size: Size {
-                width: length(100.0),
-                height: auto(),
+                width: length(self.style.min_width),
+                height: length(self.style.min_height),
             },
             ..Default::default()
         }
@@ -358,7 +378,8 @@ impl Widget for TextInput {
 
                 // Draw cursor line (scale cursor width)
                 let cursor_width = 2.0 * scale;
-                let cursor_rect = spark_core::Rect::new(cursor_x, text_y, cursor_width, cursor_height);
+                let cursor_rect =
+                    spark_core::Rect::new(cursor_x, text_y, cursor_width, cursor_height);
                 ctx.fill_rect(cursor_rect, self.style.text_color);
             }
         }
@@ -466,6 +487,26 @@ impl Widget for TextInput {
         true
     }
 
+    fn measure(&self, ctx: &mut crate::LayoutContext) -> Option<(f32, f32)> {
+        let text_style = TextStyle::default().with_size(self.style.font_size);
+        let sample = if self.value.is_empty() {
+            if self.placeholder.is_empty() {
+                "M"
+            } else {
+                &self.placeholder
+            }
+        } else {
+            &self.value
+        };
+        let (text_width, text_height) = ctx.measure_text(sample, &text_style);
+
+        let width = (text_width + self.style.padding_h * 2.0 + self.style.border_width * 2.0)
+            .max(self.style.min_width);
+        let height = (text_height + self.style.padding_v * 2.0 + self.style.border_width * 2.0)
+            .max(self.style.min_height);
+        Some((width, height))
+    }
+
     fn on_focus(&mut self) {
         // Select all on focus
         self.select_all();
@@ -475,4 +516,3 @@ impl Widget for TextInput {
         self.selection_start = None;
     }
 }
-

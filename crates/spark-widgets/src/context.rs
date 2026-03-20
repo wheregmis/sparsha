@@ -1,11 +1,10 @@
 //! Context types passed to widgets during layout, paint, and events.
 
-use spark_core::{Color, GlyphInstance, Rect};
+use spark_core::{Color, Rect};
 use spark_input::FocusManager;
 use spark_layout::{ComputedLayout, LayoutTree, WidgetId};
 use spark_render::DrawList;
 use spark_text::{TextStyle, TextSystem};
-use wgpu::{Device, Queue};
 
 /// Context for layout measurement.
 pub struct LayoutContext<'a> {
@@ -40,10 +39,6 @@ pub struct PaintContext<'a> {
     pub scale_factor: f32,
     /// The text system for shaping text.
     pub text_system: &'a mut TextSystem,
-    /// The GPU device.
-    pub device: &'a Device,
-    /// The GPU queue.
-    pub queue: &'a Queue,
     /// Elapsed time in seconds (for animations like cursor blinking).
     pub elapsed_time: f32,
 }
@@ -113,8 +108,8 @@ impl<'a> PaintContext<'a> {
 
     /// Draw text at the specified position.
     ///
-    /// The text is shaped using the provided style and drawn with its
-    /// top-left corner at (x, y). Coordinates are in physical pixels.
+    /// The text run is emitted into the draw list and consumed by the active renderer.
+    /// Coordinates are in physical pixels.
     pub fn draw_text(&mut self, text: &str, style: &TextStyle, x: f32, y: f32) {
         if text.is_empty() {
             return;
@@ -125,20 +120,7 @@ impl<'a> PaintContext<'a> {
             font_size: style.font_size * self.scale_factor,
             ..style.clone()
         };
-
-        let shaped = self.text_system.shape(self.device, self.queue, text, &scaled_style, None);
-
-        // Offset all glyphs by the given position
-        let glyphs: Vec<GlyphInstance> = shaped
-            .glyphs
-            .iter()
-            .map(|g| GlyphInstance {
-                pos: [g.pos[0] + x, g.pos[1] + y],
-                ..*g
-            })
-            .collect();
-
-        self.draw_list.text(glyphs);
+        self.draw_list.text_run(text.to_owned(), scaled_style, x, y);
     }
 
     /// Draw text centered within the given bounds.
@@ -163,7 +145,13 @@ impl<'a> PaintContext<'a> {
     /// Draw text left-aligned within the given bounds, vertically centered.
     ///
     /// Useful for text inputs and labels. Bounds are in physical pixels.
-    pub fn draw_text_aligned(&mut self, text: &str, style: &TextStyle, bounds: Rect, padding_left: f32) {
+    pub fn draw_text_aligned(
+        &mut self,
+        text: &str,
+        style: &TextStyle,
+        bounds: Rect,
+        padding_left: f32,
+    ) {
         if text.is_empty() {
             return;
         }
@@ -235,9 +223,6 @@ impl<'a> EventContext<'a> {
 
     /// Convert a point to local coordinates.
     pub fn to_local(&self, pos: glam::Vec2) -> glam::Vec2 {
-        glam::Vec2::new(
-            pos.x - self.layout.bounds.x,
-            pos.y - self.layout.bounds.y,
-        )
+        glam::Vec2::new(pos.x - self.layout.bounds.x, pos.y - self.layout.bounds.y)
     }
 }

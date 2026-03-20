@@ -64,13 +64,12 @@ impl FocusManager {
         }
 
         let next_idx = match self.focused {
-            Some(current) => {
-                self.focusable
-                    .iter()
-                    .position(|id| *id == current)
-                    .map(|idx| (idx + 1) % self.focusable.len())
-                    .unwrap_or(0)
-            }
+            Some(current) => self
+                .focusable
+                .iter()
+                .position(|id| *id == current)
+                .map(|idx| (idx + 1) % self.focusable.len())
+                .unwrap_or(0),
             None => 0,
         };
 
@@ -84,19 +83,18 @@ impl FocusManager {
         }
 
         let prev_idx = match self.focused {
-            Some(current) => {
-                self.focusable
-                    .iter()
-                    .position(|id| *id == current)
-                    .map(|idx| {
-                        if idx == 0 {
-                            self.focusable.len() - 1
-                        } else {
-                            idx - 1
-                        }
-                    })
-                    .unwrap_or(self.focusable.len() - 1)
-            }
+            Some(current) => self
+                .focusable
+                .iter()
+                .position(|id| *id == current)
+                .map(|idx| {
+                    if idx == 0 {
+                        self.focusable.len() - 1
+                    } else {
+                        idx - 1
+                    }
+                })
+                .unwrap_or(self.focusable.len() - 1),
             None => self.focusable.len() - 1,
         };
 
@@ -178,4 +176,3 @@ mod tests {
         assert_eq!(fm.focusable_count(), 1);
     }
 }
-

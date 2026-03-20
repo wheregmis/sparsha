@@ -41,8 +41,8 @@ pub mod prelude {
     pub use spark_input::{InputEvent, Key, Modifiers, PointerButton};
     pub use spark_layout::taffy;
     pub use spark_widgets::{
-        Button, ButtonStyle, Container, EventResponse, Scroll, ScrollDirection, Text, TextAlign,
-        TextInput, Widget,
+        Button, ButtonStyle, Checkbox, CheckboxStyle, Container, EventResponse, List,
+        ListDirection, Scroll, ScrollDirection, Text, TextAlign, TextInput, Widget,
     };
 }
 

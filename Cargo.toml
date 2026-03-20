@@ -8,6 +8,7 @@ members = [
     "crates/spark-widgets",
     "crates/spark",
     "examples/kitchen-sink",
+    "examples/todo",
 ]
 resolver = "2"
 

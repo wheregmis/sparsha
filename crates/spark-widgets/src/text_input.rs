@@ -5,6 +5,7 @@ use spark_core::Color;
 use spark_input::{shortcuts, InputEvent, Key};
 use spark_layout::WidgetId;
 use spark_text::TextStyle;
+use std::cell::RefCell;
 use taffy::prelude::*;
 
 /// Callback type for text change and submit handlers.
@@ -59,6 +60,7 @@ pub struct TextInput {
     on_change: Option<TextInputCallback>,
     on_submit: Option<TextInputCallback>,
     fill_width: bool,
+    prefix_widths: RefCell<Vec<(usize, f32)>>,
 }
 
 impl TextInput {
@@ -74,6 +76,7 @@ impl TextInput {
             on_change: None,
             on_submit: None,
             fill_width: false,
+            prefix_widths: RefCell::new(vec![(0, 0.0)]),
         }
     }
 
@@ -221,6 +224,73 @@ impl TextInput {
             handler(&self.value);
         }
     }
+
+    fn compute_prefix_widths(
+        text: &str,
+        mut measure_width: impl FnMut(&str) -> f32,
+    ) -> Vec<(usize, f32)> {
+        if text.is_empty() {
+            return vec![(0, 0.0)];
+        }
+
+        let mut boundaries = Vec::with_capacity(text.chars().count() + 1);
+        boundaries.push(0);
+        for (idx, _) in text.char_indices().skip(1) {
+            boundaries.push(idx);
+        }
+        if boundaries.last().copied() != Some(text.len()) {
+            boundaries.push(text.len());
+        }
+
+        boundaries
+            .into_iter()
+            .map(|idx| (idx, measure_width(&text[..idx])))
+            .collect()
+    }
+
+    fn update_prefix_width_cache_with_paint_ctx(&self, ctx: &mut PaintContext, style: &TextStyle) {
+        let cache =
+            Self::compute_prefix_widths(&self.value, |prefix| ctx.measure_text(prefix, style).0);
+        *self.prefix_widths.borrow_mut() = cache;
+    }
+
+    fn update_prefix_width_cache_with_layout_ctx(
+        &self,
+        ctx: &mut crate::LayoutContext,
+        style: &TextStyle,
+    ) {
+        let cache =
+            Self::compute_prefix_widths(&self.value, |prefix| ctx.measure_text(prefix, style).0);
+        *self.prefix_widths.borrow_mut() = cache;
+    }
+
+    fn cursor_index_for_x(&self, x: f32) -> usize {
+        if self.value.is_empty() {
+            return 0;
+        }
+        let prefix = self.prefix_widths.borrow();
+        if prefix.is_empty() {
+            return self.value.len();
+        }
+
+        if x <= 0.0 {
+            return 0;
+        }
+        if let Some((last_idx, last_x)) = prefix.last() {
+            if x >= *last_x {
+                return *last_idx;
+            }
+        }
+
+        let mut best = (self.value.len(), f32::MAX);
+        for (idx, width) in prefix.iter() {
+            let dist = (*width - x).abs();
+            if dist < best.1 {
+                best = (*idx, dist);
+            }
+        }
+        best.0
+    }
 }
 
 impl Default for TextInput {
@@ -320,6 +390,8 @@ impl Widget for TextInput {
             .with_size(self.style.font_size)
             .with_color(self.style.placeholder_color);
 
+        self.update_prefix_width_cache_with_paint_ctx(ctx, &text_style);
+
         // Measure text height for vertical centering
         let (_, text_height) = ctx.measure_text("Ay", &text_style);
         let text_y = bounds.y + (bounds.height - text_height) / 2.0;
@@ -390,8 +462,9 @@ impl Widget for TextInput {
             InputEvent::PointerDown { pos, .. } => {
                 if ctx.contains(*pos) {
                     ctx.request_focus();
-                    // TODO: Position cursor based on click position
-                    self.cursor_pos = self.value.len();
+                    let local = ctx.to_local(*pos);
+                    let click_x = (local.x - self.style.padding_h).max(0.0);
+                    self.cursor_pos = self.cursor_index_for_x(click_x);
                     self.selection_start = None;
                     return EventResponse::focus();
                 }
@@ -489,6 +562,7 @@ impl Widget for TextInput {
 
     fn measure(&self, ctx: &mut crate::LayoutContext) -> Option<(f32, f32)> {
         let text_style = TextStyle::default().with_size(self.style.font_size);
+        self.update_prefix_width_cache_with_layout_ctx(ctx, &text_style);
         let sample = if self.value.is_empty() {
             if self.placeholder.is_empty() {
                 "M"
@@ -514,5 +588,54 @@ impl Widget for TextInput {
 
     fn on_blur(&mut self) {
         self.selection_start = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_helpers::{layout_bounds, mock_event_context, pointer_down_at};
+    use spark_input::FocusManager;
+    use spark_layout::LayoutTree;
+    use spark_text::TextSystem;
+
+    fn prepare_input_with_cache(input: &TextInput) {
+        let mut text = TextSystem::new_headless();
+        let mut ctx = crate::LayoutContext {
+            text: &mut text,
+            max_width: None,
+            max_height: None,
+        };
+        let _ = input.measure(&mut ctx);
+    }
+
+    #[test]
+    fn pointer_click_places_cursor_at_start_middle_end() {
+        let mut input = TextInput::new().value("hello");
+        input.set_id(Default::default());
+        prepare_input_with_cache(&input);
+
+        let layout = layout_bounds(0.0, 0.0, 240.0, 36.0);
+        let layout_tree = LayoutTree::new();
+        let mut focus = FocusManager::new();
+        let mut event_ctx = mock_event_context(layout, &layout_tree, &mut focus, input.id(), false);
+
+        let _ = input.event(&mut event_ctx, &pointer_down_at(2.0, 18.0));
+        assert_eq!(input.cursor_pos, 0);
+
+        let mid_prefix_width = input
+            .prefix_widths
+            .borrow()
+            .iter()
+            .find_map(|(idx, width)| (*idx == 3).then_some(*width))
+            .expect("missing width for index 3");
+        let _ = input.event(
+            &mut event_ctx,
+            &pointer_down_at(mid_prefix_width + input.style.padding_h, 18.0),
+        );
+        assert_eq!(input.cursor_pos, 3);
+
+        let _ = input.event(&mut event_ctx, &pointer_down_at(238.0, 18.0));
+        assert_eq!(input.cursor_pos, input.value.len());
     }
 }

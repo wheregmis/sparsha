@@ -1,6 +1,6 @@
 # Spark Examples
 
-This directory contains the Kitchen Sink example, a comprehensive showcase of the Spark UI framework.
+This directory contains runnable Spark example applications.
 
 ## Kitchen Sink
 
@@ -55,3 +55,23 @@ trunk serve
 
 Then open `http://127.0.0.1:8080`.
 
+## Todo
+
+**Path:** `examples/todo`
+
+A cross-platform todo app demonstrating dynamic list rendering with reusable `Checkbox` and `List`
+widgets, filter controls, and action-driven state updates.
+
+**Run:**
+```bash
+cargo run -p todo
+```
+
+For web (WASM + Trunk):
+```bash
+cd examples/todo
+rustup target add wasm32-unknown-unknown
+trunk serve
+```
+
+Then open `http://127.0.0.1:8081`.

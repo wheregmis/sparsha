@@ -88,6 +88,13 @@ fn main() {
 cargo run -p kitchen-sink --release
 ```
 
+For web (WASM + Trunk):
+```bash
+cd examples/kitchen-sink
+rustup target add wasm32-unknown-unknown
+trunk serve
+```
+
 ## Frame Loop
 
 ```

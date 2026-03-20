@@ -74,6 +74,7 @@ impl App {
     }
 
     /// Run the application with the given root widget.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn run<F>(self, build_ui: F) -> !
     where
         F: FnOnce() -> Box<dyn Widget> + 'static,
@@ -83,6 +84,18 @@ impl App {
         let runner_leaked: &'static mut AppRunner<F> = Box::leak(Box::new(runner));
         event_loop.run_app(runner_leaked).unwrap();
         std::process::exit(0);
+    }
+
+    /// Run the application with the given root widget.
+    #[cfg(target_arch = "wasm32")]
+    pub fn run<F>(self, build_ui: F)
+    where
+        F: FnOnce() -> Box<dyn Widget> + 'static,
+    {
+        let event_loop = winit::event_loop::EventLoop::new().unwrap();
+        let runner = AppRunner::new(self.config, build_ui);
+        let runner_leaked: &'static mut AppRunner<F> = Box::leak(Box::new(runner));
+        event_loop.run_app(runner_leaked).unwrap();
     }
 }
 
@@ -353,15 +366,22 @@ impl<F: FnOnce() -> Box<dyn Widget>> AppRunner<F> {
 
 impl<F: FnOnce() -> Box<dyn Widget>> winit::application::ApplicationHandler for AppRunner<F> {
     fn can_create_surfaces(&mut self, event_loop: &dyn winit::event_loop::ActiveEventLoop) {
+        let mut window_attributes = winit::window::WindowAttributes::default()
+            .with_title(&self.config.title)
+            .with_surface_size(winit::dpi::LogicalSize::new(
+                self.config.width,
+                self.config.height,
+            ));
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            use winit::platform::web::WindowAttributesWeb;
+            window_attributes = window_attributes
+                .with_platform_attributes(Box::new(WindowAttributesWeb::default().with_append(true)));
+        }
+
         let window = event_loop
-            .create_window(
-                winit::window::WindowAttributes::default()
-                    .with_title(&self.config.title)
-                    .with_surface_size(winit::dpi::LogicalSize::new(
-                        self.config.width,
-                        self.config.height,
-                    )),
-            )
+            .create_window(window_attributes)
             .expect("create window");
 
         let window_leaked: &'static mut Box<dyn winit::window::Window> =

@@ -3,6 +3,10 @@
 use spark::prelude::*;
 
 fn main() {
+    #[cfg(target_arch = "wasm32")]
+    spark::init_web();
+
+    #[cfg(not(target_arch = "wasm32"))]
     env_logger::init();
 
     App::new()

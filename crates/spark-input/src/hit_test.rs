@@ -25,10 +25,7 @@ pub fn hit_test(layout_tree: &LayoutTree, pos: Vec2) -> Option<HitTestResult> {
             if result.is_none() || depth > result.as_ref().unwrap().depth {
                 result = Some(HitTestResult {
                     widget_id,
-                    local_pos: Vec2::new(
-                        pos.x - computed.bounds.x,
-                        pos.y - computed.bounds.y,
-                    ),
+                    local_pos: Vec2::new(pos.x - computed.bounds.x, pos.y - computed.bounds.y),
                     depth,
                 });
             }
@@ -39,11 +36,7 @@ pub fn hit_test(layout_tree: &LayoutTree, pos: Vec2) -> Option<HitTestResult> {
 }
 
 /// Perform a hit test with a custom filter.
-pub fn hit_test_filtered<F>(
-    layout_tree: &LayoutTree,
-    pos: Vec2,
-    filter: F,
-) -> Option<HitTestResult>
+pub fn hit_test_filtered<F>(layout_tree: &LayoutTree, pos: Vec2, filter: F) -> Option<HitTestResult>
 where
     F: Fn(WidgetId) -> bool,
 {
@@ -55,12 +48,9 @@ where
             && (result.is_none() || depth > result.as_ref().unwrap().depth)
         {
             result = Some(HitTestResult {
-                    widget_id,
-                    local_pos: Vec2::new(
-                        pos.x - computed.bounds.x,
-                        pos.y - computed.bounds.y,
-                    ),
-                    depth,
+                widget_id,
+                local_pos: Vec2::new(pos.x - computed.bounds.x, pos.y - computed.bounds.y),
+                depth,
             });
         }
     });
@@ -88,10 +78,7 @@ pub fn hit_test_all(layout_tree: &LayoutTree, pos: Vec2) -> Vec<HitTestResult> {
         if computed.bounds.contains(pos) {
             results.push(HitTestResult {
                 widget_id,
-                local_pos: Vec2::new(
-                    pos.x - computed.bounds.x,
-                    pos.y - computed.bounds.y,
-                ),
+                local_pos: Vec2::new(pos.x - computed.bounds.x, pos.y - computed.bounds.y),
                 depth,
             });
         }
@@ -151,4 +138,3 @@ mod tests {
         assert!(results[0].depth >= results[1].depth);
     }
 }
-

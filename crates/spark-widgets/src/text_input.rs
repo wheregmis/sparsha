@@ -358,7 +358,8 @@ impl Widget for TextInput {
 
                 // Draw cursor line (scale cursor width)
                 let cursor_width = 2.0 * scale;
-                let cursor_rect = spark_core::Rect::new(cursor_x, text_y, cursor_width, cursor_height);
+                let cursor_rect =
+                    spark_core::Rect::new(cursor_x, text_y, cursor_width, cursor_height);
                 ctx.fill_rect(cursor_rect, self.style.text_color);
             }
         }
@@ -475,4 +476,3 @@ impl Widget for TextInput {
         self.selection_start = None;
     }
 }
-

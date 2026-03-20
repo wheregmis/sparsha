@@ -4,7 +4,9 @@ use crate::atlas::{CachedGlyph, GlyphAtlas, GlyphBitmap, GlyphKey};
 use parley::{
     fontique::Blob,
     layout::{Alignment, GlyphRun, PositionedLayoutItem},
-    style::{FontFamily, FontStack, FontStyle, FontWeight, GenericFamily, LineHeight, StyleProperty},
+    style::{
+        FontFamily, FontStack, FontStyle, FontWeight, GenericFamily, LineHeight, StyleProperty,
+    },
     FontContext, Layout, LayoutContext,
 };
 use spark_core::{Color, GlyphInstance};
@@ -110,15 +112,14 @@ impl TextSystem {
     /// Create a new text system.
     pub fn new(device: &Device) -> Self {
         let mut font_cx = FontContext::new();
-        
+
         // Register embedded Inter fonts
         let regular_blob = Blob::new(std::sync::Arc::new(INTER_REGULAR.to_vec()));
         let bold_blob = Blob::new(std::sync::Arc::new(INTER_BOLD.to_vec()));
-        
+
         font_cx.collection.register_fonts(regular_blob, None);
         font_cx.collection.register_fonts(bold_blob, None);
-        
-        
+
         let layout_cx = LayoutContext::new();
         let scale_cx = ScaleContext::new();
         let atlas = GlyphAtlas::new(device, 1024, 1024);
@@ -169,7 +170,7 @@ impl TextSystem {
         builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(
             style.line_height,
         )));
-        
+
         // Use embedded Inter font with fallback to system sans-serif
         builder.push_default(StyleProperty::FontStack(FontStack::List(
             vec![
@@ -256,7 +257,7 @@ impl TextSystem {
         let run = glyph_run.run();
         let font = run.font();
         let font_size = run.font_size();
-        
+
         // Convert brush color from [u8; 4] back to [f32; 4] for GlyphInstance
         let brush = glyph_run.style().brush;
         let color = [
@@ -403,7 +404,7 @@ impl TextSystem {
         builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(
             style.line_height,
         )));
-        
+
         // Use embedded Inter font with fallback to system sans-serif
         builder.push_default(StyleProperty::FontStack(FontStack::List(
             vec![

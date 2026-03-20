@@ -114,6 +114,8 @@ struct AppRunner<F: FnOnce() -> Box<dyn Widget>> {
     config: AppConfig,
     build_ui: Option<F>,
     state: Option<AppState>,
+    // Outer Option: whether async web initialization has been kicked off.
+    // Inner Option: completed AppState produced by the async init task.
     #[cfg(target_arch = "wasm32")]
     pending_init: Option<Rc<RefCell<Option<AppState>>>>,
 }
@@ -137,6 +139,12 @@ struct AppState {
 }
 
 impl<F: FnOnce() -> Box<dyn Widget>> AppRunner<F> {
+    #[cfg(target_arch = "wasm32")]
+    const GPU_ADAPTER_ERROR_HTML: &'static str =
+        "<div style=\"margin:24px;font-family:system-ui,sans-serif;color:#b00020;\">\
+         Spark could not initialize a compatible GPU adapter in this browser.\
+         </div>";
+
     fn new(config: AppConfig, build_ui: F) -> Self {
         Self {
             config,
@@ -481,11 +489,7 @@ impl<F: FnOnce() -> Box<dyn Widget>> winit::application::ApplicationHandler for 
                         if let Some(window) = web_sys::window() {
                             if let Some(document) = window.document() {
                                 if let Some(body) = document.body() {
-                                    body.set_inner_html(
-                                        "<div style=\"margin:24px;font-family:system-ui,sans-serif;color:#b00020;\">\
-                                         Spark could not initialize a compatible GPU adapter in this browser.\
-                                         </div>",
-                                    );
+                                    body.set_inner_html(Self::GPU_ADAPTER_ERROR_HTML);
                                 }
                             }
                         }

@@ -88,20 +88,20 @@ impl Renderer {
                 DrawCommand::Text { glyphs } => {
                     // Apply clipping to glyphs
                     let translation = self.translation_stack.last().copied().unwrap_or((0.0, 0.0));
-                    
+
                     if let Some(clip) = self.clip_stack.last() {
                         let mut visible_glyphs = Vec::with_capacity(glyphs.len());
                         for glyph in glyphs {
                             let mut translated_glyph = *glyph;
                             translated_glyph.pos[0] += translation.0;
                             translated_glyph.pos[1] += translation.1;
-                            
+
                             // Simple point-in-rect check for now
                             // Ideally we'd valid against glyph bounds, but point check is a good start
                             // to prevent massive overflow
                             if clip.contains(spark_core::Point::new(
                                 translated_glyph.pos[0],
-                                translated_glyph.pos[1]
+                                translated_glyph.pos[1],
                             )) {
                                 visible_glyphs.push(translated_glyph);
                             }

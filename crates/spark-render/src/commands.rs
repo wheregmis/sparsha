@@ -14,19 +14,13 @@ pub enum DrawCommand {
         border_color: Color,
     },
     /// Draw text glyphs.
-    Text {
-        glyphs: Vec<GlyphInstance>,
-    },
+    Text { glyphs: Vec<GlyphInstance> },
     /// Push a clip rectangle (future draw commands will be clipped).
-    PushClip {
-        bounds: Rect,
-    },
+    PushClip { bounds: Rect },
     /// Pop the current clip rectangle.
     PopClip,
     /// Push a translation offset (affects all subsequent draw commands).
-    PushTranslation {
-        offset: (f32, f32),
-    },
+    PushTranslation { offset: (f32, f32) },
     /// Pop the current translation offset.
     PopTranslation,
 }

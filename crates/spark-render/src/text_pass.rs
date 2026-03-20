@@ -1,8 +1,8 @@
 //! Text rendering pass using a glyph atlas.
 
 use spark_core::{
-    pipeline::{Pipeline, PipelineConfig},
     buffer::QuadBuffers,
+    pipeline::{Pipeline, PipelineConfig},
     vertex::{GlyphInstance, Vertex2D},
     DynamicBuffer, GlobalUniforms,
 };
@@ -10,8 +10,8 @@ use spark_text::GlyphAtlas;
 use wgpu::{
     BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
     BindGroupLayoutEntry, BindingResource, BindingType, Device, FilterMode, Queue, RenderPass,
-    Sampler, SamplerBindingType, SamplerDescriptor, ShaderStages, TextureFormat,
-    TextureSampleType, TextureViewDimension,
+    Sampler, SamplerBindingType, SamplerDescriptor, ShaderStages, TextureFormat, TextureSampleType,
+    TextureViewDimension,
 };
 
 /// WGSL shader for rendering text glyphs from an atlas.
@@ -95,28 +95,27 @@ impl TextPass {
     /// Create a new text pass.
     pub fn new(device: &Device, format: TextureFormat) -> Self {
         // Create atlas bind group layout
-        let atlas_bind_group_layout =
-            device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-                label: Some("text_atlas_bgl"),
-                entries: &[
-                    BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: ShaderStages::FRAGMENT,
-                        ty: BindingType::Texture {
-                            sample_type: TextureSampleType::Float { filterable: true },
-                            view_dimension: TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
+        let atlas_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("text_atlas_bgl"),
+            entries: &[
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
                     },
-                    BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: ShaderStages::FRAGMENT,
-                        ty: BindingType::Sampler(SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                ],
-            });
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
 
         let pipeline = Pipeline::with_config(
             device,
@@ -218,4 +217,3 @@ impl TextPass {
         self.instances.len()
     }
 }
-

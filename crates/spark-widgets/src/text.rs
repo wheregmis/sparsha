@@ -95,7 +95,9 @@ impl Text {
 
     /// Create a small/caption-style text.
     pub fn caption(content: impl Into<String>) -> Self {
-        Self::new(content).size(12.0).color(Color::from_hex(0x6B7280))
+        Self::new(content)
+            .size(12.0)
+            .color(Color::from_hex(0x6B7280))
     }
 
     fn text_style(&self) -> TextStyle {
@@ -166,4 +168,3 @@ impl Widget for Text {
         Some((w, h))
     }
 }
-

@@ -13,6 +13,7 @@ pub enum WgpuInitError {
     AdapterUnavailable,
     RequestDevice(RequestDeviceError),
     NoSurfaceFormat,
+    NoPresentMode,
 }
 
 impl core::fmt::Display for WgpuInitError {
@@ -22,6 +23,7 @@ impl core::fmt::Display for WgpuInitError {
             Self::AdapterUnavailable => write!(f, "no compatible GPU adapter available"),
             Self::RequestDevice(err) => write!(f, "failed to request GPU device: {err}"),
             Self::NoSurfaceFormat => write!(f, "surface did not report any supported formats"),
+            Self::NoPresentMode => write!(f, "surface did not report any supported present modes"),
         }
     }
 }
@@ -47,6 +49,8 @@ pub async fn init_wgpu<'a>(
         .create_surface(window)
         .map_err(WgpuInitError::SurfaceCreation)?;
 
+    // Prefer fallback adapters on web to support browsers/platforms where
+    // high-performance adapters are unavailable or WebGPU exposure is limited.
     #[cfg(target_arch = "wasm32")]
     let force_fallback_adapter = true;
     #[cfg(not(target_arch = "wasm32"))]
@@ -85,7 +89,7 @@ pub async fn init_wgpu<'a>(
         .copied()
         .find(|mode| *mode == PresentMode::AutoVsync || *mode == PresentMode::Fifo)
         .or_else(|| caps.present_modes.first().copied())
-        .unwrap_or(PresentMode::AutoVsync);
+        .ok_or(WgpuInitError::NoPresentMode)?;
     let alpha_mode = caps
         .alpha_modes
         .first()

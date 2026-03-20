@@ -126,7 +126,9 @@ impl<'a> PaintContext<'a> {
             ..style.clone()
         };
 
-        let shaped = self.text_system.shape(self.device, self.queue, text, &scaled_style, None);
+        let shaped = self
+            .text_system
+            .shape(self.device, self.queue, text, &scaled_style, None);
 
         // Offset all glyphs by the given position
         let glyphs: Vec<GlyphInstance> = shaped
@@ -163,7 +165,13 @@ impl<'a> PaintContext<'a> {
     /// Draw text left-aligned within the given bounds, vertically centered.
     ///
     /// Useful for text inputs and labels. Bounds are in physical pixels.
-    pub fn draw_text_aligned(&mut self, text: &str, style: &TextStyle, bounds: Rect, padding_left: f32) {
+    pub fn draw_text_aligned(
+        &mut self,
+        text: &str,
+        style: &TextStyle,
+        bounds: Rect,
+        padding_left: f32,
+    ) {
         if text.is_empty() {
             return;
         }
@@ -235,9 +243,6 @@ impl<'a> EventContext<'a> {
 
     /// Convert a point to local coordinates.
     pub fn to_local(&self, pos: glam::Vec2) -> glam::Vec2 {
-        glam::Vec2::new(
-            pos.x - self.layout.bounds.x,
-            pos.y - self.layout.bounds.y,
-        )
+        glam::Vec2::new(pos.x - self.layout.bounds.x, pos.y - self.layout.bounds.y)
     }
 }

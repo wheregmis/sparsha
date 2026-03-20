@@ -95,7 +95,12 @@ impl Rect {
     pub const ZERO: Self = Self::new(0.0, 0.0, 0.0, 0.0);
 
     pub const fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
-        Self { x, y, width, height }
+        Self {
+            x,
+            y,
+            width,
+            height,
+        }
     }
 
     pub fn from_pos_size(pos: Vec2, size: Vec2) -> Self {
@@ -320,4 +325,3 @@ mod tests {
         assert!(over.height >= 0.0);
     }
 }
-

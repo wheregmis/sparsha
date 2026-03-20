@@ -41,9 +41,9 @@ pub struct ButtonStyle {
 impl Default for ButtonStyle {
     fn default() -> Self {
         Self {
-            background: Color::from_hex(0x3B82F6),         // Blue
-            background_hovered: Color::from_hex(0x2563EB), // Darker blue
-            background_pressed: Color::from_hex(0x1D4ED8), // Even darker
+            background: Color::from_hex(0x3B82F6),          // Blue
+            background_hovered: Color::from_hex(0x2563EB),  // Darker blue
+            background_pressed: Color::from_hex(0x1D4ED8),  // Even darker
             background_disabled: Color::from_hex(0x9CA3AF), // Gray
             text_color: Color::WHITE,
             text_color_disabled: Color::from_hex(0x6B7280),
@@ -73,16 +73,16 @@ impl Button {
     pub fn new(label: impl Into<String>) -> Self {
         let label = label.into();
         let style = ButtonStyle::default();
-        
+
         // Estimate minimum size based on label and style
         // Rough estimate: ~8px per character for 14px font, plus padding
         let char_width = style.font_size * 0.6;
         let estimated_text_width = label.len() as f32 * char_width;
         let min_width = estimated_text_width + style.padding_h * 2.0;
-        
+
         // Height: font size * line height (~1.4) + vertical padding
         let min_height = style.font_size * 1.4 + style.padding_v * 2.0;
-        
+
         Self {
             id: WidgetId::default(),
             label,
@@ -324,13 +324,7 @@ mod tests {
         let mut focus = FocusManager::new();
         button.set_id(Default::default());
 
-        let mut ctx = mock_event_context(
-            layout,
-            &layout_tree,
-            &mut focus,
-            button.id(),
-            false,
-        );
+        let mut ctx = mock_event_context(layout, &layout_tree, &mut focus, button.id(), false);
         let inside = (x + w / 2.0, y + h / 2.0);
         let _ = button.event(&mut ctx, &pointer_move_at(inside.0, inside.1));
         assert_eq!(button.state(), ButtonState::Hovered);
@@ -345,13 +339,7 @@ mod tests {
         let mut focus = FocusManager::new();
         button.set_id(Default::default());
 
-        let mut ctx = mock_event_context(
-            layout,
-            &layout_tree,
-            &mut focus,
-            button.id(),
-            false,
-        );
+        let mut ctx = mock_event_context(layout, &layout_tree, &mut focus, button.id(), false);
         let _ = button.event(&mut ctx, &pointer_move_at(x + w / 2.0, y + h / 2.0));
         assert_eq!(button.state(), ButtonState::Hovered);
         let _ = button.event(&mut ctx, &pointer_move_at(-10.0, -10.0));
@@ -362,20 +350,15 @@ mod tests {
     fn click_flow_down_inside_capture_then_up_fires_click() {
         let clicked = Arc::new(AtomicBool::new(false));
         let clicked_clone = Arc::clone(&clicked);
-        let mut button = Button::new("OK").on_click(move || clicked_clone.store(true, Ordering::SeqCst));
+        let mut button =
+            Button::new("OK").on_click(move || clicked_clone.store(true, Ordering::SeqCst));
         let (x, y, w, h) = button_bounds();
         let layout = layout_bounds(x, y, w, h);
         let layout_tree = LayoutTree::new();
         let mut focus = FocusManager::new();
         button.set_id(Default::default());
 
-        let mut ctx = mock_event_context(
-            layout,
-            &layout_tree,
-            &mut focus,
-            button.id(),
-            false,
-        );
+        let mut ctx = mock_event_context(layout, &layout_tree, &mut focus, button.id(), false);
         let inside = (x + w / 2.0, y + h / 2.0);
 
         let r = button.event(&mut ctx, &pointer_down_at(inside.0, inside.1));
@@ -397,13 +380,7 @@ mod tests {
         let mut focus = FocusManager::new();
         button.set_id(Default::default());
 
-        let mut ctx = mock_event_context(
-            layout,
-            &layout_tree,
-            &mut focus,
-            button.id(),
-            false,
-        );
+        let mut ctx = mock_event_context(layout, &layout_tree, &mut focus, button.id(), false);
         let inside = (x + w / 2.0, y + h / 2.0);
         let r = button.event(&mut ctx, &pointer_move_at(inside.0, inside.1));
         assert_eq!(button.state(), ButtonState::Disabled);
@@ -418,20 +395,15 @@ mod tests {
     fn keyboard_activate_with_focus_fires_click() {
         let clicked = Arc::new(AtomicBool::new(false));
         let clicked_clone = Arc::clone(&clicked);
-        let mut button = Button::new("OK").on_click(move || clicked_clone.store(true, Ordering::SeqCst));
+        let mut button =
+            Button::new("OK").on_click(move || clicked_clone.store(true, Ordering::SeqCst));
         let (x, y, w, h) = button_bounds();
         let layout = layout_bounds(x, y, w, h);
         let layout_tree = LayoutTree::new();
         let mut focus = FocusManager::new();
         focus.set_focus(button.id());
 
-        let mut ctx = mock_event_context(
-            layout,
-            &layout_tree,
-            &mut focus,
-            button.id(),
-            false,
-        );
+        let mut ctx = mock_event_context(layout, &layout_tree, &mut focus, button.id(), false);
         let event = InputEvent::KeyDown {
             event: KeyboardEvent {
                 key: Key::Named(NamedKey::Enter),
@@ -443,4 +415,3 @@ mod tests {
         assert!(r.handled);
     }
 }
-

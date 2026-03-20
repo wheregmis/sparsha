@@ -1,8 +1,8 @@
 //! Shape rendering pass for rectangles with rounded corners.
 
 use spark_core::{
-    pipeline::{Pipeline, PipelineConfig},
     buffer::QuadBuffers,
+    pipeline::{Pipeline, PipelineConfig},
     vertex::{ShapeInstance, Vertex2D},
     DynamicBuffer, GlobalUniforms, Rect,
 };
@@ -186,4 +186,3 @@ impl ShapePass {
         self.instances.len()
     }
 }
-

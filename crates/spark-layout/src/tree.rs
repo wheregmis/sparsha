@@ -1,11 +1,8 @@
 //! Layout tree that wraps taffy for flexbox layout computation.
 
-use spark_core::Rect;
 use slotmap::{new_key_type, SlotMap};
-use taffy::{
-    prelude::*,
-    TaffyTree,
-};
+use spark_core::Rect;
+use taffy::{prelude::*, TaffyTree};
 
 new_key_type! {
     /// Unique identifier for a widget in the layout tree.
@@ -111,20 +108,18 @@ impl LayoutTree {
 
     /// Add a child to a parent node.
     pub fn add_child(&mut self, parent: WidgetId, child: WidgetId) {
-        if let (Some(parent_node), Some(child_node)) = (
-            self.mapping.get_node(parent),
-            self.mapping.get_node(child),
-        ) {
+        if let (Some(parent_node), Some(child_node)) =
+            (self.mapping.get_node(parent), self.mapping.get_node(child))
+        {
             self.taffy.add_child(parent_node, child_node).ok();
         }
     }
 
     /// Remove a child from a parent node.
     pub fn remove_child(&mut self, parent: WidgetId, child: WidgetId) {
-        if let (Some(parent_node), Some(child_node)) = (
-            self.mapping.get_node(parent),
-            self.mapping.get_node(child),
-        ) {
+        if let (Some(parent_node), Some(child_node)) =
+            (self.mapping.get_node(parent), self.mapping.get_node(child))
+        {
             self.taffy.remove_child(parent_node, child_node).ok();
         }
     }
@@ -170,11 +165,11 @@ impl LayoutTree {
     /// Get the computed layout for a widget with absolute position (accumulated from ancestors).
     pub fn get_absolute_layout(&self, widget_id: WidgetId) -> Option<ComputedLayout> {
         let node_id = self.mapping.get_node(widget_id)?;
-        
+
         // Accumulate positions from ancestors
         let mut x = 0.0;
         let mut y = 0.0;
-        
+
         // Walk up to root to accumulate positions
         let mut current = Some(node_id);
         while let Some(node) = current {
@@ -184,10 +179,10 @@ impl LayoutTree {
             }
             current = self.taffy.parent(node);
         }
-        
+
         // Get this node's size
         let layout = self.taffy.layout(node_id).ok()?;
-        
+
         Some(ComputedLayout {
             bounds: Rect::new(x, y, layout.size.width, layout.size.height),
         })
@@ -217,7 +212,7 @@ impl LayoutTree {
             if let Ok(layout) = self.taffy.layout(node_id) {
                 let absolute_x = parent_x + layout.location.x;
                 let absolute_y = parent_y + layout.location.y;
-                
+
                 let computed = ComputedLayout {
                     bounds: Rect::new(
                         absolute_x,
@@ -226,7 +221,7 @@ impl LayoutTree {
                         layout.size.height,
                     ),
                 };
-                
+
                 callback(widget_id, &computed, depth);
 
                 // Traverse children
@@ -433,4 +428,3 @@ mod tests {
         assert_eq!(s.align_items, Some(AlignItems::Center));
     }
 }
-

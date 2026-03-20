@@ -19,9 +19,8 @@ pub use action::{
 
 // Our wrapper types
 pub use events::{
-    shortcuts, CompositionEvent, InputEvent, Key, KeyState, KeyboardEvent, Modifiers,
-    NamedKey, PointerButton, PointerId, PointerState, PointerType, ScrollDelta,
+    shortcuts, CompositionEvent, InputEvent, Key, KeyState, KeyboardEvent, Modifiers, NamedKey,
+    PointerButton, PointerId, PointerState, PointerType, ScrollDelta,
 };
 pub use focus::FocusManager;
 pub use hit_test::{hit_test, hit_test_all, hit_test_filtered, HitTestResult};
-

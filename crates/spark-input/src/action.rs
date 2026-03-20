@@ -4,7 +4,7 @@
 //! This allows multiple input methods (keyboard, mouse, touch) to trigger
 //! the same logical action.
 
-use crate::{InputEvent, Key, KeyboardEvent, NamedKey, PointerButton, shortcuts};
+use crate::{shortcuts, InputEvent, Key, KeyboardEvent, NamedKey, PointerButton};
 
 /// Built-in UI actions that have standard semantics.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -300,7 +300,7 @@ mod tests {
                 ..Default::default()
             },
         };
-        
+
         assert_eq!(
             mapper.map_event(&event),
             Some(Action::Standard(StandardAction::Cancel))
@@ -316,7 +316,7 @@ mod tests {
                 ..Default::default()
             },
         };
-        
+
         assert_eq!(
             mapper.map_event(&event),
             Some(Action::Standard(StandardAction::Activate))

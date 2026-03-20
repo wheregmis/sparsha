@@ -9,4 +9,3 @@ pub use commands::{DrawCommand, DrawList};
 pub use renderer::Renderer;
 pub use shape_pass::ShapePass;
 pub use text_pass::TextPass;
-

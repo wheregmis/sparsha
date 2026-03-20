@@ -41,10 +41,9 @@ pub async fn init_wgpu<'a>(
     #[cfg(not(target_arch = "wasm32"))]
     let backends = Backends::PRIMARY;
 
-    let instance = Instance::new(&InstanceDescriptor {
-        backends,
-        ..Default::default()
-    });
+    let mut instance_desc = InstanceDescriptor::new_without_display_handle();
+    instance_desc.backends = backends;
+    let instance = Instance::new(instance_desc);
     let surface = instance
         .create_surface(window)
         .map_err(WgpuInitError::SurfaceCreation)?;
@@ -80,8 +79,10 @@ pub async fn init_wgpu<'a>(
     let caps = surface.get_capabilities(&adapter);
     let format = caps
         .formats
-        .first()
+        .iter()
         .copied()
+        .find(|f| f.is_srgb())
+        .or_else(|| caps.formats.first().copied())
         .ok_or(WgpuInitError::NoSurfaceFormat)?;
     let present_mode = caps
         .present_modes
@@ -124,10 +125,9 @@ pub async fn init_wgpu<'a>(
 pub async fn init_wgpu_headless() -> Result<(Device, Queue), WgpuInitError> {
     let backends = Backends::PRIMARY;
 
-    let instance = Instance::new(&InstanceDescriptor {
-        backends,
-        ..Default::default()
-    });
+    let mut instance_desc = InstanceDescriptor::new_without_display_handle();
+    instance_desc.backends = backends;
+    let instance = Instance::new(instance_desc);
 
     let adapter = instance
         .request_adapter(&RequestAdapterOptions {

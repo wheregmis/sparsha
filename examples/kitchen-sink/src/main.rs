@@ -107,9 +107,7 @@ fn build_sidebar() -> Container {
                         .color(Color::WHITE),
                 )
                 .child(
-                    Text::new(
-                        "Body text example that might wrap if it is too long for the sidebar.",
-                    )
+                    Text::new("Body text example that wraps\nto fit the sidebar.")
                     .size(16.0)
                     .color(Color::from_hex(0xE2E8F0)),
                 )
@@ -123,16 +121,20 @@ fn build_sidebar() -> Container {
 
 /// Main content area with scrollable sections
 fn build_main_area() -> Scroll {
-    Scroll::new().vertical().content(
-        Container::new()
-            .column()
-            .gap(32.0)
-            .padding(32.0)
-            .flex_grow(1.0)
-            .child(build_input_section())
-            .child(build_container_section())
-            .child(build_scroll_section()),
-    )
+    Scroll::new()
+        .vertical()
+        .flex_grow(1.0)
+        .fill_height()
+        .content(
+            Container::new()
+                .column()
+                .gap(32.0)
+                .padding(32.0)
+                .fill_width()
+                .child(build_input_section())
+                .child(build_container_section())
+                .child(build_scroll_section()),
+        )
 }
 
 /// Input fields section
@@ -142,9 +144,10 @@ fn build_input_section() -> Container {
         Container::new()
             .column()
             .gap(12.0)
-            .child(TextInput::new().placeholder("Enter text..."))
-            .child(TextInput::new().placeholder("Email address..."))
-            .child(TextInput::new().placeholder("Password...")),
+            .fill_width()
+            .child(TextInput::new().fill_width().placeholder("Enter text..."))
+            .child(TextInput::new().fill_width().placeholder("Email address..."))
+            .child(TextInput::new().fill_width().placeholder("Password...")),
     )
 }
 
@@ -211,6 +214,7 @@ fn build_scroll_section() -> Container {
     section(
         "Scrollable Area",
         Container::new()
+            .fill_width()
             .height(300.0)
             .child(Scroll::new().vertical().fill().content(scroll_content)),
     )
@@ -220,6 +224,7 @@ fn build_scroll_section() -> Container {
 fn section(title: &str, content: Container) -> Container {
     Container::new()
         .column()
+        .fill_width()
         .gap(16.0)
         .padding(24.0)
         .background(Color::from_hex(0x1E293B))

@@ -5,7 +5,7 @@ use spark_input::{FocusManager, InputEvent, PointerButton};
 use spark_layout::LayoutTree;
 use spark_render::{DrawList, Renderer};
 use spark_text::TextSystem;
-use spark_widgets::{EventContext, PaintContext, Widget};
+use spark_widgets::{EventContext, LayoutContext, PaintContext, Widget};
 #[cfg(target_arch = "wasm32")]
 use std::{cell::RefCell, rc::Rc};
 use wgpu::{Device, Queue};
@@ -165,8 +165,11 @@ impl<F: FnOnce() -> Box<dyn Widget>> AppRunner<F> {
         fn add_to_layout(
             widget: &mut dyn Widget,
             tree: &mut LayoutTree,
+            text_system: &mut TextSystem,
             in_scroll: bool,
         ) -> spark_layout::WidgetId {
+            use spark_layout::taffy::Dimension;
+
             let mut style = widget.style();
             if in_scroll {
                 style.flex_shrink = 0.0;
@@ -175,10 +178,33 @@ impl<F: FnOnce() -> Box<dyn Widget>> AppRunner<F> {
             let children_ids: Vec<_> = widget
                 .children_mut()
                 .iter_mut()
-                .map(|child| add_to_layout(child.as_mut(), tree, in_scroll || is_scroll))
+                .map(|child| {
+                    add_to_layout(child.as_mut(), tree, text_system, in_scroll || is_scroll)
+                })
                 .collect();
 
             let id = if children_ids.is_empty() {
+                // Apply intrinsic height for leaf widgets that provide measurement.
+                // This prevents text-like widgets from collapsing to zero height.
+                let mut layout_ctx = LayoutContext {
+                    text: text_system,
+                    max_width: None,
+                    max_height: None,
+                };
+                if let Some((_, measured_height)) = widget.measure(&mut layout_ctx) {
+                    let valid_height = measured_height.is_finite() && measured_height > 0.0;
+                    if valid_height {
+                        let current_min_height = style.min_size.height;
+                        let current_min_height_value = if current_min_height.is_auto() {
+                            0.0
+                        } else {
+                            current_min_height.value()
+                        };
+                        if measured_height > current_min_height_value {
+                            style.min_size.height = Dimension::length(measured_height);
+                        }
+                    }
+                }
                 tree.new_leaf(style)
             } else {
                 tree.new_with_children(style, &children_ids)
@@ -188,7 +214,12 @@ impl<F: FnOnce() -> Box<dyn Widget>> AppRunner<F> {
             id
         }
 
-        let root_id = add_to_layout(state.root_widget.as_mut(), &mut state.layout_tree, false);
+        let root_id = add_to_layout(
+            state.root_widget.as_mut(),
+            &mut state.layout_tree,
+            &mut state.text_system,
+            false,
+        );
         state.layout_tree.set_root(root_id);
 
         // Compute layout
@@ -445,6 +476,10 @@ impl<F: FnOnce() -> Box<dyn Widget>> winit::application::ApplicationHandler for 
 
             // Build initial layout
             self.build_layout();
+            // Trigger the very first frame; some platforms won't emit an initial redraw.
+            if let Some(state) = self.state.as_ref() {
+                state.window.request_redraw();
+            }
         }
 
         #[cfg(target_arch = "wasm32")]
@@ -672,10 +707,19 @@ impl<F: FnOnce() -> Box<dyn Widget>> winit::application::ApplicationHandler for 
 
                 // Get frame
                 let frame = match state.surface_state.surface.get_current_texture() {
-                    Ok(frame) => frame,
-                    Err(_) => {
+                    wgpu::CurrentSurfaceTexture::Success(frame) => frame,
+                    wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
                         state.surface_state.reconfigure(&state.device);
-                        state.surface_state.surface.get_current_texture().unwrap()
+                        frame
+                    }
+                    wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
+                        state.surface_state.reconfigure(&state.device);
+                        return;
+                    }
+                    wgpu::CurrentSurfaceTexture::Timeout
+                    | wgpu::CurrentSurfaceTexture::Occluded
+                    | wgpu::CurrentSurfaceTexture::Validation => {
+                        return;
                     }
                 };
 
@@ -722,7 +766,11 @@ impl<F: FnOnce() -> Box<dyn Widget>> winit::application::ApplicationHandler for 
             }
         }
 
-        // Request redraw for animation
-        // In a real app, you'd only request this when needed
+        // Keep rendering event-driven: redraw only when something is dirty.
+        if let Some(state) = self.state.as_ref() {
+            if state.needs_layout || state.needs_repaint {
+                state.window.request_redraw();
+            }
+        }
     }
 }

@@ -1,21 +1,29 @@
 //! Application runner and main event loop.
 
-use spark_core::{init_wgpu, Color, SurfaceState};
+use spark_core::Color;
+use spark_widgets::Widget;
+
+#[cfg(not(target_arch = "wasm32"))]
+use spark_core::{init_wgpu, SurfaceState};
+#[cfg(not(target_arch = "wasm32"))]
 use spark_input::{FocusManager, InputEvent, PointerButton};
+#[cfg(not(target_arch = "wasm32"))]
 use spark_layout::LayoutTree;
-use spark_render::{DrawList, Renderer};
+#[cfg(not(target_arch = "wasm32"))]
+use spark_render::DrawList;
+#[cfg(not(target_arch = "wasm32"))]
+use spark_render::Renderer;
+#[cfg(not(target_arch = "wasm32"))]
 use spark_text::TextSystem;
-use spark_widgets::{EventContext, LayoutContext, PaintContext, Widget};
-#[cfg(target_arch = "wasm32")]
-use std::{cell::RefCell, rc::Rc};
+#[cfg(not(target_arch = "wasm32"))]
+use spark_widgets::{EventContext, LayoutContext, PaintContext};
+#[cfg(not(target_arch = "wasm32"))]
 use wgpu::{Device, Queue};
+#[cfg(not(target_arch = "wasm32"))]
 use winit::event::WindowEvent;
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
-
-#[cfg(target_arch = "wasm32")]
-use web_time::Instant;
 
 /// Application configuration.
 pub struct AppConfig {
@@ -96,10 +104,7 @@ impl App {
     where
         F: FnOnce() -> Box<dyn Widget> + 'static,
     {
-        let event_loop = winit::event_loop::EventLoop::new().unwrap();
-        let runner = AppRunner::new(self.config, build_ui);
-        let runner_leaked: &'static mut AppRunner<F> = Box::leak(Box::new(runner));
-        event_loop.run_app(runner_leaked).unwrap();
+        crate::web_app::run_dom_app(self.config, build_ui);
     }
 }
 
@@ -110,16 +115,14 @@ impl Default for App {
 }
 
 /// Internal application runner that handles the event loop.
+#[cfg(not(target_arch = "wasm32"))]
 struct AppRunner<F: FnOnce() -> Box<dyn Widget>> {
     config: AppConfig,
     build_ui: Option<F>,
     state: Option<AppState>,
-    // Outer Option: whether async web initialization has been kicked off.
-    // Inner Option: completed AppState produced by the async init task.
-    #[cfg(target_arch = "wasm32")]
-    pending_init: Option<Rc<RefCell<Option<AppState>>>>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 struct AppState {
     window: &'static dyn winit::window::Window,
     device: Device,
@@ -138,20 +141,13 @@ struct AppState {
     needs_repaint: bool,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<F: FnOnce() -> Box<dyn Widget>> AppRunner<F> {
-    #[cfg(target_arch = "wasm32")]
-    const GPU_ADAPTER_ERROR_HTML: &'static str =
-        "<div style=\"margin:24px;font-family:system-ui,sans-serif;color:#b00020;\">\
-         Spark could not initialize a compatible GPU adapter in this browser.\
-         </div>";
-
     fn new(config: AppConfig, build_ui: F) -> Self {
         Self {
             config,
             build_ui: Some(build_ui),
             state: None,
-            #[cfg(target_arch = "wasm32")]
-            pending_init: None,
         }
     }
 
@@ -246,8 +242,6 @@ impl<F: FnOnce() -> Box<dyn Widget>> AppRunner<F> {
         // We need to use raw pointers to pass mutable references through the recursive function
         // This is safe because we control the lifetime and don't alias
         let text_system_ptr = &mut state.text_system as *mut TextSystem;
-        let device_ptr = &state.device as *const Device;
-        let queue_ptr = &state.queue as *const Queue;
 
         #[allow(clippy::too_many_arguments)]
         fn paint_widget(
@@ -257,8 +251,6 @@ impl<F: FnOnce() -> Box<dyn Widget>> AppRunner<F> {
             draw_list: &mut DrawList,
             scale_factor: f32,
             text_system_ptr: *mut TextSystem,
-            device_ptr: *const Device,
-            queue_ptr: *const Queue,
             elapsed_time: f32,
         ) {
             let id = widget.id();
@@ -266,8 +258,6 @@ impl<F: FnOnce() -> Box<dyn Widget>> AppRunner<F> {
             if let Some(layout) = layout_tree.get_absolute_layout(id) {
                 // SAFETY: We control the lifetime and ensure no aliasing within this function
                 let text_system = unsafe { &mut *text_system_ptr };
-                let device = unsafe { &*device_ptr };
-                let queue = unsafe { &*queue_ptr };
 
                 // Scale layout bounds from logical to physical pixels
                 // Layout is computed in logical pixels, but renderer uses physical pixels
@@ -286,8 +276,6 @@ impl<F: FnOnce() -> Box<dyn Widget>> AppRunner<F> {
                     widget_id: id,
                     scale_factor,
                     text_system,
-                    device,
-                    queue,
                     elapsed_time,
                 };
                 widget.paint(&mut ctx);
@@ -301,8 +289,6 @@ impl<F: FnOnce() -> Box<dyn Widget>> AppRunner<F> {
                         ctx.draw_list,
                         scale_factor,
                         text_system_ptr,
-                        device_ptr,
-                        queue_ptr,
                         elapsed_time,
                     );
                 }
@@ -319,8 +305,6 @@ impl<F: FnOnce() -> Box<dyn Widget>> AppRunner<F> {
             &mut state.draw_list,
             state.scale_factor,
             text_system_ptr,
-            device_ptr,
-            queue_ptr,
             elapsed_time,
         );
 
@@ -413,9 +397,10 @@ impl<F: FnOnce() -> Box<dyn Widget>> AppRunner<F> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<F: FnOnce() -> Box<dyn Widget>> winit::application::ApplicationHandler for AppRunner<F> {
     fn can_create_surfaces(&mut self, event_loop: &dyn winit::event_loop::ActiveEventLoop) {
-        let mut window_attributes = winit::window::WindowAttributes::default()
+        let window_attributes = winit::window::WindowAttributes::default()
             .with_title(&self.config.title)
             .with_surface_size(winit::dpi::LogicalSize::new(
                 self.config.width,
@@ -702,7 +687,7 @@ impl<F: FnOnce() -> Box<dyn Widget>> winit::application::ApplicationHandler for 
                     &state.device,
                     &state.queue,
                     &state.draw_list,
-                    state.text_system.atlas(),
+                    &mut state.text_system,
                 );
 
                 // Get frame

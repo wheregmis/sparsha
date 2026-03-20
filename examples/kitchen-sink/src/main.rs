@@ -108,8 +108,8 @@ fn build_sidebar() -> Container {
                 )
                 .child(
                     Text::new("Body text example that wraps\nto fit the sidebar.")
-                    .size(16.0)
-                    .color(Color::from_hex(0xE2E8F0)),
+                        .size(16.0)
+                        .color(Color::from_hex(0xE2E8F0)),
                 )
                 .child(
                     Text::new("Small caption text")
@@ -146,7 +146,11 @@ fn build_input_section() -> Container {
             .gap(12.0)
             .fill_width()
             .child(TextInput::new().fill_width().placeholder("Enter text..."))
-            .child(TextInput::new().fill_width().placeholder("Email address..."))
+            .child(
+                TextInput::new()
+                    .fill_width()
+                    .placeholder("Email address..."),
+            )
             .child(TextInput::new().fill_width().placeholder("Password...")),
     )
 }

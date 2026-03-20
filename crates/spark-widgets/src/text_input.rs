@@ -241,7 +241,11 @@ impl Widget for TextInput {
     fn style(&self) -> Style {
         Style {
             size: Size {
-                width: if self.fill_width { percent(1.0) } else { auto() },
+                width: if self.fill_width {
+                    percent(1.0)
+                } else {
+                    auto()
+                },
                 height: auto(),
             },
             padding: Rect {

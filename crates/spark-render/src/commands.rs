@@ -1,6 +1,18 @@
 //! Draw commands that represent what to render.
 
 use spark_core::{Color, GlyphInstance, Rect};
+use spark_text::TextStyle;
+
+/// A logical text run that can be consumed by different render backends.
+#[derive(Clone, Debug)]
+pub struct TextRun {
+    /// UTF-8 text content.
+    pub text: String,
+    /// Text styling attributes.
+    pub style: TextStyle,
+    /// Top-left origin in render-space pixels.
+    pub position: (f32, f32),
+}
 
 /// A single draw command representing a primitive to render.
 #[derive(Clone, Debug)]
@@ -15,6 +27,8 @@ pub enum DrawCommand {
     },
     /// Draw text glyphs.
     Text { glyphs: Vec<GlyphInstance> },
+    /// Draw a text run (backend-neutral text command).
+    TextRun { run: TextRun },
     /// Push a clip rectangle (future draw commands will be clipped).
     PushClip { bounds: Rect },
     /// Pop the current clip rectangle.
@@ -115,6 +129,20 @@ impl DrawList {
     pub fn text(&mut self, glyphs: Vec<GlyphInstance>) {
         if !glyphs.is_empty() {
             self.push(DrawCommand::Text { glyphs });
+        }
+    }
+
+    /// Draw a logical text run.
+    pub fn text_run(&mut self, text: impl Into<String>, style: TextStyle, x: f32, y: f32) {
+        let text = text.into();
+        if !text.is_empty() {
+            self.push(DrawCommand::TextRun {
+                run: TextRun {
+                    text,
+                    style,
+                    position: (x, y),
+                },
+            });
         }
     }
 

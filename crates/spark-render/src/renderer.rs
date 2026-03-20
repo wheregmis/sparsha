@@ -2,7 +2,7 @@
 
 use crate::{DrawCommand, DrawList, ShapePass, TextPass};
 use spark_core::{GlobalUniforms, Rect};
-use spark_text::GlyphAtlas;
+use spark_text::TextSystem;
 use wgpu::{CommandEncoder, Device, Queue, TextureFormat, TextureView};
 
 /// The main renderer that processes draw lists and renders to the screen.
@@ -43,7 +43,7 @@ impl Renderer {
         device: &Device,
         queue: &Queue,
         draw_list: &DrawList,
-        atlas: &GlyphAtlas,
+        text_system: &mut TextSystem,
     ) {
         self.shape_pass.clear();
         self.text_pass.clear();
@@ -124,6 +124,40 @@ impl Renderer {
                         }
                     }
                 }
+                DrawCommand::TextRun { run } => {
+                    let translation = self.translation_stack.last().copied().unwrap_or((0.0, 0.0));
+                    let shaped = text_system.shape(device, queue, &run.text, &run.style, None);
+                    if shaped.glyphs.is_empty() {
+                        continue;
+                    }
+
+                    if let Some(clip) = self.clip_stack.last() {
+                        let mut visible_glyphs = Vec::with_capacity(shaped.glyphs.len());
+                        for glyph in &shaped.glyphs {
+                            let mut translated_glyph = *glyph;
+                            translated_glyph.pos[0] += run.position.0 + translation.0;
+                            translated_glyph.pos[1] += run.position.1 + translation.1;
+                            if clip.contains(spark_core::Point::new(
+                                translated_glyph.pos[0],
+                                translated_glyph.pos[1],
+                            )) {
+                                visible_glyphs.push(translated_glyph);
+                            }
+                        }
+                        if !visible_glyphs.is_empty() {
+                            self.text_pass.add_glyphs(&visible_glyphs);
+                        }
+                    } else {
+                        let mut translated = Vec::with_capacity(shaped.glyphs.len());
+                        for glyph in &shaped.glyphs {
+                            let mut translated_glyph = *glyph;
+                            translated_glyph.pos[0] += run.position.0 + translation.0;
+                            translated_glyph.pos[1] += run.position.1 + translation.1;
+                            translated.push(translated_glyph);
+                        }
+                        self.text_pass.add_glyphs(&translated);
+                    }
+                }
                 DrawCommand::PushClip { bounds } => {
                     let translation = self.translation_stack.last().copied().unwrap_or((0.0, 0.0));
                     let translated_bounds = Rect::new(
@@ -160,7 +194,9 @@ impl Renderer {
 
         // Update GPU buffers
         self.shape_pass.prepare(device, queue, &self.globals);
-        self.text_pass.prepare(device, queue, &self.globals, atlas);
+        if let Some(atlas) = text_system.atlas() {
+            self.text_pass.prepare(device, queue, &self.globals, atlas);
+        }
     }
 
     /// Render to the given texture view.

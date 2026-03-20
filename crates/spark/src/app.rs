@@ -376,8 +376,9 @@ impl<F: FnOnce() -> Box<dyn Widget>> winit::application::ApplicationHandler for 
         #[cfg(target_arch = "wasm32")]
         {
             use winit::platform::web::WindowAttributesWeb;
-            window_attributes = window_attributes
-                .with_platform_attributes(Box::new(WindowAttributesWeb::default().with_append(true)));
+            window_attributes = window_attributes.with_platform_attributes(Box::new(
+                WindowAttributesWeb::default().with_append(true),
+            ));
         }
 
         let window = event_loop

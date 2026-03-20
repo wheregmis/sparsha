@@ -6,6 +6,8 @@ use spark_layout::LayoutTree;
 use spark_render::{DrawList, Renderer};
 use spark_text::TextSystem;
 use spark_widgets::{EventContext, PaintContext, Widget};
+#[cfg(target_arch = "wasm32")]
+use std::{cell::RefCell, rc::Rc};
 use wgpu::{Device, Queue};
 use winit::event::WindowEvent;
 
@@ -112,6 +114,8 @@ struct AppRunner<F: FnOnce() -> Box<dyn Widget>> {
     config: AppConfig,
     build_ui: Option<F>,
     state: Option<AppState>,
+    #[cfg(target_arch = "wasm32")]
+    pending_init: Option<Rc<RefCell<Option<AppState>>>>,
 }
 
 struct AppState {
@@ -138,6 +142,8 @@ impl<F: FnOnce() -> Box<dyn Widget>> AppRunner<F> {
             config,
             build_ui: Some(build_ui),
             state: None,
+            #[cfg(target_arch = "wasm32")]
+            pending_init: None,
         }
     }
 
@@ -283,7 +289,9 @@ impl<F: FnOnce() -> Box<dyn Widget>> AppRunner<F> {
     }
 
     fn handle_event(&mut self, event: InputEvent) {
-        let state = self.state.as_mut().unwrap();
+        let Some(state) = self.state.as_mut() else {
+            return;
+        };
 
         // Simple event dispatch - dispatch to all widgets, let them check bounds
         fn dispatch_event(
@@ -392,41 +400,101 @@ impl<F: FnOnce() -> Box<dyn Widget>> winit::application::ApplicationHandler for 
             Box::leak(Box::new(window));
         let window: &'static dyn winit::window::Window = &**window_leaked;
 
-        // Initialize wgpu - use pollster on native, web handles this specially
-        let (device, queue, surface_state) = pollster::block_on(init_wgpu(window));
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let (device, queue, surface_state) =
+                pollster::block_on(init_wgpu(window)).expect("initialize wgpu");
 
-        let renderer = Renderer::new(&device, surface_state.config.format);
-        let text_system = TextSystem::new(&device);
-        let draw_list = DrawList::new();
-        let layout_tree = LayoutTree::new();
-        let focus_manager = FocusManager::new();
+            let renderer = Renderer::new(&device, surface_state.config.format);
+            let text_system = TextSystem::new(&device);
+            let draw_list = DrawList::new();
+            let layout_tree = LayoutTree::new();
+            let focus_manager = FocusManager::new();
 
-        // Build the UI
-        let build_ui = self.build_ui.take().expect("build_ui already called");
-        let root_widget = build_ui();
+            // Build the UI
+            let build_ui = self.build_ui.take().expect("build_ui already called");
+            let root_widget = build_ui();
 
-        let scale_factor = window.scale_factor() as f32;
+            let scale_factor = window.scale_factor() as f32;
 
-        self.state = Some(AppState {
-            window,
-            device,
-            queue,
-            surface_state,
-            renderer,
-            text_system,
-            draw_list,
-            layout_tree,
-            focus_manager,
-            root_widget,
-            start_time: Instant::now(),
-            mouse_pos: glam::Vec2::ZERO,
-            scale_factor,
-            needs_layout: true,
-            needs_repaint: true,
-        });
+            self.state = Some(AppState {
+                window,
+                device,
+                queue,
+                surface_state,
+                renderer,
+                text_system,
+                draw_list,
+                layout_tree,
+                focus_manager,
+                root_widget,
+                start_time: Instant::now(),
+                mouse_pos: glam::Vec2::ZERO,
+                scale_factor,
+                needs_layout: true,
+                needs_repaint: true,
+            });
 
-        // Build initial layout
-        self.build_layout();
+            // Build initial layout
+            self.build_layout();
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            let build_ui = self.build_ui.take().expect("build_ui already called");
+            let root_widget = build_ui();
+            let scale_factor = window.scale_factor() as f32;
+            let pending = Rc::new(RefCell::new(None));
+            let pending_for_task = Rc::clone(&pending);
+
+            wasm_bindgen_futures::spawn_local(async move {
+                match init_wgpu(window).await {
+                    Ok((device, queue, surface_state)) => {
+                        let renderer = Renderer::new(&device, surface_state.config.format);
+                        let text_system = TextSystem::new(&device);
+                        let draw_list = DrawList::new();
+                        let layout_tree = LayoutTree::new();
+                        let focus_manager = FocusManager::new();
+
+                        *pending_for_task.borrow_mut() = Some(AppState {
+                            window,
+                            device,
+                            queue,
+                            surface_state,
+                            renderer,
+                            text_system,
+                            draw_list,
+                            layout_tree,
+                            focus_manager,
+                            root_widget,
+                            start_time: Instant::now(),
+                            mouse_pos: glam::Vec2::ZERO,
+                            scale_factor,
+                            needs_layout: true,
+                            needs_repaint: true,
+                        });
+
+                        window.request_redraw();
+                    }
+                    Err(err) => {
+                        log::error!("failed to initialize wgpu on web: {err}");
+                        if let Some(window) = web_sys::window() {
+                            if let Some(document) = window.document() {
+                                if let Some(body) = document.body() {
+                                    body.set_inner_html(
+                                        "<div style=\"margin:24px;font-family:system-ui,sans-serif;color:#b00020;\">\
+                                         Spark could not initialize a compatible GPU adapter in this browser.\
+                                         </div>",
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            self.pending_init = Some(pending);
+        }
     }
 
     fn window_event(
@@ -562,7 +630,11 @@ impl<F: FnOnce() -> Box<dyn Widget>> winit::application::ApplicationHandler for 
                 }
             }
             WindowEvent::RedrawRequested => {
-                let state = self.state.as_mut().unwrap();
+                if self.state.is_none() {
+                    return;
+                }
+
+                let state = self.state.as_mut().expect("state checked above");
 
                 if state.needs_layout {
                     self.build_layout();
@@ -634,6 +706,18 @@ impl<F: FnOnce() -> Box<dyn Widget>> winit::application::ApplicationHandler for 
     }
 
     fn about_to_wait(&mut self, _event_loop: &dyn winit::event_loop::ActiveEventLoop) {
+        #[cfg(target_arch = "wasm32")]
+        if self.state.is_none() {
+            let ready_state = self
+                .pending_init
+                .as_ref()
+                .and_then(|pending| pending.borrow_mut().take());
+            if let Some(state) = ready_state {
+                self.state = Some(state);
+                self.build_layout();
+            }
+        }
+
         // Request redraw for animation
         // In a real app, you'd only request this when needed
     }

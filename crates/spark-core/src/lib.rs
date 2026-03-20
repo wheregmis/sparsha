@@ -11,7 +11,7 @@ pub use buffer::{DynamicBuffer, QuadBuffers, StaticBuffer};
 pub use pipeline::{Pipeline, UniformBuffer};
 pub use types::{Color, GlobalUniforms, Point, Rect};
 pub use vertex::{GlyphInstance, ShapeInstance, Vertex2D};
-pub use wgpu_init::{init_wgpu, SurfaceState};
+pub use wgpu_init::{init_wgpu, SurfaceState, WgpuInitError};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use wgpu_init::init_wgpu_headless;

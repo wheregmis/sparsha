@@ -13,7 +13,7 @@ use spark_widgets::{Button, PaintContext, Widget};
 #[test]
 #[ignore = "requires GPU; run with cargo test --ignored"]
 fn button_paint_emits_rect_and_text_commands() {
-    let (device, queue) = pollster::block_on(init_wgpu_headless());
+    let (device, queue) = pollster::block_on(init_wgpu_headless()).expect("init headless wgpu");
 
     let mut draw_list = DrawList::new();
     let layout = ComputedLayout::new(Rect::new(0.0, 0.0, 100.0, 40.0));
@@ -39,11 +39,18 @@ fn button_paint_emits_rect_and_text_commands() {
     button.paint(&mut ctx);
 
     let commands = draw_list.commands();
-    assert!(!commands.is_empty(), "button should emit at least one draw command");
+    assert!(
+        !commands.is_empty(),
+        "button should emit at least one draw command"
+    );
 
-    let has_rect = commands.iter().any(|c| matches!(c, DrawCommand::Rect { .. }));
+    let has_rect = commands
+        .iter()
+        .any(|c| matches!(c, DrawCommand::Rect { .. }));
     assert!(has_rect, "button should emit a Rect command for background");
 
-    let has_text = commands.iter().any(|c| matches!(c, DrawCommand::Text { .. }));
+    let has_text = commands
+        .iter()
+        .any(|c| matches!(c, DrawCommand::Text { .. }));
     assert!(has_text, "button should emit a Text command for label");
 }

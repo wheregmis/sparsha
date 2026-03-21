@@ -11,6 +11,11 @@ use taffy::prelude::*;
 /// Callback type for text change and submit handlers.
 type TextInputCallback = Box<dyn FnMut(&str)>;
 
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static TEXT_MEASURE_SPAN: RefCell<Option<web_sys::Element>> = const { RefCell::new(None) };
+}
+
 /// Style configuration for text input.
 #[derive(Clone, Debug)]
 pub struct TextInputStyle {
@@ -249,8 +254,9 @@ impl TextInput {
     }
 
     fn update_prefix_width_cache_with_paint_ctx(&self, ctx: &mut PaintContext, style: &TextStyle) {
-        let cache =
-            Self::compute_prefix_widths(&self.value, |prefix| ctx.measure_text(prefix, style).0);
+        let cache = Self::compute_prefix_widths(&self.value, |prefix| {
+            self.measure_width(ctx, style, prefix)
+        });
         *self.prefix_widths.borrow_mut() = cache;
     }
 
@@ -291,6 +297,65 @@ impl TextInput {
         }
         best.0
     }
+
+    fn prefix_width_for(&self, index: usize) -> Option<f32> {
+        self.prefix_widths
+            .borrow()
+            .iter()
+            .find_map(|(idx, width)| (*idx == index).then_some(*width))
+    }
+
+    fn cursor_offset_for(&self, ctx: &mut PaintContext, style: &TextStyle) -> f32 {
+        if let Some(width) = self.prefix_width_for(self.cursor_pos) {
+            return width;
+        }
+        let text_before_cursor = &self.value[..self.cursor_pos];
+        self.measure_width(ctx, style, text_before_cursor)
+    }
+
+    fn measure_width(&self, ctx: &mut PaintContext, style: &TextStyle, text: &str) -> f32 {
+        #[cfg(target_arch = "wasm32")]
+        if let Some(width) = measure_text_width_dom(text, style, ctx.scale_factor) {
+            return width;
+        }
+        ctx.measure_text(text, style).0
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn measure_text_width_dom(text: &str, style: &TextStyle, scale_factor: f32) -> Option<f32> {
+    let document = web_sys::window()?.document()?;
+    let span = TEXT_MEASURE_SPAN.with(|slot| {
+        if let Some(existing) = slot.borrow().as_ref() {
+            return Some(existing.clone());
+        }
+
+        let body = document.body()?;
+        let node = document.create_element("span").ok()?;
+        body.append_child(&node).ok()?;
+        *slot.borrow_mut() = Some(node.clone());
+        Some(node)
+    })?;
+
+    let family = if style.family.trim().is_empty() || style.family == "system-ui" {
+        "sans-serif"
+    } else {
+        style.family.as_str()
+    };
+
+    let css = format!(
+        "position:absolute;visibility:hidden;white-space:pre;left:-100000px;top:-100000px;\
+         pointer-events:none;font-size:{}px;font-family:{};font-style:{};font-weight:{};\
+         line-height:{};",
+        style.font_size * scale_factor,
+        family,
+        if style.italic { "italic" } else { "normal" },
+        if style.bold { "700" } else { "400" },
+        style.line_height
+    );
+    span.set_attribute("style", &css).ok()?;
+    span.set_text_content(Some(text));
+    Some(span.get_bounding_client_rect().width() as f32)
 }
 
 impl Default for TextInput {
@@ -413,11 +478,11 @@ impl Widget for TextInput {
 
                 // Measure text before selection start
                 let text_before_sel = &self.value[..start];
-                let (sel_x_start, _) = ctx.measure_text(text_before_sel, &text_style);
+                let sel_x_start = self.measure_width(ctx, &text_style, text_before_sel);
 
                 // Measure selected text
                 let selected_text = &self.value[start..end];
-                let (sel_width, _) = ctx.measure_text(selected_text, &text_style);
+                let sel_width = self.measure_width(ctx, &text_style, selected_text);
 
                 // Draw selection rectangle
                 if sel_width > 0.0 {
@@ -441,9 +506,7 @@ impl Widget for TextInput {
             let cursor_visible = (ctx.elapsed_time * 2.0).fract() < 0.5;
 
             if cursor_visible {
-                // Measure text up to cursor position
-                let text_before_cursor = &self.value[..self.cursor_pos];
-                let (cursor_x_offset, _) = ctx.measure_text(text_before_cursor, &text_style);
+                let cursor_x_offset = self.cursor_offset_for(ctx, &text_style);
 
                 let cursor_x = text_x + cursor_x_offset;
                 let cursor_height = text_height;
@@ -649,5 +712,31 @@ mod tests {
 
         let _ = input.event(&mut event_ctx, &pointer_down_at(238.0, 18.0));
         assert_eq!(input.cursor_pos, input.value.len());
+    }
+
+    #[test]
+    fn cursor_offset_prefers_prefix_cache() {
+        let input = TextInput::new().value("hello");
+        *input.prefix_widths.borrow_mut() = vec![(0, 0.0), (5, 77.5)];
+
+        let mut draw_list = spark_render::DrawList::new();
+        let layout = layout_bounds(0.0, 0.0, 240.0, 36.0);
+        let layout_tree = LayoutTree::new();
+        let focus = FocusManager::new();
+        let mut text = TextSystem::new_headless();
+
+        let mut ctx = PaintContext {
+            draw_list: &mut draw_list,
+            layout,
+            layout_tree: &layout_tree,
+            focus: &focus,
+            widget_id: input.id(),
+            scale_factor: 1.0,
+            text_system: &mut text,
+            elapsed_time: 0.0,
+        };
+
+        let style = TextStyle::default().with_size(input.style.font_size);
+        assert_eq!(input.cursor_offset_for(&mut ctx, &style), 77.5);
     }
 }

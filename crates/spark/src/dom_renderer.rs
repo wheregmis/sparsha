@@ -2,6 +2,7 @@
 
 #![cfg(target_arch = "wasm32")]
 
+use crate::web_text_metrics::normalize_dom_font_family;
 use spark_core::{Color, Point, Rect};
 use spark_render::{DrawCommand, DrawList};
 use wasm_bindgen::JsCast;
@@ -116,7 +117,10 @@ impl DomRenderer {
                     set_style(&node, "top", &px(y))?;
                     set_style(&node, "color", &color_to_css(run.style.color))?;
                     set_style(&node, "font-size", &px(run.style.font_size))?;
-                    set_style(&node, "font-family", &run.style.family)?;
+                    // Keep DOM text metrics aligned with wasm text measurement, which currently
+                    // uses a generic sans-serif stack on the shaping side.
+                    let family = normalize_dom_font_family(&run.style.family);
+                    set_style(&node, "font-family", family)?;
                     set_style(
                         &node,
                         "font-style",

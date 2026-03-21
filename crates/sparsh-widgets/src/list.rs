@@ -3,7 +3,7 @@
 use crate::{
     current_theme,
     scroll_model::{ScrollAxes, ScrollModel},
-    AccessibilityInfo, AccessibilityRole, EventContext, PaintContext, Widget,
+    AccessibilityInfo, AccessibilityRole, EventContext, IntoWidget, PaintContext, Widget,
 };
 use sparsh_core::Rect as CoreRect;
 use sparsh_input::InputEvent;
@@ -340,8 +340,8 @@ impl List {
     }
 
     /// Append an item widget.
-    pub fn push_item(&mut self, widget: impl Widget + 'static) {
-        self.ensure_owned_items().push(Box::new(widget));
+    pub fn push_item(&mut self, widget: impl IntoWidget) {
+        self.ensure_owned_items().push(widget.into_widget());
     }
 
     /// Append a boxed item widget.

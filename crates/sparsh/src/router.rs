@@ -3,7 +3,7 @@
 use sparsh_layout::taffy::prelude::{percent, Size, Style};
 use sparsh_layout::WidgetId;
 use sparsh_signals::Signal;
-use sparsh_widgets::{Container, Text, Widget};
+use sparsh_widgets::{Container, IntoWidget, Text, Widget};
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -13,10 +13,13 @@ pub struct Route {
 }
 
 impl Route {
-    pub fn new(path: impl Into<String>, builder: impl Fn() -> Box<dyn Widget> + 'static) -> Self {
+    pub fn new<W>(path: impl Into<String>, builder: impl Fn() -> W + 'static) -> Self
+    where
+        W: IntoWidget,
+    {
         Self {
             path: normalize_path(&path.into()),
-            builder: Arc::new(builder),
+            builder: Arc::new(move || builder().into_widget()),
         }
     }
 
@@ -97,13 +100,11 @@ impl Router {
         }
     }
 
-    pub fn route(
-        mut self,
-        path: impl Into<String>,
-        builder: impl Fn() -> Box<dyn Widget> + 'static,
-    ) -> Self {
-        self = self.add_route(Route::new(path, builder));
-        self
+    pub fn route<W>(self, path: impl Into<String>, builder: impl Fn() -> W + 'static) -> Self
+    where
+        W: IntoWidget,
+    {
+        self.add_route(Route::new(path, builder))
     }
 
     pub fn add_route(mut self, route: Route) -> Self {
@@ -363,8 +364,8 @@ mod tests {
     use super::*;
     use sparsh_signals::RuntimeHandle;
 
-    fn screen(name: &'static str) -> Box<dyn Widget> {
-        Box::new(Container::new().child(Text::new(name)))
+    fn screen(name: &'static str) -> Container {
+        Container::new().child(Text::new(name))
     }
 
     fn with_runtime(f: impl FnOnce()) {

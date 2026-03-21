@@ -9,6 +9,8 @@ mod container;
 mod context;
 mod control_state;
 mod draw_surface;
+mod for_each;
+mod into_widget;
 mod list;
 mod scroll;
 mod scroll_model;
@@ -25,9 +27,12 @@ pub use button::{Button, ButtonState, ButtonStyle};
 pub use checkbox::{Checkbox, CheckboxStyle};
 pub use container::Container;
 pub use context::{
-    BuildContext, EventCommands, EventContext, LayoutContext, PaintCommands, PaintContext,
+    BuildContext, BuildStateStore, EventCommands, EventContext, LayoutContext, PaintCommands,
+    PaintContext,
 };
 pub use draw_surface::{DrawSurface, DrawSurfaceContext};
+pub use for_each::ForEach;
+pub use into_widget::IntoWidget;
 pub use list::{List, ListDirection};
 pub use scroll::{Scroll, ScrollDirection, ScrollbarStyle};
 pub use semantics::Semantics;

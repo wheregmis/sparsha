@@ -2,6 +2,8 @@
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::accessibility::{action_from_accesskit, AccessibilityTreeSnapshot};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::component::ComponentStateStore;
 use crate::router::Router;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::router::RouterHost;
@@ -282,7 +284,7 @@ impl App {
             config: AppConfig::default(),
             theme: AppTheme::new(ThemeSource::Static(Theme::default())),
             router: Router::new()
-                .route("/", || Box::new(sparsh_widgets::Container::new().fill()))
+                .route("/", || sparsh_widgets::Container::new().fill())
                 .fallback("/"),
         }
     }
@@ -400,6 +402,7 @@ struct AppState {
     draw_list: DrawList,
     layout_tree: LayoutTree,
     widget_registry: WidgetRuntimeRegistry,
+    component_states: ComponentStateStore,
     focus_manager: FocusManager,
     focused_path: Option<WidgetPath>,
     capture_path: Option<WidgetPath>,
@@ -445,6 +448,30 @@ impl AppState {
                 None
             }
         }
+    }
+
+    fn sync_window_metrics(&mut self) -> bool {
+        let mut changed = false;
+
+        let actual_scale_factor = self.window.scale_factor() as f32;
+        if should_sync_native_scale_factor(self.scale_factor, actual_scale_factor) {
+            self.scale_factor = actual_scale_factor;
+            changed = true;
+        }
+
+        let actual_size = self.window.inner_size();
+        if should_sync_native_surface_size(self.surface_state.size, actual_size) {
+            self.surface_state
+                .resize(&self.device, actual_size.width, actual_size.height);
+            changed = true;
+        }
+
+        if changed {
+            self.needs_layout = true;
+            self.needs_repaint = true;
+        }
+
+        changed
     }
 }
 
@@ -604,20 +631,40 @@ impl AppRunner {
             let runtime = state.signal_runtime.clone();
 
             state.layout_tree = LayoutTree::new();
+            state.component_states.begin_rebuild();
 
             runtime.with_tracking(SubscriberKind::Rebuild, || {
-                set_current_theme(state.theme.resolve_theme());
+                let resolved_theme = state.theme.resolve_theme();
+                let navigator = self.router.navigator();
+                set_current_theme(resolved_theme.clone());
 
-                fn rebuild_widget(widget: &mut dyn Widget, build_ctx: &mut BuildContext) {
+                fn rebuild_widget(
+                    widget: &mut dyn Widget,
+                    build_ctx: &mut BuildContext,
+                    path: &mut Vec<usize>,
+                ) {
+                    build_ctx.set_path(path);
                     widget.rebuild(build_ctx);
-                    for child in widget.children_mut() {
-                        rebuild_widget(child.as_mut(), build_ctx);
+                    let child_keys: Vec<_> = (0..widget.children().len())
+                        .map(|index| widget.child_path_key(index))
+                        .collect();
+                    for (index, child) in widget.children_mut().iter_mut().enumerate() {
+                        path.push(child_keys[index]);
+                        rebuild_widget(child.as_mut(), build_ctx, path);
+                        path.pop();
                     }
                 }
 
                 let mut build_ctx = BuildContext::default();
-                rebuild_widget(state.root_widget.as_mut(), &mut build_ctx);
+                build_ctx.set_theme(resolved_theme);
+                build_ctx.insert_resource(navigator);
+                build_ctx.insert_resource(state.task_runtime.clone());
+                build_ctx.insert_resource(state.signal_runtime.clone());
+                build_ctx.set_state_store(&mut state.component_states);
+                let mut path = Vec::new();
+                rebuild_widget(state.root_widget.as_mut(), &mut build_ctx, &mut path);
             });
+            state.component_states.finish_rebuild();
 
             let mut widget_registry = WidgetRuntimeRegistry::default();
             let root_id = runtime.with_tracking(SubscriberKind::Layout, || {
@@ -895,6 +942,9 @@ fn map_winit_key(key: &winit::keyboard::Key<&str>) -> Option<sparsh_input::Key> 
 
     Some(match key {
         winit::keyboard::Key::Character(value) => Key::Character(value.to_string()),
+        winit::keyboard::Key::Named(winit::keyboard::NamedKey::Space) => {
+            Key::Character(" ".to_owned())
+        }
         winit::keyboard::Key::Named(named) => Key::Named(match named {
             winit::keyboard::NamedKey::Enter => NamedKey::Enter,
             winit::keyboard::NamedKey::Tab => NamedKey::Tab,
@@ -939,6 +989,19 @@ fn should_emit_native_text(text: &str, modifiers: Modifiers) -> bool {
         && text.chars().all(|ch| !ch.is_control())
         && !sparsh_input::shortcuts::primary_modifier(modifiers)
         && !modifiers.alt()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn should_sync_native_surface_size(
+    current: winit::dpi::PhysicalSize<u32>,
+    actual: winit::dpi::PhysicalSize<u32>,
+) -> bool {
+    actual.width > 0 && actual.height > 0 && actual != current
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn should_sync_native_scale_factor(current: f32, actual: f32) -> bool {
+    actual.is_finite() && actual > 0.0 && (actual - current).abs() > f32::EPSILON
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -987,6 +1050,7 @@ impl winit::application::ApplicationHandler<NativeUserEvent> for AppRunner {
             let draw_list = DrawList::new();
             let layout_tree = LayoutTree::new();
             let widget_registry = WidgetRuntimeRegistry::default();
+            let component_states = ComponentStateStore::default();
             let focus_manager = FocusManager::new();
             let signal_runtime = RuntimeHandle::current_or_default();
             let task_runtime = match TaskRuntime::try_new() {
@@ -1027,6 +1091,7 @@ impl winit::application::ApplicationHandler<NativeUserEvent> for AppRunner {
                 draw_list,
                 layout_tree,
                 widget_registry,
+                component_states,
                 focus_manager,
                 focused_path: None,
                 capture_path: None,
@@ -1062,6 +1127,7 @@ impl winit::application::ApplicationHandler<NativeUserEvent> for AppRunner {
                 );
                 state.accessibility_adapter = Some(adapter);
                 state.window.set_visible(true);
+                state.sync_window_metrics();
             }
 
             self.refresh_accessibility();
@@ -1171,24 +1237,22 @@ impl winit::application::ApplicationHandler<NativeUserEvent> for AppRunner {
                     .map(|state| state.modifiers)
                     .unwrap_or_default();
                 let key_without_modifiers = event.key_without_modifiers();
-                let Some(key) = map_winit_key(&key_without_modifiers.as_ref()) else {
-                    return;
-                };
+                if let Some(key) = map_winit_key(&key_without_modifiers.as_ref()) {
+                    let mut kb_event = if event.state.is_pressed() {
+                        KeyboardEvent::key_down(key, Code::Unidentified)
+                    } else {
+                        KeyboardEvent::key_up(key, Code::Unidentified)
+                    };
+                    kb_event.modifiers = modifiers;
+                    kb_event.repeat = event.repeat;
 
-                let mut kb_event = if event.state.is_pressed() {
-                    KeyboardEvent::key_down(key, Code::Unidentified)
-                } else {
-                    KeyboardEvent::key_up(key, Code::Unidentified)
-                };
-                kb_event.modifiers = modifiers;
-                kb_event.repeat = event.repeat;
-
-                if event.state.is_pressed() {
-                    self.handle_event(InputEvent::KeyDown {
-                        event: kb_event.clone(),
-                    });
-                } else {
-                    self.handle_event(InputEvent::KeyUp { event: kb_event });
+                    if event.state.is_pressed() {
+                        self.handle_event(InputEvent::KeyDown {
+                            event: kb_event.clone(),
+                        });
+                    } else {
+                        self.handle_event(InputEvent::KeyUp { event: kb_event });
+                    }
                 }
 
                 if event.state.is_pressed() && !event.repeat {
@@ -1247,6 +1311,10 @@ impl winit::application::ApplicationHandler<NativeUserEvent> for AppRunner {
             WindowEvent::RedrawRequested => {
                 if self.state.is_none() {
                     return;
+                }
+
+                if let Some(state) = self.state.as_mut() {
+                    state.sync_window_metrics();
                 }
 
                 if self
@@ -1368,6 +1436,7 @@ impl winit::application::ApplicationHandler<NativeUserEvent> for AppRunner {
 
     fn about_to_wait(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {
         if let Some(state) = self.state.as_mut() {
+            state.sync_window_metrics();
             let mut had_task_results = false;
             state.task_runtime.drain_completed(|result| {
                 had_task_results = true;
@@ -1524,5 +1593,65 @@ mod tests {
             error.to_string(),
             "failed to initialize background task runtime: startup failed"
         );
+    }
+
+    #[test]
+    fn native_key_mapping_normalizes_space_to_character() {
+        use sparsh_input::Key;
+
+        let mapped = map_winit_key(&winit::keyboard::Key::Named(
+            winit::keyboard::NamedKey::Space,
+        ));
+
+        assert_eq!(mapped, Some(Key::Character(" ".to_owned())));
+    }
+
+    #[test]
+    fn native_text_emission_allows_plain_space() {
+        assert!(should_emit_native_text(" ", Modifiers::empty()));
+    }
+
+    #[test]
+    fn native_text_emission_rejects_primary_shortcuts_and_alt_text() {
+        let primary_modifiers = {
+            #[cfg(any(target_os = "macos", target_arch = "wasm32"))]
+            {
+                Modifiers::META
+            }
+
+            #[cfg(not(any(target_os = "macos", target_arch = "wasm32")))]
+            {
+                Modifiers::CONTROL
+            }
+        };
+
+        assert!(!should_emit_native_text(" ", primary_modifiers));
+        assert!(!should_emit_native_text(" ", Modifiers::ALT));
+    }
+
+    #[test]
+    fn native_surface_sync_only_runs_for_non_zero_size_changes() {
+        use winit::dpi::PhysicalSize;
+
+        assert!(!should_sync_native_surface_size(
+            PhysicalSize::new(1200, 900),
+            PhysicalSize::new(1200, 900)
+        ));
+        assert!(!should_sync_native_surface_size(
+            PhysicalSize::new(1, 1),
+            PhysicalSize::new(0, 900)
+        ));
+        assert!(should_sync_native_surface_size(
+            PhysicalSize::new(1, 1),
+            PhysicalSize::new(1200, 900)
+        ));
+    }
+
+    #[test]
+    fn native_scale_factor_sync_only_runs_for_valid_changes() {
+        assert!(!should_sync_native_scale_factor(2.0, 2.0));
+        assert!(!should_sync_native_scale_factor(2.0, 0.0));
+        assert!(!should_sync_native_scale_factor(2.0, f32::NAN));
+        assert!(should_sync_native_scale_factor(2.0, 1.5));
     }
 }

@@ -148,8 +148,16 @@ impl ActionMapper {
             return Some(Redo);
         }
 
-        // Check named keys
+        // Check navigation/editing keys.
         match &event.key {
+            Key::Character(value)
+                if value == " "
+                    && !event.modifiers.ctrl()
+                    && !event.modifiers.alt()
+                    && !event.modifiers.meta() =>
+            {
+                Some(Activate)
+            }
             Key::Named(named) => match named {
                 NamedKey::Tab => {
                     if event.modifiers.shift() {
@@ -322,6 +330,60 @@ mod tests {
             mapper.map_event(&event),
             Some(Action::Standard(StandardAction::Activate))
         );
+    }
+
+    #[test]
+    fn test_space_maps_to_activate() {
+        let mapper = ActionMapper::new();
+        let event = InputEvent::KeyDown {
+            event: KeyboardEvent {
+                key: Key::Character(" ".to_owned()),
+                ..Default::default()
+            },
+        };
+
+        assert_eq!(
+            mapper.map_event(&event),
+            Some(Action::Standard(StandardAction::Activate))
+        );
+    }
+
+    #[test]
+    fn test_space_with_primary_shortcut_modifiers_does_not_activate() {
+        let mapper = ActionMapper::new();
+        let event = InputEvent::KeyDown {
+            event: KeyboardEvent {
+                key: Key::Character(" ".to_owned()),
+                modifiers: {
+                    #[cfg(any(target_os = "macos", target_arch = "wasm32"))]
+                    {
+                        Modifiers::META
+                    }
+
+                    #[cfg(not(any(target_os = "macos", target_arch = "wasm32")))]
+                    {
+                        Modifiers::CONTROL
+                    }
+                },
+                ..Default::default()
+            },
+        };
+
+        assert_eq!(mapper.map_event(&event), None);
+    }
+
+    #[test]
+    fn test_space_with_alt_does_not_activate() {
+        let mapper = ActionMapper::new();
+        let event = InputEvent::KeyDown {
+            event: KeyboardEvent {
+                key: Key::Character(" ".to_owned()),
+                modifiers: Modifiers::ALT,
+                ..Default::default()
+            },
+        };
+
+        assert_eq!(mapper.map_event(&event), None);
     }
 
     #[test]

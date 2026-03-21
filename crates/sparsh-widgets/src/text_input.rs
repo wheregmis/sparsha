@@ -928,4 +928,55 @@ mod tests {
 
         assert_eq!(input.editor.cursor(), input.get_value().len());
     }
+
+    #[test]
+    fn space_text_input_advances_cursor_and_updates_value() {
+        let mut input = TextInput::new().value("hey");
+        input.set_id(Default::default());
+        let layout = layout_bounds(0.0, 0.0, 240.0, 36.0);
+        let layout_tree = LayoutTree::new();
+        let mut focus = FocusManager::new();
+        focus.set_focus(input.id());
+
+        let mut key_ctx = mock_event_context(layout, &layout_tree, &mut focus, input.id(), false);
+        input.event(
+            &mut key_ctx,
+            &InputEvent::KeyDown {
+                event: KeyboardEvent::key_down(
+                    Key::Character(" ".to_owned()),
+                    sparsh_input::ui_events::keyboard::Code::Space,
+                ),
+            },
+        );
+
+        let mut text_ctx =
+            mock_event_context(layout, &layout_tree, &mut focus, input.id(), false);
+        input.event(
+            &mut text_ctx,
+            &InputEvent::TextInput {
+                text: " ".to_owned(),
+            },
+        );
+
+        assert_eq!(input.get_value(), "hey ");
+        assert_eq!(input.editor.cursor(), input.get_value().len());
+    }
+
+    #[test]
+    fn prefix_cache_tracks_trailing_space_width() {
+        let input = TextInput::new().value("a ");
+        prepare_input_with_cache(&input);
+
+        let prefix = input.prefix_widths.borrow();
+        let width_after_a = prefix
+            .iter()
+            .find_map(|(idx, width)| (*idx == 1).then_some(*width))
+            .expect("width after first glyph");
+        let width_after_space = prefix
+            .iter()
+            .find_map(|(idx, width)| (*idx == 2).then_some(*width))
+            .expect("width after trailing space");
+
+        assert!(width_after_space > width_after_a);
+    }
 }

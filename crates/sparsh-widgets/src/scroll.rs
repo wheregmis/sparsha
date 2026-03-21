@@ -3,7 +3,8 @@
 use crate::{
     current_theme,
     scroll_model::{ScrollAxes, ScrollModel, Scrollbars},
-    AccessibilityAction, AccessibilityInfo, AccessibilityRole, EventContext, PaintContext, Widget,
+    AccessibilityAction, AccessibilityInfo, AccessibilityRole, EventContext, IntoWidget,
+    PaintContext, Widget,
 };
 use sparsh_core::{Color, Rect};
 use sparsh_input::{InputEvent, Modifiers};
@@ -144,8 +145,8 @@ impl Scroll {
     }
 
     /// Set the content widget.
-    pub fn content(mut self, widget: impl Widget + 'static) -> Self {
-        self.content = Some(Box::new(widget));
+    pub fn content(mut self, widget: impl IntoWidget) -> Self {
+        self.content = Some(widget.into_widget());
         self
     }
 

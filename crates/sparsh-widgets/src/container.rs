@@ -1,6 +1,6 @@
 //! Container widget for laying out children.
 
-use crate::{EventContext, PaintContext, Widget};
+use crate::{EventContext, IntoWidget, PaintContext, Widget};
 use sparsh_core::Color;
 use sparsh_input::InputEvent;
 use sparsh_layout::WidgetId;
@@ -42,8 +42,8 @@ impl Container {
     }
 
     /// Add a child widget.
-    pub fn child(mut self, widget: impl Widget + 'static) -> Self {
-        self.children.push(Box::new(widget));
+    pub fn child(mut self, widget: impl IntoWidget) -> Self {
+        self.children.push(widget.into_widget());
         self
     }
 

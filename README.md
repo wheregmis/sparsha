@@ -37,6 +37,7 @@ Notable current behavior:
 - `Scroll` supports vertical, horizontal, and both-axis scrolling with interactive scrollbars
 - `List` supports both simple owned-children mode and fixed-extent virtualization for large data sets
 - Default widget sizing and focus-ring behavior are aligned through shared theme control tokens
+- Normal app screens can be authored as function components via `component(...)` and `ComponentContext`
 
 ## Web Story
 
@@ -74,15 +75,13 @@ fn main() -> Result<(), sparsh::AppRunError> {
         .router(
             Router::new()
                 .route("/", || {
-                    Box::new(
-                        Container::new()
-                            .fill()
-                            .center()
-                            .gap(16.0)
-                            .child(Text::new("Build UI with a GPU-first stack."))
-                            .child(Button::new("Click me"))
-                            .child(TextInput::new().placeholder("Type here...")),
-                    )
+                    Container::new()
+                        .fill()
+                        .center()
+                        .gap(16.0)
+                        .child(Text::new("Build UI with a GPU-first stack."))
+                        .child(Button::new("Click me"))
+                        .child(TextInput::new().placeholder("Type here..."))
                 })
                 .fallback("/"),
         )

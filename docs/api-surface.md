@@ -9,6 +9,7 @@ Stable for 1.0:
 - `App`
 - `AppRunError`
 - `Router`, `Route`, `Navigator`, `hash_to_path`, `path_to_hash`
+- component authoring helpers: `component`, `Component`, `ComponentContext`, `TaskHook`
 - theme and accessibility configuration types re-exported from `sparsh-widgets`
 - task runtime types: `TaskRuntime`, `TaskRuntimeInitError`, `TaskHandle`, `TaskResult`, `TaskStatus`, `TaskKey`, `TaskId`, `TaskPayload`, `TaskPolicy`, `Generation`
   - supported built-in task kinds in 1.0: `echo`, `sleep_echo`, `analyze_text`
@@ -96,9 +97,10 @@ Stable for 1.0:
 
 Stable for 1.0:
 
-- widgets: `Container`, `Button`, `Checkbox`, `Text`, `TextInput`, `List`, `Scroll`, `DrawSurface`
+- widgets/helpers: `Container`, `Button`, `Checkbox`, `Text`, `TextInput`, `List`, `Scroll`, `DrawSurface`, `ForEach`
 - editing/accessibility widgets: `TextArea`, `Semantics`
 - accessibility metadata types: `AccessibilityInfo`, `AccessibilityRole`, `AccessibilityAction`
+- `IntoWidget`
 - widget/theme/context types re-exported from the crate root
 - `styles`, `taffy`, and `WidgetId` convenience re-exports
 

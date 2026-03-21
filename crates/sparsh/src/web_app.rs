@@ -6,6 +6,7 @@ use crate::tasks::{TaskRuntime, TaskStatus};
 use crate::{
     accessibility::{AccessibilityTreeSnapshot, ACCESSIBILITY_ROOT_ID},
     app::{AppConfig, AppRunError, AppTheme},
+    component::ComponentStateStore,
     dom_renderer::{DomFrameSnapshot, DomRenderer},
     router::{hash_to_path, path_to_hash, Navigator, Router, RouterHost},
     runtime_widget::{
@@ -87,6 +88,7 @@ pub(crate) fn run_dom_app(
         surface_frames: Vec::new(),
         layout_tree: LayoutTree::new(),
         widget_registry: WidgetRuntimeRegistry::default(),
+        component_states: ComponentStateStore::default(),
         focus_manager: FocusManager::new(),
         focused_path: None,
         capture_path: None,
@@ -138,6 +140,7 @@ struct WebAppState {
     surface_frames: Vec<SurfaceFrame>,
     layout_tree: LayoutTree,
     widget_registry: WidgetRuntimeRegistry,
+    component_states: ComponentStateStore,
     focus_manager: FocusManager,
     focused_path: Option<WidgetPath>,
     capture_path: Option<WidgetPath>,
@@ -708,20 +711,40 @@ impl WebAppState {
     fn build_layout(&mut self) {
         let runtime = self.signal_runtime.clone();
         self.layout_tree = LayoutTree::new();
+        self.component_states.begin_rebuild();
 
         runtime.with_tracking(SubscriberKind::Rebuild, || {
-            set_current_theme(self.theme.resolve_theme());
+            let resolved_theme = self.theme.resolve_theme();
+            let navigator = self.router_navigator.clone();
+            set_current_theme(resolved_theme.clone());
 
-            fn rebuild_widget(widget: &mut dyn Widget, build_ctx: &mut BuildContext) {
+            fn rebuild_widget(
+                widget: &mut dyn Widget,
+                build_ctx: &mut BuildContext,
+                path: &mut Vec<usize>,
+            ) {
+                build_ctx.set_path(path);
                 widget.rebuild(build_ctx);
-                for child in widget.children_mut() {
-                    rebuild_widget(child.as_mut(), build_ctx);
+                let child_keys: Vec<_> = (0..widget.children().len())
+                    .map(|index| widget.child_path_key(index))
+                    .collect();
+                for (index, child) in widget.children_mut().iter_mut().enumerate() {
+                    path.push(child_keys[index]);
+                    rebuild_widget(child.as_mut(), build_ctx, path);
+                    path.pop();
                 }
             }
 
             let mut build_ctx = BuildContext::default();
-            rebuild_widget(self.root_widget.as_mut(), &mut build_ctx);
+            build_ctx.set_theme(resolved_theme);
+            build_ctx.insert_resource(navigator);
+            build_ctx.insert_resource(self.task_runtime.clone());
+            build_ctx.insert_resource(self.signal_runtime.clone());
+            build_ctx.set_state_store(&mut self.component_states);
+            let mut path = Vec::new();
+            rebuild_widget(self.root_widget.as_mut(), &mut build_ctx, &mut path);
         });
+        self.component_states.finish_rebuild();
 
         let mut widget_registry = WidgetRuntimeRegistry::default();
         let root_id = runtime.with_tracking(SubscriberKind::Layout, || {
@@ -1245,7 +1268,7 @@ fn install_event_listeners(
                 let focused_text_editor = state.borrow().focused_text_editor_state().is_some();
                 if focused_text_editor {
                     if let Some(Action::Standard(action)) = mapped {
-                        if should_prevent_keydown_for_text_editor_action(action) {
+                        if should_prevent_keydown_for_text_editor_action(&kb_event, action) {
                             event.prevent_default();
                         }
                     }
@@ -1862,7 +1885,10 @@ fn primary_shortcut_modifiers() -> Modifiers {
     Modifiers::META
 }
 
-fn should_prevent_keydown_for_text_editor_action(action: StandardAction) -> bool {
+fn should_prevent_keydown_for_text_editor_action(
+    event: &sparsh_input::KeyboardEvent,
+    action: StandardAction,
+) -> bool {
     matches!(
         action,
         StandardAction::FocusNext
@@ -1888,9 +1914,9 @@ fn should_prevent_keydown_for_text_editor_action(action: StandardAction) -> bool
             | StandardAction::SelectWordRight
             | StandardAction::SelectToStart
             | StandardAction::SelectToEnd
-            | StandardAction::Activate
             | StandardAction::Cancel
-    )
+    ) || matches!(action, StandardAction::Activate)
+        && !matches!(&event.key, sparsh_input::Key::Character(value) if value == " ")
 }
 
 fn should_emit_text(event: &WebKeyboardEvent) -> bool {
@@ -2082,22 +2108,83 @@ mod wasm_tests {
         ));
     }
 
+    #[test]
+    fn browser_key_mapping_normalizes_space_to_character() {
+        assert_eq!(
+            map_browser_key(" ".to_owned()),
+            Some(sparsh_input::Key::Character(" ".to_owned()))
+        );
+    }
+
+    #[test]
+    fn browser_key_mapping_keeps_named_navigation_keys() {
+        assert_eq!(
+            map_browser_key("Enter".to_owned()),
+            Some(sparsh_input::Key::Named(sparsh_input::NamedKey::Enter))
+        );
+        assert_eq!(
+            map_browser_key("ArrowLeft".to_owned()),
+            Some(sparsh_input::Key::Named(sparsh_input::NamedKey::ArrowLeft))
+        );
+    }
+
     #[wasm_bindgen_test]
     fn text_editor_keydown_prevention_leaves_clipboard_shortcuts_to_browser() {
+        let nav_event = sparsh_input::KeyboardEvent::key_down(
+            sparsh_input::Key::Named(sparsh_input::NamedKey::Backspace),
+            sparsh_input::ui_events::keyboard::Code::Backspace,
+        );
         assert!(should_prevent_keydown_for_text_editor_action(
+            &nav_event,
             StandardAction::Backspace
         ));
+        let move_event = sparsh_input::KeyboardEvent::key_down(
+            sparsh_input::Key::Named(sparsh_input::NamedKey::ArrowLeft),
+            sparsh_input::ui_events::keyboard::Code::ArrowLeft,
+        );
         assert!(should_prevent_keydown_for_text_editor_action(
+            &move_event,
             StandardAction::MoveLeft
         ));
+        let copy_event = sparsh_input::KeyboardEvent::key_down(
+            sparsh_input::Key::Character("c".to_owned()),
+            sparsh_input::ui_events::keyboard::Code::KeyC,
+        );
         assert!(!should_prevent_keydown_for_text_editor_action(
+            &copy_event,
             StandardAction::Copy
         ));
+        let cut_event = sparsh_input::KeyboardEvent::key_down(
+            sparsh_input::Key::Character("x".to_owned()),
+            sparsh_input::ui_events::keyboard::Code::KeyX,
+        );
         assert!(!should_prevent_keydown_for_text_editor_action(
+            &cut_event,
             StandardAction::Cut
         ));
+        let paste_event = sparsh_input::KeyboardEvent::key_down(
+            sparsh_input::Key::Character("v".to_owned()),
+            sparsh_input::ui_events::keyboard::Code::KeyV,
+        );
         assert!(!should_prevent_keydown_for_text_editor_action(
+            &paste_event,
             StandardAction::Paste
+        ));
+        let enter_event = sparsh_input::KeyboardEvent::key_down(
+            sparsh_input::Key::Named(sparsh_input::NamedKey::Enter),
+            sparsh_input::ui_events::keyboard::Code::Enter,
+        );
+        assert!(should_prevent_keydown_for_text_editor_action(
+            &enter_event,
+            StandardAction::Activate
+        ));
+        let space_event = sparsh_input::KeyboardEvent::key_down(
+            sparsh_input::Key::Character(" ".to_owned()),
+            sparsh_input::ui_events::keyboard::Code::Space,
+        );
+        assert!(!should_prevent_keydown_for_text_editor_action(
+            &space_event,
+            StandardAction::Activate
         ));
     }
 

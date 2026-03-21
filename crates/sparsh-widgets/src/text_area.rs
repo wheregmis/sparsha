@@ -738,6 +738,16 @@ mod tests {
     use sparsh_render::DrawList;
     use sparsh_text::TextSystem;
 
+    fn prepare_area_with_cache(area: &TextArea) {
+        let mut text = TextSystem::new_headless();
+        let mut ctx = crate::LayoutContext {
+            text: &mut text,
+            max_width: None,
+            max_height: None,
+        };
+        let _ = area.measure(&mut ctx);
+    }
+
     fn primary_modifiers() -> Modifiers {
         #[cfg(any(target_os = "macos", target_arch = "wasm32"))]
         {
@@ -855,5 +865,58 @@ mod tests {
         );
 
         assert_eq!(area.editor.cursor(), area.get_value().len());
+    }
+
+    #[test]
+    fn trailing_space_text_input_advances_cursor() {
+        let mut area = TextArea::new().value("hello");
+        area.set_id(Default::default());
+        let layout = layout_bounds(0.0, 0.0, 280.0, 120.0);
+        let layout_tree = LayoutTree::new();
+        let mut focus = FocusManager::new();
+        focus.set_focus(area.id());
+
+        let mut key_ctx = mock_event_context(layout, &layout_tree, &mut focus, area.id(), false);
+        area.event(
+            &mut key_ctx,
+            &InputEvent::KeyDown {
+                event: KeyboardEvent::key_down(
+                    Key::Character(" ".to_owned()),
+                    sparsh_input::ui_events::keyboard::Code::Space,
+                ),
+            },
+        );
+
+        let mut text_ctx = mock_event_context(layout, &layout_tree, &mut focus, area.id(), false);
+        area.event(
+            &mut text_ctx,
+            &InputEvent::TextInput {
+                text: " ".to_owned(),
+            },
+        );
+
+        assert_eq!(area.get_value(), "hello ");
+        assert_eq!(area.editor.cursor(), area.get_value().len());
+    }
+
+    #[test]
+    fn line_metrics_track_trailing_space_width() {
+        let area = TextArea::new().value("a \nline");
+        prepare_area_with_cache(&area);
+
+        let metrics = area.line_metrics.borrow();
+        let first_line = metrics.first().expect("first line metrics");
+        let width_after_a = first_line
+            .widths
+            .iter()
+            .find_map(|(idx, width)| (*idx == 1).then_some(*width))
+            .expect("width after first glyph");
+        let width_after_space = first_line
+            .widths
+            .iter()
+            .find_map(|(idx, width)| (*idx == 2).then_some(*width))
+            .expect("width after trailing space");
+
+        assert!(width_after_space > width_after_a);
     }
 }

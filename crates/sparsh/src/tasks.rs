@@ -28,10 +28,11 @@ pub type Generation = u64;
 pub type TaskPayload = Value;
 
 static NEXT_RUNTIME_ID: AtomicU64 = AtomicU64::new(1);
+static NEXT_RESULT_HANDLER_ID: AtomicU64 = AtomicU64::new(1);
 
 thread_local! {
     static CURRENT_TASK_RUNTIME: RefCell<Option<TaskRuntime>> = const { RefCell::new(None) };
-    static RESULT_HANDLERS: RefCell<HashMap<u64, Vec<ResultHandler>>> = RefCell::new(HashMap::new());
+    static RESULT_HANDLERS: RefCell<HashMap<u64, Vec<(u64, ResultHandler)>>> = RefCell::new(HashMap::new());
 }
 
 type ResultHandler = Box<dyn FnMut(TaskResult)>;
@@ -134,6 +135,40 @@ impl TaskHandle {
 pub struct TaskRuntime {
     id: u64,
     inner: Arc<Inner>,
+}
+
+pub struct TaskResultSubscription {
+    runtime_id: u64,
+    handler_id: u64,
+    active: bool,
+}
+
+impl TaskResultSubscription {
+    pub fn unsubscribe(mut self) {
+        self.remove();
+    }
+
+    fn remove(&mut self) {
+        if !self.active {
+            return;
+        }
+        self.active = false;
+        RESULT_HANDLERS.with(|handlers| {
+            let mut handlers = handlers.borrow_mut();
+            if let Some(list) = handlers.get_mut(&self.runtime_id) {
+                list.retain(|(handler_id, _)| *handler_id != self.handler_id);
+                if list.is_empty() {
+                    handlers.remove(&self.runtime_id);
+                }
+            }
+        });
+    }
+}
+
+impl Drop for TaskResultSubscription {
+    fn drop(&mut self) {
+        self.remove();
+    }
 }
 
 impl Default for TaskRuntime {
@@ -245,14 +280,20 @@ impl TaskRuntime {
         self.inner.in_flight.load(Ordering::Relaxed) > 0
     }
 
-    pub fn on_result(&self, handler: impl FnMut(TaskResult) + 'static) {
+    pub fn on_result(&self, handler: impl FnMut(TaskResult) + 'static) -> TaskResultSubscription {
+        let handler_id = NEXT_RESULT_HANDLER_ID.fetch_add(1, Ordering::Relaxed);
         RESULT_HANDLERS.with(|handlers| {
             handlers
                 .borrow_mut()
                 .entry(self.id)
                 .or_default()
-                .push(Box::new(handler));
+                .push((handler_id, Box::new(handler)));
         });
+        TaskResultSubscription {
+            runtime_id: self.id,
+            handler_id,
+            active: true,
+        }
     }
 
     pub fn spawn(&self, task_kind: impl Into<String>, payload: TaskPayload) -> TaskHandle {
@@ -397,7 +438,7 @@ impl TaskRuntime {
     fn notify_handlers(&self, result: TaskResult) {
         RESULT_HANDLERS.with(|handlers| {
             if let Some(list) = handlers.borrow_mut().get_mut(&self.id) {
-                for handler in list.iter_mut() {
+                for (_, handler) in list.iter_mut() {
                     handler(result.clone());
                 }
             }

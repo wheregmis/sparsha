@@ -1,14 +1,133 @@
 //! Context types passed to widgets during layout, paint, and events.
 
+use crate::Theme;
 use sparsh_core::{Color, Rect};
 use sparsh_input::FocusManager;
 use sparsh_layout::{ComputedLayout, LayoutTree, WidgetId};
 use sparsh_render::DrawList;
 use sparsh_text::{TextStyle, TextSystem};
+use std::any::{Any, TypeId};
+use std::collections::HashMap;
+
+/// Runtime-owned storage for component-style build state.
+#[doc(hidden)]
+pub trait BuildStateStore {
+    fn mark_path_used(&mut self, path: &[usize]);
+    fn take_boxed_state(&mut self, path: &[usize]) -> Option<Box<dyn Any>>;
+    fn store_boxed_state(&mut self, path: Vec<usize>, state: Box<dyn Any>);
+}
+
+#[derive(Clone, Copy)]
+struct BuildStateStoreOps {
+    ptr: *mut (),
+    mark_path_used: unsafe fn(*mut (), &[usize]),
+    take_boxed_state: unsafe fn(*mut (), &[usize]) -> Option<Box<dyn Any>>,
+    store_boxed_state: unsafe fn(*mut (), Vec<usize>, Box<dyn Any>),
+}
 
 /// Context for rebuilding dynamic widget children.
 #[derive(Default)]
-pub struct BuildContext {}
+pub struct BuildContext {
+    path: Vec<usize>,
+    theme: Option<Theme>,
+    resources: HashMap<TypeId, Box<dyn Any>>,
+    state_store: Option<BuildStateStoreOps>,
+}
+
+impl BuildContext {
+    /// Set the logical widget path currently being rebuilt.
+    #[doc(hidden)]
+    pub fn set_path(&mut self, path: &[usize]) {
+        self.path.clear();
+        self.path.extend_from_slice(path);
+    }
+
+    /// Return the current logical widget path.
+    pub fn path(&self) -> &[usize] {
+        &self.path
+    }
+
+    /// Set the resolved theme for this rebuild pass.
+    #[doc(hidden)]
+    pub fn set_theme(&mut self, theme: Theme) {
+        self.theme = Some(theme);
+    }
+
+    /// Return the resolved theme for the current rebuild pass.
+    pub fn theme(&self) -> Theme {
+        self.theme.clone().unwrap_or_else(crate::current_theme)
+    }
+
+    /// Insert a typed resource for rebuild-time consumers.
+    #[doc(hidden)]
+    pub fn insert_resource<T: 'static>(&mut self, value: T) {
+        self.resources.insert(TypeId::of::<T>(), Box::new(value));
+    }
+
+    /// Fetch a cloned rebuild-time resource.
+    pub fn resource<T: Clone + 'static>(&self) -> Option<T> {
+        self.resources
+            .get(&TypeId::of::<T>())
+            .and_then(|value| value.downcast_ref::<T>())
+            .cloned()
+    }
+
+    /// Attach runtime-owned component state storage.
+    #[doc(hidden)]
+    pub fn set_state_store<T: BuildStateStore>(&mut self, store: &mut T) {
+        unsafe fn mark_path_used<T: BuildStateStore>(ptr: *mut (), path: &[usize]) {
+            (&mut *(ptr as *mut T)).mark_path_used(path);
+        }
+
+        unsafe fn take_boxed_state<T: BuildStateStore>(
+            ptr: *mut (),
+            path: &[usize],
+        ) -> Option<Box<dyn Any>> {
+            (&mut *(ptr as *mut T)).take_boxed_state(path)
+        }
+
+        unsafe fn store_boxed_state<T: BuildStateStore>(
+            ptr: *mut (),
+            path: Vec<usize>,
+            state: Box<dyn Any>,
+        ) {
+            (&mut *(ptr as *mut T)).store_boxed_state(path, state);
+        }
+
+        self.state_store = Some(BuildStateStoreOps {
+            ptr: store as *mut T as *mut (),
+            mark_path_used: mark_path_used::<T>,
+            take_boxed_state: take_boxed_state::<T>,
+            store_boxed_state: store_boxed_state::<T>,
+        });
+    }
+
+    /// Remove and return the boxed component state for the current path.
+    #[doc(hidden)]
+    pub fn take_boxed_state(&mut self) -> Option<Box<dyn Any>> {
+        let path = self.path.clone();
+        let store = self.state_store?;
+        // SAFETY: the build pass owns the store for the lifetime of the context.
+        unsafe {
+            (store.mark_path_used)(store.ptr, &path);
+            (store.take_boxed_state)(store.ptr, &path)
+        }
+    }
+
+    /// Store boxed component state for the current path.
+    #[doc(hidden)]
+    pub fn store_boxed_state(&mut self, state: Box<dyn Any>) {
+        let path = self.path.clone();
+        let Some(store) = self.state_store else {
+            return;
+        };
+        // SAFETY: the build pass owns the store for the lifetime of the context.
+        unsafe {
+            (store.mark_path_used)(store.ptr, &path);
+            (store.store_boxed_state)(store.ptr, path, state);
+        }
+    }
+}
 
 /// Context for layout measurement.
 pub struct LayoutContext<'a> {

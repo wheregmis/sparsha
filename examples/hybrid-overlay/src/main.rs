@@ -19,7 +19,7 @@ fn main() -> Result<(), sparsh::AppRunError> {
         .theme(Theme::light())
         .router(
             Router::new()
-                .route("/", || Box::new(HybridOverlayDemo::new()))
+                .route("/", HybridOverlayDemo::new)
                 .fallback("/"),
         )
         .run()

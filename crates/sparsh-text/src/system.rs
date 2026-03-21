@@ -312,7 +312,7 @@ impl TextSystem {
 
         let shaped = ShapedText {
             glyphs,
-            width: layout.width(),
+            width: layout_advance_width(&layout).max(layout.width()),
             height: total_height,
         };
         cache_insert(&mut self.shape_cache, cache_key, shaped.clone(), 512);
@@ -513,7 +513,7 @@ impl TextSystem {
         // Perform line breaking
         layout.break_all_lines(max_width);
 
-        let measured_width = layout.width();
+        let measured_width = layout_advance_width(&layout).max(layout.width());
         let measured_height = layout.height();
 
         // On web builds without embedded fonts, the shaping backend can occasionally return
@@ -540,6 +540,26 @@ impl TextSystem {
         cache_insert(&mut self.measure_cache, cache_key, measured, 1024);
         measured
     }
+}
+
+fn layout_advance_width(layout: &Layout<[u8; 4]>) -> f32 {
+    let mut max_width: f32 = 0.0;
+
+    for line in layout.lines() {
+        let mut line_width: f32 = 0.0;
+        for item in line.items() {
+            if let PositionedLayoutItem::GlyphRun(glyph_run) = item {
+                let mut cursor_x = glyph_run.offset();
+                for glyph in glyph_run.glyphs() {
+                    cursor_x += glyph.advance;
+                }
+                line_width = line_width.max(cursor_x);
+            }
+        }
+        max_width = max_width.max(line_width);
+    }
+
+    max_width
 }
 
 fn cache_insert<V: Clone>(
@@ -646,5 +666,47 @@ mod tests {
             elapsed
         );
         assert_eq!(non_zero, texts.len() * 12);
+    }
+
+    #[test]
+    fn measure_includes_trailing_space_advance() {
+        let mut system = TextSystem::new_headless();
+        let style = TextStyle::default().with_family("Inter").with_size(16.0);
+
+        let without_space = system.measure("h", &style, None).0;
+        let with_trailing_space = system.measure("h ", &style, None).0;
+
+        assert!(
+            with_trailing_space > without_space,
+            "expected trailing space width to advance the measured width: {without_space} -> {with_trailing_space}"
+        );
+    }
+
+    #[test]
+    fn measure_includes_multiple_trailing_spaces() {
+        let mut system = TextSystem::new_headless();
+        let style = TextStyle::default().with_family("Inter").with_size(16.0);
+
+        let single_space = system.measure("h ", &style, None).0;
+        let double_space = system.measure("h  ", &style, None).0;
+
+        assert!(
+            double_space > single_space,
+            "expected each trailing space to advance width: {single_space} -> {double_space}"
+        );
+    }
+
+    #[test]
+    fn measure_preserves_trailing_space_on_each_line() {
+        let mut system = TextSystem::new_headless();
+        let style = TextStyle::default().with_family("Inter").with_size(16.0);
+
+        let without_space = system.measure("hello\nworld", &style, None).0;
+        let with_space = system.measure("hello \nworld ", &style, None).0;
+
+        assert!(
+            with_space > without_space,
+            "expected multiline trailing spaces to affect measured width: {without_space} -> {with_space}"
+        );
     }
 }

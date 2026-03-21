@@ -21,9 +21,7 @@
 //!         .theme(Theme::light())
 //!         .router(
 //!             Router::new()
-//!                 .route("/", || {
-//!                     Box::new(Container::new().child(Button::new("Click me!")))
-//!                 })
+//!                 .route("/", || Container::new().child(Button::new("Click me!")))
 //!                 .fallback("/"),
 //!         )
 //!         .run()
@@ -46,6 +44,7 @@
 
 mod accessibility;
 mod app;
+mod component;
 mod router;
 mod runtime_widget;
 mod tasks;
@@ -62,15 +61,16 @@ mod web_surface_manager;
 mod web_text_metrics;
 
 pub use app::{App, AppRunError, ThemeInput, ThemeMode, ThemeModeInput};
+pub use component::{component, Component, ComponentContext, TaskHook};
 pub use router::{hash_to_path, path_to_hash, Navigator, Route, Router};
 pub use sparsh_widgets::{
-    current_theme, AccessibilityAction, AccessibilityInfo, AccessibilityRole, Semantics, TextArea,
-    TextAreaStyle, TextEditorState, TextInput, TextInputStyle, Theme, ThemeColors, ThemeControls,
-    ThemeRadii, ThemeSpacing, ThemeTypography,
+    current_theme, AccessibilityAction, AccessibilityInfo, AccessibilityRole, ForEach, IntoWidget,
+    Semantics, TextArea, TextAreaStyle, TextEditorState, TextInput, TextInputStyle, Theme,
+    ThemeColors, ThemeControls, ThemeRadii, ThemeSpacing, ThemeTypography,
 };
 pub use tasks::{
-    Generation, TaskHandle, TaskId, TaskKey, TaskPayload, TaskPolicy, TaskResult, TaskRuntime,
-    TaskRuntimeInitError, TaskStatus,
+    Generation, TaskHandle, TaskId, TaskKey, TaskPayload, TaskPolicy, TaskResult,
+    TaskResultSubscription, TaskRuntime, TaskRuntimeInitError, TaskStatus,
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -79,11 +79,12 @@ pub use web::init_web;
 /// Re-exports of commonly used types.
 pub mod prelude {
     pub use crate::tasks::{
-        Generation, TaskHandle, TaskId, TaskKey, TaskPayload, TaskPolicy, TaskResult, TaskRuntime,
-        TaskStatus,
+        Generation, TaskHandle, TaskId, TaskKey, TaskPayload, TaskPolicy, TaskResult,
+        TaskResultSubscription, TaskRuntime, TaskStatus,
     };
     pub use crate::{
-        App, AppRunError, Navigator, Route, Router, ThemeInput, ThemeMode, ThemeModeInput,
+        component, App, AppRunError, Component, ComponentContext, Navigator, Route, Router,
+        TaskHook, ThemeInput, ThemeMode, ThemeModeInput,
     };
     pub use sparsh_core::{Color, Rect};
     pub use sparsh_input::{InputEvent, Key, Modifiers, PointerButton};
@@ -91,10 +92,10 @@ pub mod prelude {
     pub use sparsh_signals::{Effect, Memo, ReadSignal, Signal, WriteSignal};
     pub use sparsh_widgets::{
         current_theme, AccessibilityAction, AccessibilityInfo, AccessibilityRole, BuildContext,
-        Button, ButtonStyle, Checkbox, CheckboxStyle, Container, DrawSurface, EventCommands, List,
-        ListDirection, Scroll, ScrollDirection, Semantics, Text, TextAlign, TextArea,
-        TextAreaStyle, TextEditorState, TextInput, TextInputStyle, Theme, ThemeColors,
-        ThemeControls, ThemeRadii, ThemeSpacing, ThemeTypography, Widget,
+        Button, ButtonStyle, Checkbox, CheckboxStyle, Container, DrawSurface, EventCommands,
+        ForEach, IntoWidget, List, ListDirection, Scroll, ScrollDirection, Semantics, Text,
+        TextAlign, TextArea, TextAreaStyle, TextEditorState, TextInput, TextInputStyle, Theme,
+        ThemeColors, ThemeControls, ThemeRadii, ThemeSpacing, ThemeTypography, Widget,
     };
 }
 

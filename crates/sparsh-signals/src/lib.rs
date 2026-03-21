@@ -98,6 +98,16 @@ impl RuntimeInner {
         }
     }
 
+    fn remove_subscriber(&mut self, subscriber: SubscriberId) {
+        self.clear_subscriber_dependencies(subscriber);
+        self.subscribers.remove(&subscriber);
+        self.effects.remove(&subscriber);
+        self.pending_effect_set.remove(&subscriber);
+        self.pending_effects
+            .retain(|candidate| *candidate != subscriber);
+        self.phase_subscribers.retain(|_, id| *id != subscriber);
+    }
+
     fn track_read(&mut self, subscriber: SubscriberId, signal_id: SignalId) {
         self.signal_subscribers
             .entry(signal_id)
@@ -530,6 +540,18 @@ impl Effect {
 
     pub fn runtime_id(self) -> u64 {
         self.runtime_id
+    }
+
+    pub fn dispose(self) {
+        let runtime = REGISTRY.with(|registry| {
+            registry
+                .borrow()
+                .get(&self.runtime_id)
+                .and_then(Weak::upgrade)
+        });
+        if let Some(runtime) = runtime {
+            runtime.borrow_mut().remove_subscriber(self.subscriber);
+        }
     }
 }
 

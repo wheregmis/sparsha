@@ -11,7 +11,7 @@ Each example is a normal Cargo binary. The examples are intended to demonstrate 
 | `kitchen-sink` | Polished core widgets, theming, two-axis scroll, text editing, and virtualized lists |
 | `fractal-clock` | Draw-heavy rendering with `DrawSurface` and reactive state |
 | `hybrid-overlay` | DOM-backed UI with a hybrid GPU surface on the web path |
-| `todo` | Signals, routing, simple owned-child lists, and background task usage in a small app |
+| `todo` | Function components, signals, keyed `ForEach`, routing, and background task hooks in a small app |
 
 ## Native
 
@@ -70,7 +70,7 @@ Direct `trunk serve` from an example directory remains useful for manual iterati
 
 - Accessibility smoke verification is still manual in this milestone
 - `todo` intentionally keeps `TextInput` single-line while `kitchen-sink` demonstrates `TextArea`
-- `todo` intentionally keeps the simple owned-children `List` path while `kitchen-sink` exercises the virtualized mode
+- `todo` intentionally uses `ForEach` plus `Scroll` instead of the virtualized `List` path that `kitchen-sink` exercises
 - Router usage stays on static paths
 - Final accessibility and browser parity sign-off still includes manual checks beyond the automated workflows
 

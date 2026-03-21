@@ -7,7 +7,7 @@ test("showcase components preview stays interactive and can switch routes", asyn
   page,
 }) => {
   await page.goto(baseURL);
-  await expect(page).toHaveTitle(/Sparsh Showcase/);
+  await expect(page).toHaveTitle(/Sparsha Showcase/);
   await expect(
     page.getByText("Basic component preview", { exact: true }).first(),
   ).toBeVisible();
@@ -49,7 +49,7 @@ test("showcase components preview stays interactive and can switch routes", asyn
 
 test("showcase rendering route loads directly from the hash", async ({ page }) => {
   await page.goto(`${baseURL}#/rendering`);
-  await expect(page).toHaveTitle(/Sparsh Showcase/);
+  await expect(page).toHaveTitle(/Sparsha Showcase/);
   await expect(
     page.getByText("Pixel alignment", { exact: true }).first(),
   ).toBeVisible();

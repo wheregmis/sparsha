@@ -42,6 +42,7 @@ self.onmessage = async (event) => {
       payload_json: JSON.stringify(resultPayload),
     });
   } catch (error) {
+    canceledTasks.delete(task_id);
     self.postMessage({
       type: "error",
       task_id,

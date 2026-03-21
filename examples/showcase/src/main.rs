@@ -40,7 +40,7 @@ fn main() -> Result<(), sparsha::AppRunError> {
     let background = theme.colors.background;
 
     App::new()
-        .title("Sparsh Showcase")
+        .title("Sparsha Showcase")
         .size(1440, 960)
         .background(background)
         .theme(theme)
@@ -143,7 +143,7 @@ fn build_top_bar(route: ShowcaseRoute, navigator: Navigator) -> Container {
             Container::new()
                 .column()
                 .gap(4.0)
-                .child(Text::new("Sparsh Showcase").size(18.0).bold())
+                .child(Text::new("Sparsha Showcase").size(18.0).bold())
                 .child(
                     Text::new("A page-ready preview surface for widgets and visual checks.")
                         .size(13.0)
@@ -970,20 +970,22 @@ fn text_rendering_scene(ctx: &mut PaintContext, bounds: Rect) {
 
     let sizes = [12.0, 16.0, 22.0];
     let alphas = [0.42, 0.72, 1.0];
+    ctx.push_clip(dark);
     for index in 0..sizes.len() {
         let y = dark.y + 36.0 + index as f32 * 30.0;
         let dark_style = scene_label_style(sizes[index], Color::WHITE.with_alpha(alphas[index]));
+        ctx.draw_text(sentence, &dark_style, dark.x + 14.0, y);
+    }
+    ctx.pop_clip();
+
+    ctx.push_clip(light);
+    for index in 0..sizes.len() {
+        let y = light.y + 36.0 + index as f32 * 30.0;
         let light_style = scene_label_style(
             sizes[index],
             Color::from_hex(0x111827).with_alpha(alphas[index]),
         );
-
-        ctx.draw_text(sentence, &dark_style, dark.x + 14.0, y);
-        ctx.draw_text(
-            sentence,
-            &light_style,
-            light.x + 14.0,
-            light.y + 36.0 + index as f32 * 30.0,
-        );
+        ctx.draw_text(sentence, &light_style, light.x + 14.0, y);
     }
+    ctx.pop_clip();
 }

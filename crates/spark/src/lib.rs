@@ -21,6 +21,7 @@
 
 pub mod accessibility;
 mod app;
+mod tasks;
 
 #[cfg(target_arch = "wasm32")]
 mod dom_renderer;
@@ -32,12 +33,20 @@ mod web_app;
 mod web_text_metrics;
 
 pub use app::{App, AppConfig};
+pub use tasks::{
+    Generation, TaskHandle, TaskId, TaskKey, TaskPayload, TaskPolicy, TaskResult, TaskRuntime,
+    TaskStatus,
+};
 
 #[cfg(target_arch = "wasm32")]
 pub use web::init_web;
 
 /// Re-exports of commonly used types.
 pub mod prelude {
+    pub use crate::tasks::{
+        Generation, TaskHandle, TaskId, TaskKey, TaskPayload, TaskPolicy, TaskResult, TaskRuntime,
+        TaskStatus,
+    };
     pub use crate::{App, AppConfig};
     pub use spark_core::{Color, Rect};
     pub use spark_input::{InputEvent, Key, Modifiers, PointerButton};

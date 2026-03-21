@@ -2,6 +2,7 @@
 
 #![cfg(target_arch = "wasm32")]
 
+use crate::tasks::{TaskRuntime, TaskStatus};
 use crate::{app::AppConfig, dom_renderer::DomRenderer};
 use spark_input::{FocusManager, InputEvent, PointerButton};
 use spark_layout::LayoutTree;
@@ -23,6 +24,9 @@ where
     let document = window.document().expect("document should be available");
     let dom_renderer = DomRenderer::mount_to_body(&document).expect("failed to mount DOM renderer");
     let signal_runtime = RuntimeHandle::new();
+    let task_runtime = TaskRuntime::new();
+    task_runtime.set_worker_script_url("spark-worker.js?v=2");
+    task_runtime.set_current();
     let root_widget = signal_runtime.run_with_current(build_ui);
 
     let mut state = WebAppState {
@@ -33,6 +37,7 @@ where
         layout_tree: LayoutTree::new(),
         focus_manager: FocusManager::new(),
         signal_runtime,
+        task_runtime,
         root_widget,
         start_time: web_time::Instant::now(),
         mouse_pos: glam::Vec2::ZERO,
@@ -57,6 +62,7 @@ struct WebAppState {
     layout_tree: LayoutTree,
     focus_manager: FocusManager,
     signal_runtime: RuntimeHandle,
+    task_runtime: TaskRuntime,
     root_widget: Box<dyn Widget>,
     start_time: web_time::Instant,
     mouse_pos: glam::Vec2,
@@ -319,12 +325,28 @@ impl WebAppState {
     }
 
     fn frame(&mut self) {
+        let mut had_task_results = false;
+        self.task_runtime.drain_completed(|result| {
+            had_task_results = true;
+            if let TaskStatus::Error(message) = &result.status {
+                log::warn!(
+                    "background task failed (id={}, kind={}): {}",
+                    result.task_id,
+                    result.task_kind,
+                    message
+                );
+            }
+        });
+
         self.signal_runtime.run_effects(64);
         let dirty = self.signal_runtime.take_dirty_flags();
         if dirty.rebuild || dirty.layout {
             self.needs_layout = true;
         }
         if dirty.paint {
+            self.needs_repaint = true;
+        }
+        if had_task_results {
             self.needs_repaint = true;
         }
 

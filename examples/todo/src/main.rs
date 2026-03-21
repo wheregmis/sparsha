@@ -1,5 +1,6 @@
 //! Todo example app for Spark (native + web) using signal-based state.
 
+use serde_json::json;
 use spark::prelude::*;
 use spark::widgets::{BuildContext, EventContext, PaintContext, WidgetId};
 
@@ -105,14 +106,62 @@ fn apply_action(model: Signal<TodoModel>, action: TodoAction) {
 struct TodoApp {
     id: WidgetId,
     model: Signal<TodoModel>,
+    analysis_text: Signal<String>,
+    analysis_generation: Signal<u64>,
+    task_runtime: TaskRuntime,
     children: Vec<Box<dyn Widget>>,
+}
+
+fn value_to_u64(value: Option<&serde_json::Value>) -> u64 {
+    match value {
+        Some(v) => v
+            .as_u64()
+            .or_else(|| {
+                v.as_f64().and_then(|num| {
+                    if num.is_finite() && num >= 0.0 {
+                        Some(num as u64)
+                    } else {
+                        None
+                    }
+                })
+            })
+            .unwrap_or(0),
+        None => 0,
+    }
 }
 
 impl TodoApp {
     fn new() -> Self {
+        let task_runtime = TaskRuntime::current_or_default();
+        let analysis_text = Signal::new(String::from("Background analyzer is idle."));
+        let analysis_for_results = analysis_text;
+        task_runtime.on_result(move |result| {
+            if result.task_kind != "analyze_text" {
+                return;
+            }
+            match result.status {
+                TaskStatus::Success(payload) => {
+                    let words = value_to_u64(payload.get("word_count"));
+                    let chars = value_to_u64(payload.get("char_count"));
+                    let lines = value_to_u64(payload.get("line_count"));
+                    analysis_for_results.set(format!(
+                        "Background analyzer: {} words, {} chars, {} lines",
+                        words, chars, lines
+                    ));
+                }
+                TaskStatus::Error(message) => {
+                    analysis_for_results.set(format!("Background analyzer error: {}", message));
+                }
+                TaskStatus::Canceled => {}
+            }
+        });
+
         let mut app = Self {
             id: WidgetId::default(),
             model: Signal::new(TodoModel::default()),
+            analysis_text,
+            analysis_generation: Signal::new(0),
+            task_runtime,
             children: Vec::new(),
         };
         app.rebuild_children();
@@ -126,6 +175,7 @@ impl TodoApp {
 
     fn rebuild_children(&mut self) {
         let model = self.model.get();
+        let analysis_text = self.analysis_text.get();
         let active_count = model.todos.iter().filter(|todo| !todo.done).count();
         let done_count = model.todos.iter().filter(|todo| todo.done).count();
 
@@ -161,6 +211,11 @@ impl TodoApp {
                 Text::new("Spark native + web example using signal-driven state.")
                     .size(13.0)
                     .color(Color::from_hex(0x9CA3AF)),
+            )
+            .child(
+                Text::new(analysis_text)
+                    .size(12.0)
+                    .color(Color::from_hex(0x93C5FD)),
             )
             .child(self.input_row(&model))
             .child(self.filter_row(model.filter))
@@ -203,6 +258,8 @@ impl TodoApp {
         let model_for_change = self.model;
         let model_for_submit = self.model;
         let model_for_add = self.model;
+        let runtime_for_analyze = self.task_runtime.clone();
+        let generation_signal = self.analysis_generation;
 
         Container::new()
             .row()
@@ -216,6 +273,16 @@ impl TodoApp {
                     .placeholder("Add a task...")
                     .on_change(move |value| {
                         apply_action(model_for_change, TodoAction::SetDraft(value.to_owned()));
+                        let generation = generation_signal.with_mut(|counter| {
+                            *counter += 1;
+                            *counter
+                        });
+                        runtime_for_analyze.spawn_keyed(
+                            "todo.input-analysis",
+                            generation,
+                            "analyze_text",
+                            json!({ "text": value }),
+                        );
                     })
                     .on_submit(move |_| {
                         apply_action(model_for_submit, TodoAction::AddDraft);

@@ -4,6 +4,8 @@ use spark_core::Color;
 use spark_widgets::Widget;
 
 #[cfg(not(target_arch = "wasm32"))]
+use crate::tasks::{TaskRuntime, TaskStatus};
+#[cfg(not(target_arch = "wasm32"))]
 use spark_core::{init_wgpu, SurfaceState};
 #[cfg(not(target_arch = "wasm32"))]
 use spark_input::{FocusManager, InputEvent, PointerButton};
@@ -136,6 +138,7 @@ struct AppState {
     layout_tree: LayoutTree,
     focus_manager: FocusManager,
     signal_runtime: RuntimeHandle,
+    task_runtime: TaskRuntime,
     root_widget: Box<dyn Widget>,
     start_time: Instant,
     mouse_pos: glam::Vec2,
@@ -465,6 +468,8 @@ impl<F: FnOnce() -> Box<dyn Widget>> winit::application::ApplicationHandler for 
             let layout_tree = LayoutTree::new();
             let focus_manager = FocusManager::new();
             let signal_runtime = RuntimeHandle::new();
+            let task_runtime = TaskRuntime::new();
+            task_runtime.set_current();
             let window_for_scheduler = window;
             signal_runtime.set_scheduler(move || {
                 window_for_scheduler.request_redraw();
@@ -487,6 +492,7 @@ impl<F: FnOnce() -> Box<dyn Widget>> winit::application::ApplicationHandler for 
                 layout_tree,
                 focus_manager,
                 signal_runtime,
+                task_runtime,
                 root_widget,
                 start_time: Instant::now(),
                 mouse_pos: glam::Vec2::ZERO,
@@ -788,6 +794,19 @@ impl<F: FnOnce() -> Box<dyn Widget>> winit::application::ApplicationHandler for 
         }
 
         if let Some(state) = self.state.as_mut() {
+            let mut had_task_results = false;
+            state.task_runtime.drain_completed(|result| {
+                had_task_results = true;
+                if let TaskStatus::Error(message) = &result.status {
+                    log::warn!(
+                        "background task failed (id={}, kind={}): {}",
+                        result.task_id,
+                        result.task_kind,
+                        message
+                    );
+                }
+            });
+
             state.signal_runtime.run_effects(64);
             let dirty = state.signal_runtime.take_dirty_flags();
             if dirty.rebuild || dirty.layout {
@@ -796,7 +815,13 @@ impl<F: FnOnce() -> Box<dyn Widget>> winit::application::ApplicationHandler for 
             if dirty.paint {
                 state.needs_repaint = true;
             }
+            if had_task_results {
+                state.needs_repaint = true;
+            }
             if state.needs_layout || state.needs_repaint {
+                state.window.request_redraw();
+            }
+            if state.task_runtime.has_in_flight() {
                 state.window.request_redraw();
             }
         }

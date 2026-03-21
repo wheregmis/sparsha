@@ -1,14 +1,14 @@
-use sparsh::core::glam::Vec2;
-use sparsh::layout::taffy::prelude::{length, percent, AlignItems, JustifyContent, Size, Style};
-use sparsh::prelude::*;
-use sparsh::text::TextStyle;
-use sparsh::widgets::{current_theme, ButtonStyle, PaintContext, WidgetId};
+use sparsha::core::glam::Vec2;
+use sparsha::layout::taffy::prelude::{length, percent, AlignItems, JustifyContent, Size, Style};
+use sparsha::prelude::*;
+use sparsha::text::TextStyle;
+use sparsha::widgets::{current_theme, ButtonStyle, PaintContext, WidgetId};
 use std::cell::RefCell;
 use std::rc::Rc;
 
-fn main() -> Result<(), sparsh::AppRunError> {
+fn main() -> Result<(), sparsha::AppRunError> {
     #[cfg(target_arch = "wasm32")]
-    sparsh::init_web()?;
+    sparsha::init_web()?;
 
     #[cfg(not(target_arch = "wasm32"))]
     env_logger::init();
@@ -23,14 +23,14 @@ fn main() -> Result<(), sparsh::AppRunError> {
                 .borrow()
                 .clone()
                 .expect("showcase navigator should be initialized before build");
-            Box::new(showcase_shell(ShowcaseRoute::Components, navigator))
+            showcase_shell(ShowcaseRoute::Components, navigator)
         })
         .route("/rendering", move || {
             let navigator = rendering_slot
                 .borrow()
                 .clone()
                 .expect("showcase navigator should be initialized before build");
-            Box::new(showcase_shell(ShowcaseRoute::Rendering, navigator))
+            showcase_shell(ShowcaseRoute::Rendering, navigator)
         })
         .fallback("/components");
 

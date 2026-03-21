@@ -8,6 +8,8 @@
 - [x] Milestone 5: Polish Core Widgets
 - [ ] Milestone 6: Release Engineering And Quality Gates
 
+Milestone checkboxes track implementation landing in the repo. The unchecked items below are the remaining verification, release, and sign-off work.
+
 ## Current Baseline
 - Sparsh already has a real end-to-end stack: app runner, router, signals, layout, rendering, text shaping, input, widgets, and core GPU primitives.
 - The main package surface is consolidated through `sparsh::prelude`, so application code can stay small and readable.
@@ -25,18 +27,18 @@
 
 ## What Still Needs Work Before 1.0
 - [x] Focus traversal exists in the input model, and it is now wired end to end through the app loops.
-- [ ] Accessibility has definitions and data structures, but it is not yet integrated into the runtime and widget tree.
+- [ ] Accessibility is now integrated into the runtime and built-in widgets, but screen-reader verification and assistive-technology sign-off are still pending.
 - [x] `TextInput` now covers the expected editing shortcuts and selection behavior, and multiline editing ships as `TextArea`.
 - [x] `Scroll` now supports polished vertical, horizontal, and both-axis behavior with interactive scrollbars.
 - [x] `List` now keeps the simple owned-children mode for small data and also supports fixed-extent virtualization for larger data sets.
 - [ ] Router paths are static-only; dynamic route patterns are rejected.
-- [ ] The web runtime still behaves more like a visual retained layer than a fully semantic browser-native surface.
+- [ ] The web runtime now has retained DOM parity work and a semantic DOM layer, but final browser parity and manual sign-off are still open.
 - [ ] There is no checked-in CI workflow or release automation, so quality gates are still manual.
 - [x] The workspace itself is healthy right now: `cargo check --workspace` and `cargo test --workspace` both pass.
 
 ## 1.0 Definition
 - [ ] Applications can build and run on native and web with the same widget tree and predictable behavior.
-- [ ] Keyboard navigation, pointer interaction, and text editing work across the core widgets without special cases.
+- [x] Keyboard navigation, pointer interaction, and text editing work across the core widgets without special cases.
 - [ ] Accessibility is implemented for the built-in widgets and is verified on both native and web.
 - [ ] The web path supports the same interaction semantics as native, including text input and composition flows.
 - [ ] The public API is stable enough to document as 1.0 and support semver expectations.
@@ -74,7 +76,7 @@
 - [ ] Verify the result with screen readers and focused accessibility smoke tests.
 
 ### Exit Criteria
-- [ ] The built-in widgets are understandable and operable through assistive technologies without custom app code.
+- [ ] The built-in widgets are understandable and operable through assistive technologies without custom app code, and this has been confirmed with the planned accessibility smoke tests.
 
 ## Milestone 4: Finish Web Parity
 ### Tasks
@@ -85,7 +87,7 @@
 - [x] Make the web release story reproducible from the checked-in repo, not from ad hoc local scripts.
 
 ### Exit Criteria
-- [ ] Web examples behave like native examples in the core interaction flows that matter for 1.0.
+- [ ] Web examples behave like native examples in the core interaction flows that matter for 1.0, including the remaining manual parity smoke checks.
 
 ## Milestone 5: Polish Core Widgets
 ### Tasks

@@ -11,6 +11,7 @@ Each example is a normal Cargo binary. The examples are intended to demonstrate 
 | `kitchen-sink` | Polished core widgets, theming, two-axis scroll, text editing, and virtualized lists |
 | `fractal-clock` | Draw-heavy rendering with `DrawSurface` and reactive state |
 | `hybrid-overlay` | DOM-backed UI with a hybrid GPU surface on the web path |
+| `showcase` | Hash-routed public preview surface with component samples and manual rendering checks |
 | `todo` | Function components, signals, keyed `ForEach`, routing, and background task hooks in a small app |
 
 ## Native
@@ -19,6 +20,7 @@ Each example is a normal Cargo binary. The examples are intended to demonstrate 
 cargo run -p kitchen-sink
 cargo run -p fractal-clock --release
 cargo run -p hybrid-overlay
+cargo run -p showcase
 cargo run -p todo
 ```
 
@@ -66,6 +68,8 @@ Run the full local release-readiness suite:
 
 Direct `trunk serve` from an example directory remains useful for manual iteration.
 
+The public `showcase` example is also published through `.github/workflows/showcase-pages.yml`. Because it uses hash routing, the deployed Pages URL remains static-host safe for routes like `/#/rendering`.
+
 ## What The Examples Intentionally Do Not Promise Yet
 
 - Accessibility smoke verification is still manual in this milestone
@@ -85,4 +89,4 @@ From the repo root, run:
 ./scripts/release-readiness.sh
 ```
 
-That covers the native workspace checks, wasm compile checks for all four examples, the browser smoke suite, and the lightweight perf/startup smoke path used in release readiness. Hosted automation lives in `.github/workflows/ci.yml` and `.github/workflows/release-readiness.yml`.
+That covers the native workspace checks, wasm compile checks for all five example binaries, the browser smoke suite, and the lightweight perf/startup smoke path used in release readiness. Hosted automation lives in `.github/workflows/ci.yml`, `.github/workflows/release-readiness.yml`, and `.github/workflows/showcase-pages.yml`.

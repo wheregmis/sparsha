@@ -7,6 +7,7 @@ EXAMPLES=(
   kitchen-sink
   fractal-clock
   hybrid-overlay
+  showcase
   todo
 )
 

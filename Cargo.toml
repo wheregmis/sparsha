@@ -11,6 +11,7 @@ members = [
     "examples/fractal-clock",
     "examples/hybrid-overlay",
     "examples/kitchen-sink",
+    "examples/showcase",
     "examples/todo",
 ]
 resolver = "2"

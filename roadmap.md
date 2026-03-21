@@ -1,7 +1,7 @@
 # Sparsh 1.0 Roadmap
 
 ## Master Checklist
-- [ ] Milestone 1: Freeze The Foundation
+- [x] Milestone 1: Freeze The Foundation
 - [ ] Milestone 2: Finish Input, Focus, And Editing
 - [ ] Milestone 3: Make Accessibility Real
 - [ ] Milestone 4: Finish Web Parity
@@ -43,14 +43,14 @@
 
 ## Milestone 1: Freeze The Foundation
 ### Tasks
-- [ ] Freeze the public API surface in `sparsh`, `sparsh-widgets`, `sparsh-input`, `sparsh-layout`, `sparsh-render`, `sparsh-text`, `sparsh-core`, and `sparsh-signals`.
-- [ ] Document the supported platforms, widget set, and web story in the main README and example docs.
-- [ ] Audit remaining panic paths, `expect` calls, and `unreachable!` cases that would be unacceptable in a 1.0 release.
-- [ ] Decide which APIs are truly public and which ones should stay internal until after 1.0.
+- [x] Freeze the public API surface in `sparsh`, `sparsh-widgets`, `sparsh-input`, `sparsh-layout`, `sparsh-render`, `sparsh-text`, `sparsh-core`, and `sparsh-signals`.
+- [x] Document the supported platforms, widget set, and web story in the main README and example docs.
+- [x] Audit remaining panic paths, `expect` calls, and `unreachable!` cases that would be unacceptable in a 1.0 release.
+- [x] Decide which APIs are truly public and which ones should stay internal until after 1.0.
 
 ### Exit Criteria
-- [ ] The main examples compile cleanly on native and web.
-- [ ] The documented surface matches the shipped implementation.
+- [x] The main examples compile cleanly on native and web.
+- [x] The documented surface matches the shipped implementation.
 
 ## Milestone 2: Finish Input, Focus, And Editing
 ### Tasks

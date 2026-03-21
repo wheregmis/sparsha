@@ -8,13 +8,14 @@ Run or confirm all of the following:
 
 1. GitHub Actions `CI` workflow is green on the target commit.
 2. GitHub Actions `Release Readiness` workflow is green on the target commit.
-3. Review uploaded artifacts from `Release Readiness`:
+3. GitHub Actions `Showcase Pages` workflow is green if the public demo should be refreshed from this commit.
+4. Review uploaded artifacts from `Release Readiness`:
    - `playwright-report`
    - `test-results`
    - `artifacts/web-smoke`
    - `artifacts/perf`
    - `artifacts/lighthouse`
-4. Local fallback entrypoint remains available:
+5. Local fallback entrypoint remains available:
    - `./scripts/release-readiness.sh`
 
 ## Manual Sign-Off
@@ -27,6 +28,7 @@ Complete the manual checks that are still intentionally outside the automated ga
    - `kitchen-sink`
    - `fractal-clock`
    - `hybrid-overlay`
+   - `showcase`
    - `todo`
 
 ## Documentation And Release Notes

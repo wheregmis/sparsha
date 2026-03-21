@@ -7,6 +7,7 @@ LOG_DIR="$ARTIFACT_DIR/web-smoke"
 KITCHEN_PORT="${SPARSH_KITCHEN_SINK_PORT:-4173}"
 HYBRID_PORT="${SPARSH_HYBRID_OVERLAY_PORT:-4174}"
 TODO_PORT="${SPARSH_TODO_PORT:-4175}"
+SHOWCASE_PORT="${SPARSH_SHOWCASE_PORT:-4176}"
 SERVER_PIDS=()
 export PLAYWRIGHT_BROWSERS_PATH="${PLAYWRIGHT_BROWSERS_PATH:-$ROOT_DIR/.playwright-browsers}"
 
@@ -38,11 +39,14 @@ SERVER_PIDS+=("$!")
 SERVER_PIDS+=("$!")
 "$ROOT_DIR/scripts/web-serve-dist.sh" todo "$TODO_PORT" >"$LOG_DIR/todo.log" 2>&1 &
 SERVER_PIDS+=("$!")
+"$ROOT_DIR/scripts/web-serve-dist.sh" showcase "$SHOWCASE_PORT" >"$LOG_DIR/showcase.log" 2>&1 &
+SERVER_PIDS+=("$!")
 
 for url in \
   "http://127.0.0.1:${KITCHEN_PORT}/" \
   "http://127.0.0.1:${HYBRID_PORT}/" \
-  "http://127.0.0.1:${TODO_PORT}/"; do
+  "http://127.0.0.1:${TODO_PORT}/" \
+  "http://127.0.0.1:${SHOWCASE_PORT}/"; do
   for _ in {1..20}; do
     if curl -sSf "$url" >/dev/null 2>&1; then
       break
@@ -58,6 +62,7 @@ done
 export SPARSH_KITCHEN_SINK_URL="http://127.0.0.1:${KITCHEN_PORT}"
 export SPARSH_HYBRID_OVERLAY_URL="http://127.0.0.1:${HYBRID_PORT}"
 export SPARSH_TODO_URL="http://127.0.0.1:${TODO_PORT}"
+export SPARSH_SHOWCASE_URL="http://127.0.0.1:${SHOWCASE_PORT}"
 
 cd "$ROOT_DIR"
 npx playwright test --config playwright.config.mjs "$@"

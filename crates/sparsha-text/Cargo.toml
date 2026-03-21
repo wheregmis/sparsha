@@ -1,0 +1,15 @@
+[package]
+name = "sparsha-text"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+sparsha-core = { workspace = true }
+wgpu = { workspace = true }
+parley = { workspace = true }
+swash = { workspace = true }
+glam = { workspace = true }
+bytemuck = { workspace = true }
+rustc-hash = { workspace = true }
+log = { workspace = true }

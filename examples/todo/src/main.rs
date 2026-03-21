@@ -1,12 +1,11 @@
-//! Todo example app for Sparsh (native + web) using signal-based state.
+//! Todo example app for Sparsha (native + web) using function components and signals.
 
 use serde_json::json;
-use sparsh::prelude::*;
-use sparsh::widgets::{current_theme, BuildContext, EventContext, PaintContext, WidgetId};
+use sparsha::prelude::*;
 
-fn main() -> Result<(), sparsh::AppRunError> {
+fn main() -> Result<(), sparsha::AppRunError> {
     #[cfg(target_arch = "wasm32")]
-    sparsh::init_web()?;
+    sparsha::init_web()?;
 
     #[cfg(not(target_arch = "wasm32"))]
     env_logger::init();
@@ -14,15 +13,15 @@ fn main() -> Result<(), sparsh::AppRunError> {
     let theme_mode = Signal::new(ThemeMode::Light);
 
     App::new()
-        .title("Sparsh Todo")
+        .title("Sparsha Todo")
         .size(960, 720)
         .theme(todo_light_theme())
         .dark_theme(todo_dark_theme())
         .theme_mode(theme_mode)
         .router(
             Router::new()
-                .route("/", move || Box::new(TodoApp::new(theme_mode)))
-                .route("/about", || Box::new(TodoAbout::new()))
+                .route("/", move || component(move |cx| todo_app(cx, theme_mode)))
+                .route("/about", || component(todo_about))
                 .fallback("/"),
         )
         .run()
@@ -137,19 +136,7 @@ impl TodoModel {
 }
 
 fn apply_action(model: Signal<TodoModel>, action: TodoAction) {
-    model.with_mut(|m| {
-        m.apply(action);
-    });
-}
-
-struct TodoApp {
-    id: WidgetId,
-    model: Signal<TodoModel>,
-    theme_mode: Signal<ThemeMode>,
-    analysis_text: Signal<String>,
-    analysis_generation: Signal<u64>,
-    task_runtime: TaskRuntime,
-    children: Vec<Box<dyn Widget>>,
+    model.with_mut(|state| state.apply(action));
 }
 
 fn value_to_u64(value: Option<&serde_json::Value>) -> u64 {
@@ -170,415 +157,321 @@ fn value_to_u64(value: Option<&serde_json::Value>) -> u64 {
     }
 }
 
-impl TodoApp {
-    fn new(theme_mode: Signal<ThemeMode>) -> Self {
-        let task_runtime = TaskRuntime::current_or_default();
-        let analysis_text = Signal::new(String::from("Background analyzer is idle."));
-        let analysis_for_results = analysis_text;
-        task_runtime.on_result(move |result| {
-            if result.task_kind != "analyze_text" {
-                return;
-            }
-            match result.status {
-                TaskStatus::Success(payload) => {
-                    let words = value_to_u64(payload.get("word_count"));
-                    let chars = value_to_u64(payload.get("char_count"));
-                    let lines = value_to_u64(payload.get("line_count"));
-                    analysis_for_results.set(format!(
-                        "Background analyzer: {} words, {} chars, {} lines",
-                        words, chars, lines
-                    ));
-                }
-                TaskStatus::Error(message) => {
-                    analysis_for_results.set(format!("Background analyzer error: {}", message));
-                }
-                TaskStatus::Canceled => {}
-            }
-        });
+fn analysis_summary(task: &TaskHook) -> String {
+    let Some(result) = task.result() else {
+        return "Background analyzer is idle.".to_owned();
+    };
 
-        let mut app = Self {
-            id: WidgetId::default(),
-            model: Signal::new(TodoModel::default()),
-            theme_mode,
-            analysis_text,
-            analysis_generation: Signal::new(0),
-            task_runtime,
-            children: Vec::new(),
-        };
-        app.rebuild_children();
-        app
-    }
-
-    fn toggle_theme_button(&self) -> Button {
-        let theme_mode = self.theme_mode;
-        let label = switch_label(theme_mode.get());
-
-        Button::new(label).on_click(move || {
-            theme_mode.with_mut(|mode| {
-                *mode = toggle_mode(*mode);
-            });
-        })
-    }
-
-    #[cfg(test)]
-    fn snapshot_model(&self) -> TodoModel {
-        self.model.get()
-    }
-
-    fn rebuild_children(&mut self) {
-        let model = self.model.get();
-        let theme = current_theme();
-        let is_dark = self.theme_mode.get() == ThemeMode::Dark;
-        let analysis_text = self.analysis_text.get();
-        let active_count = model.todos.iter().filter(|todo| !todo.done).count();
-        let done_count = model.todos.iter().filter(|todo| todo.done).count();
-
-        let shell_bg = theme.colors.background;
-        let panel_bg = theme.colors.surface;
-        let card_bg = theme.colors.surface_variant;
-        let subdued_text = theme.colors.text_muted;
-        let analysis_color = if is_dark {
-            theme.colors.border_focus
-        } else {
-            theme.colors.primary_hovered
-        };
-
-        let mut list = List::new().vertical().gap(10.0).fill_width();
-        let visible: Vec<TodoItem> = model.filtered_todos().cloned().collect();
-        if visible.is_empty() {
-            list.push_item(
-                Container::new()
-                    .padding(14.0)
-                    .background(card_bg)
-                    .corner_radius(8.0)
-                    .child(
-                        Text::new("No tasks for this filter yet.")
-                            .size(14.0)
-                            .color(subdued_text),
-                    ),
-            );
-        } else {
-            for todo in visible {
-                list.push_item(self.todo_row(todo));
-            }
-        }
-
-        let content = Container::new()
-            .column()
-            .gap(14.0)
-            .padding(26.0)
-            .width(720.0)
-            .background(panel_bg)
-            .corner_radius(14.0)
-            .child(
-                Container::new()
-                    .row()
-                    .fill_width()
-                    .space_between()
-                    .align_items(taffy::prelude::AlignItems::Center)
-                    .child(
-                        Text::new("Todo")
-                            .size(28.0)
-                            .bold()
-                            .color(theme.colors.text_primary),
-                    )
-                    .child(self.toggle_theme_button()),
+    match result.status {
+        TaskStatus::Success(payload) => {
+            let words = value_to_u64(payload.get("word_count"));
+            let chars = value_to_u64(payload.get("char_count"));
+            let lines = value_to_u64(payload.get("line_count"));
+            format!(
+                "Background analyzer: {} words, {} chars, {} lines",
+                words, chars, lines
             )
+        }
+        TaskStatus::Error(message) => format!("Background analyzer error: {}", message),
+        TaskStatus::Canceled => "Background analyzer canceled.".to_owned(),
+    }
+}
+
+fn toggle_theme_button(theme_mode: Signal<ThemeMode>) -> Button {
+    let label = switch_label(theme_mode.get());
+    Button::new(label).on_click(move || {
+        theme_mode.with_mut(|mode| {
+            *mode = toggle_mode(*mode);
+        });
+    })
+}
+
+fn secondary_button(label: &str, on_click: impl FnMut() + 'static) -> Button {
+    let theme = current_theme();
+    Button::new(label)
+        .background(theme.colors.surface_variant)
+        .text_color(theme.colors.text_primary)
+        .on_click(on_click)
+}
+
+fn filter_button(label: &str, model: Signal<TodoModel>, filter: Filter, current: Filter) -> Button {
+    let theme = current_theme();
+    let selected = current == filter;
+    let background = if selected {
+        theme.colors.primary
+    } else {
+        theme.colors.surface_variant
+    };
+    let text_color = if selected {
+        Color::WHITE
+    } else {
+        theme.colors.text_primary
+    };
+    Button::new(label)
+        .background(background)
+        .text_color(text_color)
+        .on_click(move || {
+            apply_action(model, TodoAction::SetFilter(filter));
+        })
+}
+
+fn filter_row(model: Signal<TodoModel>, current: Filter) -> Container {
+    Container::new()
+        .row()
+        .fill_width()
+        .gap(8.0)
+        .child(filter_button("All", model, Filter::All, current))
+        .child(filter_button("Active", model, Filter::Active, current))
+        .child(filter_button("Done", model, Filter::Done, current))
+}
+
+fn clear_completed_button(model: Signal<TodoModel>) -> Button {
+    secondary_button("Clear Completed", move || {
+        apply_action(model, TodoAction::ClearCompleted);
+    })
+}
+
+fn about_button(navigator: Navigator) -> Button {
+    secondary_button("About", move || {
+        navigator.go("/about");
+    })
+}
+
+fn back_to_todo_button(navigator: Navigator) -> Button {
+    secondary_button("Back to Todo", move || {
+        navigator.go("/");
+    })
+}
+
+fn footer_actions(model: Signal<TodoModel>, navigator: Navigator) -> Container {
+    Container::new()
+        .row()
+        .gap(10.0)
+        .child(about_button(navigator))
+        .child(clear_completed_button(model))
+}
+
+fn todo_row(model: Signal<TodoModel>, todo: TodoItem) -> Container {
+    let theme = current_theme();
+    let text_color = if todo.done {
+        theme.colors.text_muted
+    } else {
+        theme.colors.text_primary
+    };
+    let row_bg = if todo.done {
+        theme.colors.surface_done
+    } else {
+        theme.colors.surface_variant
+    };
+
+    let id = todo.id;
+    Container::new()
+        .row()
+        .fill_width()
+        .gap(12.0)
+        .padding(12.0)
+        .background(row_bg)
+        .corner_radius(10.0)
+        .align_items(taffy::prelude::AlignItems::Center)
+        .child(Checkbox::with_checked(todo.done).on_toggle(move |_| {
+            apply_action(model, TodoAction::Toggle(id));
+        }))
+        .child(
+            Container::new()
+                .flex_grow(1.0)
+                .child(Text::new(todo.text).size(15.0).color(text_color)),
+        )
+        .child(
+            Button::new("Delete")
+                .background(theme.colors.error)
+                .text_color(Color::WHITE)
+                .on_click(move || {
+                    apply_action(model, TodoAction::Delete(id));
+                }),
+        )
+}
+
+fn input_row(model: Signal<TodoModel>, draft: String, analysis: TaskHook) -> Container {
+    let theme = current_theme();
+    let model_for_change = model;
+    let model_for_submit = model;
+    let model_for_add = model;
+
+    Container::new()
+        .row()
+        .fill_width()
+        .gap(10.0)
+        .align_items(taffy::prelude::AlignItems::Center)
+        .child(
+            TextInput::new()
+                .value(draft)
+                .fill_width()
+                .placeholder("Add a task...")
+                .on_change(move |value| {
+                    apply_action(model_for_change, TodoAction::SetDraft(value.to_owned()));
+                    analysis.spawn(json!({ "text": value }));
+                })
+                .on_submit(move |_| {
+                    apply_action(model_for_submit, TodoAction::AddDraft);
+                }),
+        )
+        .child(
+            Button::new("Add")
+                .background(theme.colors.primary)
+                .text_color(Color::WHITE)
+                .on_click(move || {
+                    apply_action(model_for_add, TodoAction::AddDraft);
+                }),
+        )
+}
+
+fn todo_app(cx: &mut ComponentContext<'_>, theme_mode: Signal<ThemeMode>) -> Container {
+    let model = cx.signal(TodoModel::default());
+    let analysis = cx.use_task("todo.input-analysis", "analyze_text");
+    let navigator = cx.navigator();
+    let snapshot = model.get();
+    let theme = cx.theme();
+    let is_dark = theme_mode.get() == ThemeMode::Dark;
+    let analysis_text = if snapshot.draft.trim().is_empty() {
+        String::new()
+    } else {
+        analysis_summary(&analysis)
+    };
+    let active_count = snapshot.todos.iter().filter(|todo| !todo.done).count();
+    let done_count = snapshot.todos.iter().filter(|todo| todo.done).count();
+
+    let shell_bg = theme.colors.background;
+    let panel_bg = theme.colors.surface;
+    let card_bg = theme.colors.surface_variant;
+    let subdued_text = theme.colors.text_muted;
+    let analysis_color = if is_dark {
+        theme.colors.border_focus
+    } else {
+        theme.colors.primary_hovered
+    };
+    let visible: Vec<TodoItem> = snapshot.filtered_todos().cloned().collect();
+
+    let todo_list = if visible.is_empty() {
+        Container::new()
+            .padding(14.0)
+            .background(card_bg)
+            .corner_radius(8.0)
             .child(
-                Text::new("Sparsh native + web example using signal-driven state.")
-                    .size(13.0)
+                Text::new("No tasks for this filter yet.")
+                    .size(14.0)
                     .color(subdued_text),
             )
-            .child(Text::new(analysis_text).size(12.0).color(analysis_color))
-            .child(self.input_row(&model))
-            .child(self.filter_row(model.filter))
-            .child(
-                Scroll::new()
-                    .vertical()
-                    .fill_width()
-                    .height(340.0)
-                    .content(list),
-            )
-            .child(
-                Container::new()
-                    .row()
-                    .fill_width()
-                    .space_between()
-                    .align_items(taffy::prelude::AlignItems::Center)
-                    .child(
-                        Text::new(format!(
-                            "{} active / {} done / {} total",
-                            active_count,
-                            done_count,
-                            model.todos.len()
-                        ))
-                        .size(13.0)
-                        .color(subdued_text),
-                    )
-                    .child(self.clear_completed_button()),
-            );
+            .into_widget()
+    } else {
+        ForEach::new(
+            visible,
+            |todo| todo.id as usize,
+            move |todo| todo_row(model, todo),
+        )
+        .column()
+        .gap(10.0)
+        .fill_width()
+        .into_widget()
+    };
 
-        self.children = vec![Box::new(
+    let content = Container::new()
+        .column()
+        .gap(14.0)
+        .padding(26.0)
+        .width(720.0)
+        .background(panel_bg)
+        .corner_radius(14.0)
+        .child(
             Container::new()
-                .fill()
-                .center()
-                .background(shell_bg)
-                .child(content),
-        )];
-    }
-
-    fn input_row(&self, model: &TodoModel) -> Container {
-        let theme = current_theme();
-        let model_for_change = self.model;
-        let model_for_submit = self.model;
-        let model_for_add = self.model;
-        let runtime_for_analyze = self.task_runtime.clone();
-        let generation_signal = self.analysis_generation;
-
-        Container::new()
-            .row()
-            .fill_width()
-            .gap(10.0)
-            .align_items(taffy::prelude::AlignItems::Center)
-            .child(
-                TextInput::new()
-                    .value(model.draft.clone())
-                    .fill_width()
-                    .placeholder("Add a task...")
-                    .on_change(move |value| {
-                        apply_action(model_for_change, TodoAction::SetDraft(value.to_owned()));
-                        let generation = generation_signal.with_mut(|counter| {
-                            *counter += 1;
-                            *counter
-                        });
-                        runtime_for_analyze.spawn_keyed(
-                            "todo.input-analysis",
-                            generation,
-                            "analyze_text",
-                            json!({ "text": value }),
-                        );
-                    })
-                    .on_submit(move |_| {
-                        apply_action(model_for_submit, TodoAction::AddDraft);
-                    }),
-            )
-            .child(
-                Button::new("Add")
-                    .background(theme.colors.primary)
-                    .text_color(Color::WHITE)
-                    .on_click(move || {
-                        apply_action(model_for_add, TodoAction::AddDraft);
-                    }),
-            )
-    }
-
-    fn filter_row(&self, current_filter: Filter) -> Container {
-        Container::new()
-            .row()
-            .fill_width()
-            .gap(8.0)
-            .child(self.filter_button("All", Filter::All, current_filter))
-            .child(self.filter_button("Active", Filter::Active, current_filter))
-            .child(self.filter_button("Done", Filter::Done, current_filter))
-    }
-
-    fn filter_button(&self, label: &str, filter: Filter, current_filter: Filter) -> Button {
-        let theme = current_theme();
-        let selected = current_filter == filter;
-        let background = if selected {
-            theme.colors.primary
-        } else {
-            theme.colors.surface_variant
-        };
-        let text_color = if selected {
-            Color::WHITE
-        } else {
-            theme.colors.text_primary
-        };
-        let model = self.model;
-        Button::new(label)
-            .background(background)
-            .text_color(text_color)
-            .on_click(move || {
-                apply_action(model, TodoAction::SetFilter(filter));
-            })
-    }
-
-    fn clear_completed_button(&self) -> Button {
-        let theme = current_theme();
-        let model = self.model;
-        Button::new("Clear Completed")
-            .background(theme.colors.surface_variant)
-            .text_color(theme.colors.text_primary)
-            .on_click(move || {
-                apply_action(model, TodoAction::ClearCompleted);
-            })
-    }
-
-    fn todo_row(&self, todo: TodoItem) -> Container {
-        let theme = current_theme();
-        let text_color = if todo.done {
-            theme.colors.text_muted
-        } else {
-            theme.colors.text_primary
-        };
-        let row_bg = if todo.done {
-            theme.colors.surface_done
-        } else {
-            theme.colors.surface_variant
-        };
-
-        let id = todo.id;
-        let model_for_toggle = self.model;
-        let model_for_delete = self.model;
-
-        Container::new()
-            .row()
-            .fill_width()
-            .gap(12.0)
-            .padding(12.0)
-            .background(row_bg)
-            .corner_radius(10.0)
-            .align_items(taffy::prelude::AlignItems::Center)
-            .child(Checkbox::with_checked(todo.done).on_toggle(move |_| {
-                apply_action(model_for_toggle, TodoAction::Toggle(id));
-            }))
-            .child(
-                Container::new()
-                    .flex_grow(1.0)
-                    .child(Text::new(todo.text).size(15.0).color(text_color)),
-            )
-            .child(
-                Button::new("Delete")
-                    .background(theme.colors.error)
-                    .text_color(Color::WHITE)
-                    .on_click(move || {
-                        apply_action(model_for_delete, TodoAction::Delete(id));
-                    }),
-            )
-    }
-}
-
-struct TodoAbout {
-    id: WidgetId,
-    children: Vec<Box<dyn Widget>>,
-}
-
-impl TodoAbout {
-    fn new() -> Self {
-        let mut page = Self {
-            id: WidgetId::default(),
-            children: Vec::new(),
-        };
-        page.rebuild_children();
-        page
-    }
-
-    fn rebuild_children(&mut self) {
-        let theme = current_theme();
-        self.children = vec![Box::new(
-            Container::new()
-                .fill()
-                .padding(32.0)
-                .background(theme.colors.background)
+                .row()
+                .fill_width()
+                .space_between()
+                .align_items(taffy::prelude::AlignItems::Center)
                 .child(
-                    Container::new()
-                        .column()
-                        .gap(16.0)
-                        .padding(24.0)
-                        .background(theme.colors.surface)
-                        .corner_radius(16.0)
-                        .child(
-                            Text::new("Todo Route Demo")
-                                .size(28.0)
-                                .bold()
-                                .color(theme.colors.text_primary),
-                        )
-                        .child(
-                            Text::new(
-                                "This static route exists so the web runtime can exercise hash navigation and route rebuilding on the same widget tree as the main todo app.",
-                            )
-                            .size(16.0)
-                            .color(theme.colors.text_muted),
-                        )
-                        .child(
-                            Text::new("Switch between `#/` and `#/about` in the browser to verify web routing parity.")
-                                .size(14.0)
-                                .color(theme.colors.primary),
-                        ),
-                ),
-        )];
-    }
+                    Text::new("Todo")
+                        .size(28.0)
+                        .bold()
+                        .color(theme.colors.text_primary),
+                )
+                .child(toggle_theme_button(theme_mode)),
+        )
+        .child(
+            Text::new("Sparsha native + web example using signal-driven state.")
+                .size(13.0)
+                .color(subdued_text),
+        )
+        .child(Text::new(analysis_text).size(12.0).color(analysis_color))
+        .child(input_row(model, snapshot.draft.clone(), analysis))
+        .child(filter_row(model, snapshot.filter))
+        .child(
+            Scroll::new()
+                .vertical()
+                .fill_width()
+                .height(340.0)
+                .content(todo_list),
+        )
+        .child(
+            Container::new()
+                .row()
+                .fill_width()
+                .space_between()
+                .align_items(taffy::prelude::AlignItems::Center)
+                .child(
+                    Text::new(format!(
+                        "{} active / {} done / {} total",
+                        active_count,
+                        done_count,
+                        snapshot.todos.len()
+                    ))
+                    .size(13.0)
+                    .color(subdued_text),
+                )
+                .child(footer_actions(model, navigator)),
+        );
+
+    Container::new()
+        .fill()
+        .center()
+        .background(shell_bg)
+        .child(content)
 }
 
-impl Widget for TodoAbout {
-    fn id(&self) -> WidgetId {
-        self.id
-    }
-
-    fn set_id(&mut self, id: WidgetId) {
-        self.id = id;
-    }
-
-    fn style(&self) -> taffy::Style {
-        taffy::Style {
-            size: taffy::prelude::Size {
-                width: taffy::prelude::percent(1.0),
-                height: taffy::prelude::percent(1.0),
-            },
-            ..Default::default()
-        }
-    }
-
-    fn rebuild(&mut self, _ctx: &mut BuildContext) {
-        self.rebuild_children();
-    }
-
-    fn paint(&self, _ctx: &mut PaintContext) {}
-
-    fn children(&self) -> &[Box<dyn Widget>] {
-        &self.children
-    }
-
-    fn children_mut(&mut self) -> &mut [Box<dyn Widget>] {
-        &mut self.children
-    }
-}
-
-impl Widget for TodoApp {
-    fn id(&self) -> WidgetId {
-        self.id
-    }
-
-    fn set_id(&mut self, id: WidgetId) {
-        self.id = id;
-    }
-
-    fn style(&self) -> taffy::Style {
-        taffy::Style {
-            size: taffy::prelude::Size {
-                width: taffy::prelude::percent(1.0),
-                height: taffy::prelude::percent(1.0),
-            },
-            ..Default::default()
-        }
-    }
-
-    fn rebuild(&mut self, _ctx: &mut BuildContext) {
-        self.rebuild_children();
-    }
-
-    fn paint(&self, _ctx: &mut PaintContext) {}
-
-    fn event(&mut self, _ctx: &mut EventContext, _event: &InputEvent) {}
-
-    fn children(&self) -> &[Box<dyn Widget>] {
-        &self.children
-    }
-
-    fn children_mut(&mut self) -> &mut [Box<dyn Widget>] {
-        &mut self.children
-    }
+fn todo_about(cx: &mut ComponentContext<'_>) -> Container {
+    let theme = cx.theme();
+    let navigator = cx.navigator();
+    Container::new()
+        .fill()
+        .padding(32.0)
+        .background(theme.colors.background)
+        .child(
+            Container::new()
+                .column()
+                .gap(16.0)
+                .padding(24.0)
+                .background(theme.colors.surface)
+                .corner_radius(16.0)
+                .child(
+                    Text::new("About Todo")
+                        .size(28.0)
+                        .bold()
+                        .color(theme.colors.text_primary),
+                )
+                .child(
+                    Text::new(
+                        "This example stays intentionally small: one task screen, one about route, shared theme state, and the same component code on native and web.",
+                    )
+                    .size(16.0)
+                    .color(theme.colors.text_muted),
+                )
+                .child(
+                    Text::new(
+                        "Use the About button in the task footer or switch between `#/` and `#/about` in the browser to verify routing parity.",
+                    )
+                    .size(14.0)
+                    .color(theme.colors.primary),
+                )
+                .child(back_to_todo_button(navigator)),
+        )
 }
 
 #[cfg(test)]
@@ -604,22 +497,22 @@ mod tests {
     }
 
     #[test]
-    fn todo_app_signal_actions_update_state() {
-        let runtime = sparsh::signals::RuntimeHandle::new();
+    fn apply_action_updates_signal_backed_model() {
+        let runtime = sparsha::signals::RuntimeHandle::new();
         runtime.run_with_current(|| {
-            let app = TodoApp::new(Signal::new(ThemeMode::Light));
-            apply_action(app.model, TodoAction::SetDraft("Alpha".to_owned()));
-            apply_action(app.model, TodoAction::AddDraft);
+            let model = Signal::new(TodoModel::default());
+            apply_action(model, TodoAction::SetDraft("Alpha".to_owned()));
+            apply_action(model, TodoAction::AddDraft);
 
-            let snapshot = app.snapshot_model();
+            let snapshot = model.get();
             assert_eq!(snapshot.todos.len(), 1);
             assert_eq!(snapshot.todos[0].text, "Alpha");
 
             let id = snapshot.todos[0].id;
-            apply_action(app.model, TodoAction::Toggle(id));
-            apply_action(app.model, TodoAction::SetFilter(Filter::Done));
+            apply_action(model, TodoAction::Toggle(id));
+            apply_action(model, TodoAction::SetFilter(Filter::Done));
 
-            let updated = app.snapshot_model();
+            let updated = model.get();
             assert_eq!(updated.filter, Filter::Done);
             assert!(updated.todos[0].done);
         });

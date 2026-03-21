@@ -18,9 +18,9 @@ run_perf_test() {
 
 cd "$ROOT_DIR"
 
-run_perf_test sparsh-layout perf_smoke
-run_perf_test sparsh-text perf_smoke
-run_perf_test sparsh-render perf_smoke
+run_perf_test sparsha-layout perf_smoke
+run_perf_test sparsha-text perf_smoke
+run_perf_test sparsha-render perf_smoke
 
 echo "[perf-smoke] web startup smoke" | tee -a "$LOG_FILE"
 "$ROOT_DIR/scripts/web-perf-smoke.sh" | tee -a "$LOG_FILE"

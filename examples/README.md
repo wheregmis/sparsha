@@ -1,4 +1,4 @@
-# Sparsh Examples
+# Sparsha Examples
 
 > Runnable reference apps for the current polished 1.0 candidate surface.
 
@@ -12,7 +12,7 @@ Each example is a normal Cargo binary. The examples are intended to demonstrate 
 | `fractal-clock` | Draw-heavy rendering with `DrawSurface` and reactive state |
 | `hybrid-overlay` | DOM-backed UI with a hybrid GPU surface on the web path |
 | `showcase` | Hash-routed public preview surface with component samples and manual rendering checks |
-| `todo` | Signals, routing, simple owned-child lists, and background task usage in a small app |
+| `todo` | Function components, signals, keyed `ForEach`, routing, and background task hooks in a small app |
 
 ## Native
 
@@ -30,7 +30,7 @@ Each example directory still contains the checked-in files needed for a Trunk fl
 
 - `index.html`
 - `Trunk.toml`
-- `sparsh-worker.js`
+- `sparsha-worker.js`
 
 Canonical repo-root workflow:
 
@@ -74,7 +74,7 @@ The public `showcase` example is also published through `.github/workflows/showc
 
 - Accessibility smoke verification is still manual in this milestone
 - `todo` intentionally keeps `TextInput` single-line while `kitchen-sink` demonstrates `TextArea`
-- `todo` intentionally keeps the simple owned-children `List` path while `kitchen-sink` exercises the virtualized mode
+- `todo` intentionally uses `ForEach` plus `Scroll` instead of the virtualized `List` path that `kitchen-sink` exercises
 - Router usage stays on static paths
 - Final accessibility and browser parity sign-off still includes manual checks beyond the automated workflows
 

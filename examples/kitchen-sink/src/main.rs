@@ -1,6 +1,8 @@
 //! Kitchen Sink - Interactive widget testing
 
+use sparsha::core::Rect;
 use sparsha::prelude::*;
+use sparsha::text::TextStyle;
 
 fn main() -> Result<(), sparsha::AppRunError> {
     #[cfg(target_arch = "wasm32")]
@@ -83,6 +85,7 @@ fn build_main_area() -> Scroll {
                 .fill_width()
                 .child(build_input_section())
                 .child(build_container_section())
+                .child(build_animation_section())
                 .child(build_scroll_section()),
         )
 }
@@ -257,6 +260,65 @@ fn build_scroll_section() -> Container {
                                 .label("Kitchen sink virtualized list"),
                             ),
                     ),
+            ),
+    )
+}
+
+fn build_animation_section() -> Container {
+    section(
+        "Animations",
+        Container::new()
+            .column()
+            .gap(16.0)
+            .fill_width()
+            .child(
+                Text::new(
+                    "Implicit animation: route-card fade uses ImplicitAnimation.\n\
+                     Explicit animation: draw surface updates using elapsed_time.\n\
+                     Page transitions: router cross-fade overlay between routes.",
+                )
+                .size(13.0)
+                .color(current_theme().colors.text_muted),
+            )
+            .child(
+                DrawSurface::new(|ctx| {
+                    ctx.request_next_frame();
+                    let bounds = ctx.bounds;
+                    let t = (ctx.elapsed_time * 1.2).sin() * 0.5 + 0.5;
+                    let bg = lerp_color(
+                        Color::from_hex(0x1F2937).with_alpha(0.9),
+                        Color::from_hex(0x2563EB).with_alpha(0.9),
+                        t,
+                    );
+                    ctx.fill_bordered_rect(
+                        bounds,
+                        bg,
+                        14.0,
+                        1.0,
+                        current_theme().colors.border.with_alpha(0.9),
+                    );
+
+                    let wave_width = bounds.width * 0.28;
+                    let x = bounds.x + (bounds.width - wave_width) * t;
+                    ctx.fill_rect(
+                        Rect::new(x, bounds.y + 8.0, wave_width, bounds.height - 16.0),
+                        current_theme().colors.primary.with_alpha(0.22),
+                    );
+
+                    let style = TextStyle::new()
+                        .with_family("Inter")
+                        .with_size(14.0)
+                        .with_color(current_theme().colors.text_primary)
+                        .bold();
+                    ctx.draw_text(
+                        "Explicit animation: DrawSurface timeline",
+                        &style,
+                        bounds.x + 16.0,
+                        bounds.y + 18.0,
+                    );
+                })
+                .fill_width()
+                .height(110.0),
             ),
     )
 }

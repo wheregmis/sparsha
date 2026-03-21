@@ -3,6 +3,7 @@
 //! Stability: the supported 1.0 contract is the crate-root widget/theme/context re-export set.
 
 mod accessibility;
+mod animation;
 mod button;
 mod checkbox;
 mod container;
@@ -24,6 +25,7 @@ mod theme;
 mod widget;
 
 pub use accessibility::{AccessibilityAction, AccessibilityInfo, AccessibilityRole};
+pub use animation::{lerp_color, AnimationEasing, ImplicitAnimation, Tween};
 pub use button::{Button, ButtonState, ButtonStyle};
 pub use checkbox::{Checkbox, CheckboxStyle};
 pub use container::Container;

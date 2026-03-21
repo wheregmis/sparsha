@@ -3,8 +3,10 @@
 use sparsha_layout::taffy::prelude::{percent, Size, Style};
 use sparsha_layout::WidgetId;
 use sparsha_signals::Signal;
-use sparsha_widgets::{Container, IntoWidget, Text, Widget};
-use std::sync::Arc;
+use sparsha_widgets::{
+    current_theme, AnimationEasing, Container, ImplicitAnimation, IntoWidget, Text, Widget,
+};
+use std::{cell::RefCell, sync::Arc};
 
 #[derive(Clone)]
 pub struct Route {
@@ -271,6 +273,13 @@ pub(crate) struct RouterHost {
     router: Router,
     active_path: String,
     children: Vec<Box<dyn Widget>>,
+    transition: RefCell<Option<RouteTransition>>,
+}
+
+#[derive(Clone, Debug)]
+struct RouteTransition {
+    animation: ImplicitAnimation,
+    initialized: bool,
 }
 
 impl RouterHost {
@@ -283,6 +292,7 @@ impl RouterHost {
             router,
             active_path,
             children: vec![child],
+            transition: RefCell::new(None),
         }
     }
 }
@@ -312,10 +322,42 @@ impl Widget for RouterHost {
             self.router.replace(path.clone());
             self.active_path = path;
             self.children = vec![self.router.build_for_current_path()];
+            *self.transition.get_mut() = Some(RouteTransition {
+                animation: ImplicitAnimation::new(0.0),
+                initialized: false,
+            });
         }
     }
 
-    fn paint(&self, _ctx: &mut sparsha_widgets::PaintContext) {}
+    fn paint(&self, ctx: &mut sparsha_widgets::PaintContext) {
+        let mut transition_slot = self.transition.borrow_mut();
+        let Some(transition) = transition_slot.as_mut() else {
+            return;
+        };
+
+        if !transition.initialized {
+            transition.animation.set_target(
+                1.0,
+                ctx.elapsed_time,
+                0.24,
+                AnimationEasing::EaseInOut,
+            );
+            transition.initialized = true;
+        }
+
+        let progress = transition.animation.sample(ctx.elapsed_time);
+        let overlay_alpha = page_transition_overlay_alpha(progress);
+        if overlay_alpha > 0.0 {
+            let overlay = current_theme().colors.background.with_alpha(overlay_alpha);
+            ctx.fill_rect(ctx.bounds(), overlay);
+        }
+
+        if transition.animation.is_animating() {
+            ctx.request_next_frame();
+        } else {
+            transition_slot.take();
+        }
+    }
 
     fn children(&self) -> &[Box<dyn Widget>] {
         &self.children
@@ -357,6 +399,12 @@ fn normalize_path(path: &str) -> String {
 
 fn is_static_path(path: &str) -> bool {
     path.starts_with('/') && !path.contains(':') && !path.contains('*')
+}
+
+fn page_transition_overlay_alpha(progress: f32) -> f32 {
+    let progress = progress.clamp(0.0, 1.0);
+    let triangle = 1.0 - (progress * 2.0 - 1.0).abs();
+    (triangle * 0.16).clamp(0.0, 0.16)
 }
 
 #[cfg(test)]
@@ -427,5 +475,17 @@ mod tests {
         assert_eq!(hash_to_path(""), "/");
         assert_eq!(path_to_hash("/"), "#/");
         assert_eq!(path_to_hash("settings"), "#/settings");
+    }
+
+    #[test]
+    fn page_transition_alpha_peaks_midway() {
+        let start = page_transition_overlay_alpha(0.0);
+        let mid = page_transition_overlay_alpha(0.5);
+        let end = page_transition_overlay_alpha(1.0);
+        assert_eq!(start, 0.0);
+        assert_eq!(end, 0.0);
+        assert!(mid > 0.0);
+        assert!(mid > start);
+        assert!(mid > end);
     }
 }

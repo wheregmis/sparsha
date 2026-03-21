@@ -245,11 +245,7 @@ impl TodoApp {
 
         let shell_bg = theme.colors.background;
         let panel_bg = theme.colors.surface;
-        let card_bg = if is_dark {
-            theme.colors.input_background
-        } else {
-            Color::from_hex(0xF8FAFC)
-        };
+        let card_bg = theme.colors.surface_variant;
         let subdued_text = theme.colors.text_muted;
         let analysis_color = if is_dark {
             theme.colors.border_focus
@@ -398,14 +394,11 @@ impl TodoApp {
 
     fn filter_button(&self, label: &str, filter: Filter, current_filter: Filter) -> Button {
         let theme = self.theme_signal.get();
-        let is_dark = self.theme_mode.get() == ThemeMode::Dark;
         let selected = current_filter == filter;
         let background = if selected {
             theme.colors.primary
-        } else if is_dark {
-            theme.colors.input_background
         } else {
-            Color::from_hex(0xF1F5F9)
+            theme.colors.surface_variant
         };
         let text_color = if selected {
             Color::WHITE
@@ -423,14 +416,9 @@ impl TodoApp {
 
     fn clear_completed_button(&self) -> Button {
         let theme = self.theme_signal.get();
-        let is_dark = self.theme_mode.get() == ThemeMode::Dark;
         let model = self.model;
         Button::new("Clear Completed")
-            .background(if is_dark {
-                theme.colors.input_background
-            } else {
-                Color::from_hex(0xF1F5F9)
-            })
+            .background(theme.colors.surface_variant)
             .text_color(theme.colors.text_primary)
             .on_click(move || {
                 apply_action(model, TodoAction::ClearCompleted);
@@ -439,24 +427,15 @@ impl TodoApp {
 
     fn todo_row(&self, todo: TodoItem) -> Container {
         let theme = self.theme_signal.get();
-        let is_dark = self.theme_mode.get() == ThemeMode::Dark;
         let text_color = if todo.done {
             theme.colors.text_muted
         } else {
             theme.colors.text_primary
         };
         let row_bg = if todo.done {
-            if is_dark {
-                Color::from_hex(0x0B1220)
-            } else {
-                Color::from_hex(0xE2E8F0)
-            }
+            theme.colors.surface_done
         } else {
-            if is_dark {
-                theme.colors.input_background
-            } else {
-                Color::from_hex(0xF1F5F9)
-            }
+            theme.colors.surface_variant
         };
 
         let id = todo.id;
@@ -481,11 +460,7 @@ impl TodoApp {
             )
             .child(
                 Button::new("Delete")
-                    .background(if is_dark {
-                        Color::from_hex(0x7F1D1D)
-                    } else {
-                        Color::from_hex(0xDC2626)
-                    })
+                    .background(theme.colors.error)
                     .text_color(Color::WHITE)
                     .on_click(move || {
                         apply_action(model_for_delete, TodoAction::Delete(id));

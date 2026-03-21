@@ -7,6 +7,20 @@
       name="description"
       content="Spark todo app example running in WebAssembly with DOM rendering."
     />
+    <meta name="robots" content="index,follow" />
+    <meta name="theme-color" content="#0f172a" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Todo - Spark" />
+    <meta
+      property="og:description"
+      content="Spark todo app example running in WebAssembly with DOM rendering."
+    />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Todo - Spark" />
+    <meta
+      name="twitter:description"
+      content="Spark todo app example running in WebAssembly with DOM rendering."
+    />
     <title>Todo - Spark</title>
     <style>
       html, body {
@@ -16,9 +30,80 @@
         height: 100%;
         background: #0f172a;
       }
+
+      body {
+        color: #e2e8f0;
+        font-family: "Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      }
+
+      #spark-loading-shell {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        background: #0f172a;
+        transition: opacity 180ms ease;
+      }
+
+      #spark-loading-shell .shell-content {
+        max-width: 34rem;
+        padding: 1.5rem;
+        text-align: center;
+      }
+
+      #spark-loading-shell h1 {
+        margin: 0;
+        font-size: clamp(1.8rem, 2.8vw, 2.3rem);
+        line-height: 1.2;
+      }
+
+      #spark-loading-shell p {
+        margin-top: 0.75rem;
+        margin-bottom: 0;
+        color: #94a3b8;
+      }
+
+      #spark-loading-shell.is-hidden {
+        opacity: 0;
+        pointer-events: none;
+        visibility: hidden;
+      }
     </style>
   </head>
   <body>
+    <main id="spark-loading-shell" aria-live="polite">
+      <div class="shell-content">
+        <h1>Spark Todo</h1>
+        <p>Preparing your todo workspace...</p>
+      </div>
+    </main>
+    <noscript>
+      <main>
+        <h1>Spark Todo</h1>
+        <p>This app needs JavaScript enabled to run.</p>
+      </main>
+    </noscript>
+    <script>
+      (() => {
+        const shell = document.getElementById("spark-loading-shell");
+        if (!shell) return;
+
+        let hidden = false;
+        const hideShell = () => {
+          if (hidden) return;
+          hidden = true;
+          requestAnimationFrame(() => {
+            shell.classList.add("is-hidden");
+            shell.setAttribute("aria-hidden", "true");
+          });
+        };
+
+        window.addEventListener("SparkFirstPaint", hideShell, { once: true });
+        window.addEventListener("TrunkApplicationStarted", hideShell, { once: true });
+
+        setTimeout(hideShell, 12_000);
+      })();
+    </script>
     <script data-trunk src="src/main.rs" type="rust"></script>
   </body>
 </html>

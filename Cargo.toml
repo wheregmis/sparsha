@@ -58,6 +58,8 @@ web-sys = { version = "0.3.91", features = [
     "Window",
     "Document",
     "Element",
+    "Event",
+    "CustomEvent",
     "Node",
     "HtmlElement",
     "CssStyleDeclaration",
@@ -72,3 +74,5 @@ console_error_panic_hook = "0.1.7"
 [profile.release]
 lto = true
 codegen-units = 1
+panic = "abort"
+strip = true

@@ -10,7 +10,7 @@ use spark_text::TextSystem;
 use spark_widgets::{EventContext, LayoutContext, PaintContext, Widget};
 use std::{cell::RefCell, rc::Rc};
 use wasm_bindgen::{closure::Closure, JsCast};
-use web_sys::{KeyboardEvent as WebKeyboardEvent, MouseEvent, WheelEvent, Window};
+use web_sys::{CustomEvent, KeyboardEvent as WebKeyboardEvent, MouseEvent, WheelEvent, Window};
 
 pub(crate) fn run_dom_app<F>(config: AppConfig, build_ui: F)
 where
@@ -35,6 +35,7 @@ where
         viewport_height: 0.0,
         needs_layout: true,
         needs_repaint: true,
+        first_paint_emitted: false,
     };
     state.update_viewport();
 
@@ -57,6 +58,7 @@ struct WebAppState {
     viewport_height: f32,
     needs_layout: bool,
     needs_repaint: bool,
+    first_paint_emitted: bool,
 }
 
 impl WebAppState {
@@ -67,6 +69,26 @@ impl WebAppState {
             }
             if let Ok(height) = window.inner_height() {
                 self.viewport_height = height.as_f64().unwrap_or(self.config.height as f64) as f32;
+            }
+        }
+    }
+
+    fn emit_first_paint_event(&mut self) {
+        if self.first_paint_emitted {
+            return;
+        }
+        self.first_paint_emitted = true;
+
+        let Some(window) = web_sys::window() else {
+            return;
+        };
+
+        match CustomEvent::new("SparkFirstPaint") {
+            Ok(event) => {
+                let _ = window.dispatch_event(event.as_ref());
+            }
+            Err(err) => {
+                log::warn!("failed to emit SparkFirstPaint event: {:?}", err);
             }
         }
     }
@@ -267,6 +289,8 @@ impl WebAppState {
                 .render(&self.draw_list, self.config.background)
             {
                 log::error!("dom render failed: {:?}", err);
+            } else {
+                self.emit_first_paint_event();
             }
         }
     }

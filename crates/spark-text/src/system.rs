@@ -1,8 +1,9 @@
 //! Text shaping and layout system using Parley.
 
 use crate::atlas::{CachedGlyph, GlyphAtlas, GlyphBitmap, GlyphKey};
+#[cfg(not(target_arch = "wasm32"))]
+use parley::fontique::Blob;
 use parley::{
-    fontique::Blob,
     layout::{Alignment, GlyphRun, PositionedLayoutItem},
     style::{
         FontFamily, FontStack, FontStyle, FontWeight, GenericFamily, LineHeight, StyleProperty,
@@ -17,8 +18,10 @@ use swash::{
 };
 use wgpu::{Device, Queue};
 
-// Embed the Inter font at compile time
+// Embed Inter on native platforms only to keep web WASM payload smaller.
+#[cfg(not(target_arch = "wasm32"))]
 static INTER_REGULAR: &[u8] = include_bytes!("../../../assets/fonts/Inter-Regular.ttf");
+#[cfg(not(target_arch = "wasm32"))]
 static INTER_BOLD: &[u8] = include_bytes!("../../../assets/fonts/Inter-Bold.ttf");
 
 /// Text style configuration.
@@ -118,14 +121,18 @@ impl TextSystem {
 
     /// Create a text system that can measure text without initializing GPU resources.
     pub fn new_headless() -> Self {
+        #[cfg(not(target_arch = "wasm32"))]
         let mut font_cx = FontContext::new();
+        #[cfg(target_arch = "wasm32")]
+        let font_cx = FontContext::new();
 
-        // Register embedded Inter fonts
-        let regular_blob = Blob::new(std::sync::Arc::new(INTER_REGULAR.to_vec()));
-        let bold_blob = Blob::new(std::sync::Arc::new(INTER_BOLD.to_vec()));
-
-        font_cx.collection.register_fonts(regular_blob, None);
-        font_cx.collection.register_fonts(bold_blob, None);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let regular_blob = Blob::new(std::sync::Arc::new(INTER_REGULAR.to_vec()));
+            let bold_blob = Blob::new(std::sync::Arc::new(INTER_BOLD.to_vec()));
+            font_cx.collection.register_fonts(regular_blob, None);
+            font_cx.collection.register_fonts(bold_blob, None);
+        }
 
         let layout_cx = LayoutContext::new();
         let scale_cx = ScaleContext::new();
@@ -184,7 +191,12 @@ impl TextSystem {
             style.line_height,
         )));
 
-        // Use embedded Inter font with fallback to system sans-serif
+        #[cfg(target_arch = "wasm32")]
+        builder.push_default(StyleProperty::FontStack(FontStack::List(
+            vec![FontFamily::Generic(GenericFamily::SansSerif)].into(),
+        )));
+
+        #[cfg(not(target_arch = "wasm32"))]
         builder.push_default(StyleProperty::FontStack(FontStack::List(
             vec![
                 FontFamily::Named("Inter".into()),
@@ -426,7 +438,12 @@ impl TextSystem {
             style.line_height,
         )));
 
-        // Use embedded Inter font with fallback to system sans-serif
+        #[cfg(target_arch = "wasm32")]
+        builder.push_default(StyleProperty::FontStack(FontStack::List(
+            vec![FontFamily::Generic(GenericFamily::SansSerif)].into(),
+        )));
+
+        #[cfg(not(target_arch = "wasm32"))]
         builder.push_default(StyleProperty::FontStack(FontStack::List(
             vec![
                 FontFamily::Named("Inter".into()),
@@ -447,7 +464,30 @@ impl TextSystem {
         // Perform line breaking
         layout.break_all_lines(max_width);
 
-        (layout.width(), layout.height())
+        let measured_width = layout.width();
+        let measured_height = layout.height();
+
+        // On web builds without embedded fonts, the shaping backend can occasionally return
+        // zero metrics while browser CSS text still renders. Guard against that so layout
+        // does not collapse and overlap adjacent text widgets.
+        let fallback_height = style.font_size * style.line_height;
+        let height = if measured_height.is_finite() && measured_height > 0.0 {
+            measured_height.max(fallback_height)
+        } else {
+            fallback_height
+        };
+
+        let width = if measured_width.is_finite() && measured_width > 0.0 {
+            measured_width
+        } else {
+            let approx = text.chars().count() as f32 * style.font_size * 0.55;
+            match max_width {
+                Some(limit) if limit.is_finite() && limit > 0.0 => approx.min(limit),
+                _ => approx,
+            }
+        };
+
+        (width, height)
     }
 }
 

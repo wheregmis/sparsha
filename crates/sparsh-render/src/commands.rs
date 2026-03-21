@@ -210,3 +210,60 @@ impl DrawList {
         self.commands.len()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Instant;
+
+    #[test]
+    #[ignore = "perf smoke"]
+    fn perf_smoke_draw_list_encoding() {
+        let start = Instant::now();
+        let mut draw_list = DrawList::new();
+        let text_style = TextStyle::default().with_family("Inter").with_size(14.0);
+
+        for row in 0..400 {
+            let y = row as f32 * 18.0;
+            draw_list.push_clip(Rect::new(0.0, y, 960.0, 18.0));
+            draw_list.push_translation((0.0, y));
+            draw_list.bordered_rect(
+                Rect::new(0.0, 0.0, 960.0, 16.0),
+                if row % 2 == 0 {
+                    Color::from_hex(0xE2E8F0)
+                } else {
+                    Color::from_hex(0xCBD5E1)
+                },
+                4.0,
+                1.0,
+                Color::from_hex(0x94A3B8),
+            );
+            draw_list.line((0.0, 16.0), (960.0, 16.0), 1.0, Color::from_hex(0x475569));
+            draw_list.text_run(format!("Row {}", row + 1), text_style.clone(), 12.0, 2.0);
+            draw_list.pop_translation();
+            draw_list.pop_clip();
+        }
+
+        let rect_count = draw_list
+            .commands()
+            .iter()
+            .filter(|command| matches!(command, DrawCommand::Rect { .. }))
+            .count();
+        let text_count = draw_list
+            .commands()
+            .iter()
+            .filter(|command| matches!(command, DrawCommand::TextRun { .. }))
+            .count();
+        let elapsed = start.elapsed();
+
+        println!(
+            "render perf smoke: encoded {} commands ({} rects, {} text runs) in {:?}",
+            draw_list.len(),
+            rect_count,
+            text_count,
+            elapsed
+        );
+        assert_eq!(rect_count, 400);
+        assert_eq!(text_count, 400);
+    }
+}

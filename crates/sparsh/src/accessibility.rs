@@ -103,9 +103,7 @@ pub(crate) struct RoutedAccessibilityAction {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn action_from_accesskit(
-    request: ActionRequest,
-) -> Option<RoutedAccessibilityAction> {
+pub(crate) fn action_from_accesskit(request: ActionRequest) -> Option<RoutedAccessibilityAction> {
     let action = match request.action {
         Action::Click => AccessibilityAction::Click,
         Action::Focus => AccessibilityAction::Focus,
@@ -154,7 +152,14 @@ pub(crate) fn accessibility_node_id(path: &[usize]) -> u64 {
 #[cfg(not(target_arch = "wasm32"))]
 fn build_accesskit_node(snapshot: &AccessibilityNodeSnapshot) -> Node {
     let mut node = Node::new(accesskit_role(snapshot.role));
-    node.set_children(snapshot.children.iter().copied().map(NodeId).collect::<Vec<_>>());
+    node.set_children(
+        snapshot
+            .children
+            .iter()
+            .copied()
+            .map(NodeId)
+            .collect::<Vec<_>>(),
+    );
     node.set_bounds(accesskit_rect(snapshot.bounds));
 
     if let Some(label) = &snapshot.label {
@@ -225,8 +230,14 @@ mod tests {
 
     #[test]
     fn node_ids_are_stable_for_widget_paths() {
-        assert_eq!(accessibility_node_id(&[0, 1, 2]), accessibility_node_id(&[0, 1, 2]));
-        assert_ne!(accessibility_node_id(&[0, 1, 2]), accessibility_node_id(&[0, 2, 1]));
+        assert_eq!(
+            accessibility_node_id(&[0, 1, 2]),
+            accessibility_node_id(&[0, 1, 2])
+        );
+        assert_ne!(
+            accessibility_node_id(&[0, 1, 2]),
+            accessibility_node_id(&[0, 2, 1])
+        );
     }
 
     #[test]

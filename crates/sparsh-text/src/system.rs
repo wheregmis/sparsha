@@ -558,6 +558,7 @@ fn cache_insert<V: Clone>(
 mod tests {
     use super::*;
     use sparsh_core::GlyphInstance;
+    use std::time::Instant;
 
     #[test]
     fn text_style_default() {
@@ -608,5 +609,42 @@ mod tests {
         st.height = 12.0;
         assert!(!st.is_empty());
         assert_eq!(st.glyphs.len(), 1);
+    }
+
+    #[test]
+    #[ignore = "perf smoke"]
+    fn perf_smoke_measurement_batch() {
+        let start = Instant::now();
+        let mut system = TextSystem::new_headless();
+        let style = TextStyle::default()
+            .with_family("Inter")
+            .with_size(16.0)
+            .with_color(Color::from_hex(0x1F2937));
+        let texts: Vec<String> = (0..300)
+            .map(|index| {
+                format!(
+                    "Perf smoke paragraph {index}: Sparsh shapes and measures repeated text for layout verification."
+                )
+            })
+            .collect();
+        let mut non_zero = 0usize;
+
+        for round in 0..12 {
+            for (index, text) in texts.iter().enumerate() {
+                let max_width = Some(240.0 + ((index + round) % 4) as f32 * 80.0);
+                let (width, height) = system.measure(text, &style, max_width);
+                if width > 0.0 && height > 0.0 {
+                    non_zero += 1;
+                }
+            }
+        }
+
+        let elapsed = start.elapsed();
+        println!(
+            "text perf smoke: measured {} text layouts in {:?}",
+            texts.len() * 12,
+            elapsed
+        );
+        assert_eq!(non_zero, texts.len() * 12);
     }
 }

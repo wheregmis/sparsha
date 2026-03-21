@@ -84,6 +84,7 @@ pub enum ThemeMode {
     Dark,
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone)]
 pub(crate) enum ThemeSource {
     Static(Theme),
@@ -114,6 +115,7 @@ impl ThemeModeSource {
     }
 }
 
+#[allow(clippy::large_enum_variant)]
 pub enum ThemeInput {
     Static(Theme),
     Dynamic(ReadSignal<Theme>),

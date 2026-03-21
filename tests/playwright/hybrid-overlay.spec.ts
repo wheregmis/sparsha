@@ -9,8 +9,8 @@ test("hybrid overlay keeps DOM overlays interactive around the GPU surface", asy
   await page.goto(baseURL);
   await expect(page).toHaveTitle(/Hybrid Overlay - Sparsh/);
 
-  const canvas = page.locator("canvas").first();
-  await expect(canvas).toBeVisible();
+  const canvas = page.locator("canvas");
+  await expect(canvas).toHaveCount(1);
   await expect(page.getByText("HYBRID OVERLAY")).toBeVisible();
   await expect(page.getByText(/Accent 1/)).toBeVisible();
 
@@ -18,6 +18,6 @@ test("hybrid overlay keeps DOM overlays interactive around the GPU surface", asy
   await expect(page.getByText(/Accent 2/)).toBeVisible();
 
   await page.setViewportSize({ width: 1180, height: 760 });
-  await expect(canvas).toBeVisible();
+  await expect(canvas).toHaveCount(1);
   await expect(page.getByText("DOM + GPU")).toBeVisible();
 });

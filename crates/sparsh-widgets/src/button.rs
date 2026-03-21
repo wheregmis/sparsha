@@ -284,38 +284,34 @@ impl Widget for Button {
         }
 
         match event {
-            InputEvent::PointerMove { pos } => {
-                if self.interaction.pointer_move(ctx.contains(*pos)) {
+            InputEvent::PointerMove { pos }
+                if self.interaction.pointer_move(ctx.contains(*pos)) =>
+            {
+                ctx.request_paint();
+            }
+            InputEvent::PointerDown { pos, .. }
+                if self.interaction.pointer_down(ctx.contains(*pos)) =>
+            {
+                ctx.capture_pointer();
+            }
+            InputEvent::PointerUp { pos, .. } if self.interaction.pressed() => {
+                let should_click = self.interaction.pointer_up(ctx.contains(*pos));
+                ctx.release_pointer();
+                if should_click {
+                    if let Some(handler) = &mut self.on_click {
+                        handler();
+                    }
+                }
+            }
+            InputEvent::KeyDown { .. } if ctx.has_focus() => {
+                use sparsh_input::{ActionMapper, StandardAction};
+                let mapper = ActionMapper::new();
+                if mapper.is_action(event, StandardAction::Activate) {
+                    if let Some(handler) = &mut self.on_click {
+                        handler();
+                    }
+                    ctx.stop_propagation();
                     ctx.request_paint();
-                }
-            }
-            InputEvent::PointerDown { pos, .. } => {
-                if self.interaction.pointer_down(ctx.contains(*pos)) {
-                    ctx.capture_pointer();
-                }
-            }
-            InputEvent::PointerUp { pos, .. } => {
-                if self.interaction.pressed() {
-                    let should_click = self.interaction.pointer_up(ctx.contains(*pos));
-                    ctx.release_pointer();
-                    if should_click {
-                        if let Some(handler) = &mut self.on_click {
-                            handler();
-                        }
-                    }
-                }
-            }
-            InputEvent::KeyDown { .. } => {
-                if ctx.has_focus() {
-                    use sparsh_input::{ActionMapper, StandardAction};
-                    let mapper = ActionMapper::new();
-                    if mapper.is_action(event, StandardAction::Activate) {
-                        if let Some(handler) = &mut self.on_click {
-                            handler();
-                        }
-                        ctx.stop_propagation();
-                        ctx.request_paint();
-                    }
                 }
             }
             _ => {}

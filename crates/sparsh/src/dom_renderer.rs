@@ -318,11 +318,7 @@ impl DomRenderer {
             "width" => &mut self.root_state.width,
             "height" => &mut self.root_state.height,
             "background-color" => &mut self.root_state.background,
-            _ => {
-                return Err(wasm_bindgen::JsValue::from_str(
-                    "unexpected root style key",
-                ))
-            }
+            _ => return Err(wasm_bindgen::JsValue::from_str("unexpected root style key")),
         };
         if *slot == value {
             return Ok(());

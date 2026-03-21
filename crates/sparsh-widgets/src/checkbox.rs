@@ -240,34 +240,30 @@ impl Widget for Checkbox {
         }
 
         match event {
-            InputEvent::PointerMove { pos } => {
-                if self.interaction.pointer_move(ctx.contains(*pos)) {
+            InputEvent::PointerMove { pos }
+                if self.interaction.pointer_move(ctx.contains(*pos)) =>
+            {
+                ctx.request_paint();
+            }
+            InputEvent::PointerDown { pos, .. }
+                if self.interaction.pointer_down(ctx.contains(*pos)) =>
+            {
+                ctx.capture_pointer();
+            }
+            InputEvent::PointerUp { pos, .. } if self.interaction.pressed() => {
+                let should_toggle = self.interaction.pointer_up(ctx.contains(*pos));
+                if should_toggle {
+                    self.toggle();
+                }
+                ctx.release_pointer();
+            }
+            InputEvent::KeyDown { .. } if ctx.has_focus() => {
+                use sparsh_input::{ActionMapper, StandardAction};
+                let mapper = ActionMapper::new();
+                if mapper.is_action(event, StandardAction::Activate) {
+                    self.toggle();
+                    ctx.stop_propagation();
                     ctx.request_paint();
-                }
-            }
-            InputEvent::PointerDown { pos, .. } => {
-                if self.interaction.pointer_down(ctx.contains(*pos)) {
-                    ctx.capture_pointer();
-                }
-            }
-            InputEvent::PointerUp { pos, .. } => {
-                if self.interaction.pressed() {
-                    let should_toggle = self.interaction.pointer_up(ctx.contains(*pos));
-                    if should_toggle {
-                        self.toggle();
-                    }
-                    ctx.release_pointer();
-                }
-            }
-            InputEvent::KeyDown { .. } => {
-                if ctx.has_focus() {
-                    use sparsh_input::{ActionMapper, StandardAction};
-                    let mapper = ActionMapper::new();
-                    if mapper.is_action(event, StandardAction::Activate) {
-                        self.toggle();
-                        ctx.stop_propagation();
-                        ctx.request_paint();
-                    }
                 }
             }
             _ => {}

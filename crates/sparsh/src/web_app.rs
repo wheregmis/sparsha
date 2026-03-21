@@ -1546,8 +1546,13 @@ fn install_event_listeners(
         let frame_cb = Rc::clone(frame_cb);
         let window = window.clone();
         let on_focus = Closure::wrap(Box::new(move || {
-            state.borrow_mut().handle_event(InputEvent::FocusGained);
-            if state.borrow().should_schedule_frame() {
+            let Ok(mut state_ref) = state.try_borrow_mut() else {
+                return;
+            };
+            state_ref.handle_event(InputEvent::FocusGained);
+            let should_schedule = state_ref.should_schedule_frame();
+            drop(state_ref);
+            if should_schedule {
                 schedule_animation_frame(&window, &pending_animation_frame, &frame_cb);
             }
         }) as Box<dyn FnMut()>);
@@ -1561,8 +1566,13 @@ fn install_event_listeners(
         let frame_cb = Rc::clone(frame_cb);
         let window = window.clone();
         let on_blur = Closure::wrap(Box::new(move || {
-            state.borrow_mut().handle_event(InputEvent::FocusLost);
-            if state.borrow().should_schedule_frame() {
+            let Ok(mut state_ref) = state.try_borrow_mut() else {
+                return;
+            };
+            state_ref.handle_event(InputEvent::FocusLost);
+            let should_schedule = state_ref.should_schedule_frame();
+            drop(state_ref);
+            if should_schedule {
                 schedule_animation_frame(&window, &pending_animation_frame, &frame_cb);
             }
         }) as Box<dyn FnMut()>);
@@ -1581,7 +1591,9 @@ fn install_event_listeners(
                 return;
             };
             let is_text = event_target_is_text_editor(event.target());
-            let mut state_ref = state.borrow_mut();
+            let Ok(mut state_ref) = state.try_borrow_mut() else {
+                return;
+            };
             state_ref.accessibility_text_focus_node = is_text.then_some(node_id);
             state_ref.handle_accessibility_action(node_id, AccessibilityAction::Focus, None);
             let should_schedule = state_ref.should_schedule_frame();
@@ -1599,7 +1611,9 @@ fn install_event_listeners(
         let state = Rc::clone(state);
         let target = semantic_root.clone();
         let on_focus_out = Closure::wrap(Box::new(move |_event: Event| {
-            let mut state_ref = state.borrow_mut();
+            let Ok(mut state_ref) = state.try_borrow_mut() else {
+                return;
+            };
             state_ref.accessibility_text_focus_node = None;
             state_ref.sync_text_input_bridge();
         }) as Box<dyn FnMut(_)>);

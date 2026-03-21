@@ -545,36 +545,30 @@ impl Widget for TextInput {
 
     fn event(&mut self, ctx: &mut EventContext, event: &InputEvent) {
         match event {
-            InputEvent::PointerDown { pos, .. } => {
-                if ctx.contains(*pos) {
-                    let style = self.resolved_style();
-                    ctx.request_focus();
-                    let local = ctx.to_local(*pos);
-                    let click_x = (local.x - style.padding_h).max(0.0);
-                    self.editor
-                        .set_cursor(self.cursor_index_for_x(click_x), false);
-                    ctx.capture_pointer();
-                }
+            InputEvent::PointerDown { pos, .. } if ctx.contains(*pos) => {
+                let style = self.resolved_style();
+                ctx.request_focus();
+                let local = ctx.to_local(*pos);
+                let click_x = (local.x - style.padding_h).max(0.0);
+                self.editor
+                    .set_cursor(self.cursor_index_for_x(click_x), false);
+                ctx.capture_pointer();
             }
-            InputEvent::PointerMove { pos } => {
-                if ctx.has_capture {
-                    let style = self.resolved_style();
-                    let local = ctx.to_local(*pos);
-                    let click_x = (local.x - style.padding_h).max(0.0);
-                    self.editor
-                        .set_cursor(self.cursor_index_for_x(click_x), true);
-                    ctx.request_paint();
-                }
+            InputEvent::PointerMove { pos } if ctx.has_capture => {
+                let style = self.resolved_style();
+                let local = ctx.to_local(*pos);
+                let click_x = (local.x - style.padding_h).max(0.0);
+                self.editor
+                    .set_cursor(self.cursor_index_for_x(click_x), true);
+                ctx.request_paint();
             }
-            InputEvent::PointerUp { pos, .. } => {
-                if ctx.has_capture {
-                    let style = self.resolved_style();
-                    let local = ctx.to_local(*pos);
-                    let click_x = (local.x - style.padding_h).max(0.0);
-                    self.editor
-                        .set_cursor(self.cursor_index_for_x(click_x), true);
-                    ctx.release_pointer();
-                }
+            InputEvent::PointerUp { pos, .. } if ctx.has_capture => {
+                let style = self.resolved_style();
+                let local = ctx.to_local(*pos);
+                let click_x = (local.x - style.padding_h).max(0.0);
+                self.editor
+                    .set_cursor(self.cursor_index_for_x(click_x), true);
+                ctx.release_pointer();
             }
             InputEvent::KeyDown { event } => {
                 if !ctx.has_focus() {
@@ -608,39 +602,37 @@ impl Widget for TextInput {
                     let _ = self.handle_action(ctx, action);
                 }
             }
-            InputEvent::TextInput { text } => {
-                if ctx.has_focus() && self.editor.insert_text(text, false) {
-                    self.fire_change();
-                    ctx.stop_propagation();
-                    ctx.request_layout();
-                }
+            InputEvent::TextInput { text }
+                if ctx.has_focus() && self.editor.insert_text(text, false) =>
+            {
+                self.fire_change();
+                ctx.stop_propagation();
+                ctx.request_layout();
             }
-            InputEvent::Paste { text } => {
-                if ctx.has_focus() && self.editor.paste_text(text, false) {
-                    self.fire_change();
-                    ctx.stop_propagation();
-                    ctx.request_layout();
-                }
+            InputEvent::Paste { text }
+                if ctx.has_focus() && self.editor.paste_text(text, false) =>
+            {
+                self.fire_change();
+                ctx.stop_propagation();
+                ctx.request_layout();
             }
-            InputEvent::CompositionStart => {
-                if ctx.has_focus() {
-                    self.editor.begin_composition();
-                    ctx.stop_propagation();
-                    ctx.request_paint();
-                }
+            InputEvent::CompositionStart if ctx.has_focus() => {
+                self.editor.begin_composition();
+                ctx.stop_propagation();
+                ctx.request_paint();
             }
-            InputEvent::CompositionUpdate { text } => {
-                if ctx.has_focus() && self.editor.update_composition(text, false) {
-                    ctx.stop_propagation();
-                    ctx.request_layout();
-                }
+            InputEvent::CompositionUpdate { text }
+                if ctx.has_focus() && self.editor.update_composition(text, false) =>
+            {
+                ctx.stop_propagation();
+                ctx.request_layout();
             }
-            InputEvent::CompositionEnd { text } => {
-                if ctx.has_focus() && self.editor.end_composition(text, false) {
-                    self.fire_change();
-                    ctx.stop_propagation();
-                    ctx.request_layout();
-                }
+            InputEvent::CompositionEnd { text }
+                if ctx.has_focus() && self.editor.end_composition(text, false) =>
+            {
+                self.fire_change();
+                ctx.stop_propagation();
+                ctx.request_layout();
             }
             _ => {}
         }

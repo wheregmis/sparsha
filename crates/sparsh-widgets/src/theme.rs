@@ -4,7 +4,7 @@ use sparsh_core::Color;
 use std::cell::RefCell;
 
 /// Top-level theme object.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Theme {
     pub colors: ThemeColors,
     pub typography: ThemeTypography,
@@ -39,18 +39,6 @@ impl Theme {
                 input_background: Color::from_hex(0x1E293B),
                 input_placeholder: Color::from_hex(0x64748B),
             },
-            typography: ThemeTypography::default(),
-            spacing: ThemeSpacing::default(),
-            radii: ThemeRadii::default(),
-            controls: ThemeControls::default(),
-        }
-    }
-}
-
-impl Default for Theme {
-    fn default() -> Self {
-        Self {
-            colors: ThemeColors::default(),
             typography: ThemeTypography::default(),
             spacing: ThemeSpacing::default(),
             radii: ThemeRadii::default(),

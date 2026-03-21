@@ -503,6 +503,7 @@ fn dispatch_widget_event_recursive(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn dispatch_widget_event_at_path(
     widget: &mut dyn Widget,
     layout_tree: &LayoutTree,

@@ -6,7 +6,7 @@ Sparsh is a Rust UI framework built around a single widget tree that runs on des
 
 ## Status
 
-- Current milestone: Polish core widgets
+- Current milestone: Release engineering and quality gates
 - Public 1.0 surface: app runner, router, themes, task runtime, widgets, accessibility metadata, signals, input, layout, render, text, and core primitives exposed at crate roots
 - Provisional/internal: raw implementation modules, platform glue like `ui_events_winit`, and runtime adapters behind the public accessibility surface
 
@@ -45,10 +45,18 @@ Notable current behavior:
 - Runtime model: DOM rendering stays responsive while background work uses a worker-backed task runtime
 - Repo-owned web workflow: root build/serve/smoke scripts wrap the checked-in example `index.html`, `Trunk.toml`, and `sparsh-worker.js` assets
 
+## Task Runtime
+
+- `TaskRuntime` is part of the supported 1.0 crate-root surface
+- The currently supported built-in task kinds are `echo`, `sleep_echo`, and `analyze_text`
+- The supported contract covers `spawn`, `spawn_keyed`, `cancel`, and result delivery across native and web
+- Milestone 6 does not add custom task registration; unknown task kinds should be treated as unsupported
+
 ## Current Limitations
 
 - Router paths are static-only; dynamic route patterns are not supported
-- CI and release automation are intentionally out of scope for this milestone; verification is local and documented below
+- Accessibility still needs manual screen-reader verification before 1.0 sign-off
+- Final native/web parity sign-off still includes manual smoke checks in addition to automation
 
 ## Quick Start
 
@@ -122,16 +130,30 @@ npm run web:install
 ./scripts/web-smoke.sh
 ```
 
+Run the lightweight web perf/startup smoke:
+
+```bash
+./scripts/web-perf-smoke.sh
+```
+
+Run the full local release-readiness suite:
+
+```bash
+./scripts/release-readiness.sh
+```
+
 Direct per-example `trunk serve` still works for local iteration, but the root scripts are the canonical checked-in build and verification path. More detail lives in [examples/README.md](examples/README.md).
 
 ## Verification
 
-Local verification entrypoints:
+Canonical verification entrypoints:
 
 ```bash
 ./scripts/verify-foundation.sh
 ./scripts/web-build-all.sh
 ./scripts/web-smoke.sh
+./scripts/web-perf-smoke.sh
+./scripts/release-readiness.sh
 ```
 
 `verify-foundation.sh` runs:
@@ -142,9 +164,19 @@ Local verification entrypoints:
 
 `web-smoke.sh` builds the checked-in web examples, serves the generated `dist/` output for `kitchen-sink`, `hybrid-overlay`, and `todo`, then runs the Playwright smoke suite against those pages.
 
+`web-perf-smoke.sh` builds the checked-in `todo` web example, serves it locally, and stores Lighthouse reports under `artifacts/lighthouse/`.
+
+`release-readiness.sh` composes the foundation verification, browser smoke suite, and perf/startup smoke checks into the local pre-release entrypoint that mirrors the checked-in GitHub Actions release-readiness workflow.
+
+GitHub Actions is the canonical hosted gate for 1.0:
+
+- `.github/workflows/ci.yml` runs formatting, clippy, workspace verification, wasm example checks, browser smoke, and macOS native verification
+- `.github/workflows/release-readiness.yml` runs the sign-off superset and uploads Playwright/perf artifacts
+
 ## More
 
 - [docs/api-surface.md](docs/api-surface.md)
+- [docs/release-checklist.md](docs/release-checklist.md)
 - [examples/README.md](examples/README.md)
 - [crates/sparsh/src/lib.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsh/src/lib.rs)
 

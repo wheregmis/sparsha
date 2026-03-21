@@ -228,29 +228,21 @@ impl TextArea {
                     ctx.request_layout();
                 }
             }
-            StandardAction::Undo => {
-                if self.editor.undo() {
-                    self.fire_change();
-                    ctx.request_layout();
-                }
+            StandardAction::Undo if self.editor.undo() => {
+                self.fire_change();
+                ctx.request_layout();
             }
-            StandardAction::Redo => {
-                if self.editor.redo() {
-                    self.fire_change();
-                    ctx.request_layout();
-                }
+            StandardAction::Redo if self.editor.redo() => {
+                self.fire_change();
+                ctx.request_layout();
             }
-            StandardAction::Backspace => {
-                if self.editor.backspace() {
-                    self.fire_change();
-                    ctx.request_layout();
-                }
+            StandardAction::Backspace if self.editor.backspace() => {
+                self.fire_change();
+                ctx.request_layout();
             }
-            StandardAction::Delete => {
-                if self.editor.delete_forward() {
-                    self.fire_change();
-                    ctx.request_layout();
-                }
+            StandardAction::Delete if self.editor.delete_forward() => {
+                self.fire_change();
+                ctx.request_layout();
             }
             StandardAction::MoveLeft => {
                 self.editor.move_left(false);
@@ -540,42 +532,36 @@ impl Widget for TextArea {
 
     fn event(&mut self, ctx: &mut EventContext, event: &InputEvent) {
         match event {
-            InputEvent::PointerDown { pos, .. } => {
-                if ctx.contains(*pos) {
-                    let style = self.resolved_style();
-                    ctx.request_focus();
-                    let local = ctx.to_local(*pos);
-                    let line_height = style.font_size * 1.2;
-                    let x = (local.x - style.padding_h).max(0.0);
-                    let y = (local.y - style.padding_v).max(0.0);
-                    let index = self.cursor_index_for_position(x, y, line_height);
-                    self.editor.set_cursor(index, false);
-                    ctx.capture_pointer();
-                }
+            InputEvent::PointerDown { pos, .. } if ctx.contains(*pos) => {
+                let style = self.resolved_style();
+                ctx.request_focus();
+                let local = ctx.to_local(*pos);
+                let line_height = style.font_size * 1.2;
+                let x = (local.x - style.padding_h).max(0.0);
+                let y = (local.y - style.padding_v).max(0.0);
+                let index = self.cursor_index_for_position(x, y, line_height);
+                self.editor.set_cursor(index, false);
+                ctx.capture_pointer();
             }
-            InputEvent::PointerMove { pos } => {
-                if ctx.has_capture {
-                    let style = self.resolved_style();
-                    let local = ctx.to_local(*pos);
-                    let line_height = style.font_size * 1.2;
-                    let x = (local.x - style.padding_h).max(0.0);
-                    let y = (local.y - style.padding_v).max(0.0);
-                    let index = self.cursor_index_for_position(x, y, line_height);
-                    self.editor.set_cursor(index, true);
-                    ctx.request_paint();
-                }
+            InputEvent::PointerMove { pos } if ctx.has_capture => {
+                let style = self.resolved_style();
+                let local = ctx.to_local(*pos);
+                let line_height = style.font_size * 1.2;
+                let x = (local.x - style.padding_h).max(0.0);
+                let y = (local.y - style.padding_v).max(0.0);
+                let index = self.cursor_index_for_position(x, y, line_height);
+                self.editor.set_cursor(index, true);
+                ctx.request_paint();
             }
-            InputEvent::PointerUp { pos, .. } => {
-                if ctx.has_capture {
-                    let style = self.resolved_style();
-                    let local = ctx.to_local(*pos);
-                    let line_height = style.font_size * 1.2;
-                    let x = (local.x - style.padding_h).max(0.0);
-                    let y = (local.y - style.padding_v).max(0.0);
-                    let index = self.cursor_index_for_position(x, y, line_height);
-                    self.editor.set_cursor(index, true);
-                    ctx.release_pointer();
-                }
+            InputEvent::PointerUp { pos, .. } if ctx.has_capture => {
+                let style = self.resolved_style();
+                let local = ctx.to_local(*pos);
+                let line_height = style.font_size * 1.2;
+                let x = (local.x - style.padding_h).max(0.0);
+                let y = (local.y - style.padding_v).max(0.0);
+                let index = self.cursor_index_for_position(x, y, line_height);
+                self.editor.set_cursor(index, true);
+                ctx.release_pointer();
             }
             InputEvent::KeyDown { event } => {
                 if !ctx.has_focus() {
@@ -609,39 +595,35 @@ impl Widget for TextArea {
                     self.handle_action(ctx, action);
                 }
             }
-            InputEvent::TextInput { text } => {
-                if ctx.has_focus() && self.editor.insert_text(text, true) {
-                    self.fire_change();
-                    ctx.stop_propagation();
-                    ctx.request_layout();
-                }
+            InputEvent::TextInput { text }
+                if ctx.has_focus() && self.editor.insert_text(text, true) =>
+            {
+                self.fire_change();
+                ctx.stop_propagation();
+                ctx.request_layout();
             }
-            InputEvent::Paste { text } => {
-                if ctx.has_focus() && self.editor.paste_text(text, true) {
-                    self.fire_change();
-                    ctx.stop_propagation();
-                    ctx.request_layout();
-                }
+            InputEvent::Paste { text } if ctx.has_focus() && self.editor.paste_text(text, true) => {
+                self.fire_change();
+                ctx.stop_propagation();
+                ctx.request_layout();
             }
-            InputEvent::CompositionStart => {
-                if ctx.has_focus() {
-                    self.editor.begin_composition();
-                    ctx.stop_propagation();
-                    ctx.request_paint();
-                }
+            InputEvent::CompositionStart if ctx.has_focus() => {
+                self.editor.begin_composition();
+                ctx.stop_propagation();
+                ctx.request_paint();
             }
-            InputEvent::CompositionUpdate { text } => {
-                if ctx.has_focus() && self.editor.update_composition(text, true) {
-                    ctx.stop_propagation();
-                    ctx.request_layout();
-                }
+            InputEvent::CompositionUpdate { text }
+                if ctx.has_focus() && self.editor.update_composition(text, true) =>
+            {
+                ctx.stop_propagation();
+                ctx.request_layout();
             }
-            InputEvent::CompositionEnd { text } => {
-                if ctx.has_focus() && self.editor.end_composition(text, true) {
-                    self.fire_change();
-                    ctx.stop_propagation();
-                    ctx.request_layout();
-                }
+            InputEvent::CompositionEnd { text }
+                if ctx.has_focus() && self.editor.end_composition(text, true) =>
+            {
+                self.fire_change();
+                ctx.stop_propagation();
+                ctx.request_layout();
             }
             _ => {}
         }

@@ -7,6 +7,8 @@
   "scripts": {
     "web:install": "PLAYWRIGHT_BROWSERS_PATH=.playwright-browsers playwright install chromium",
     "web:test": "playwright test --config playwright.config.mjs",
-    "web:smoke": "./scripts/web-smoke.sh"
+    "web:smoke": "./scripts/web-smoke.sh",
+    "web:perf": "./scripts/web-perf-smoke.sh",
+    "release:readiness": "./scripts/release-readiness.sh"
   }
 }

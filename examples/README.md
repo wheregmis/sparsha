@@ -52,6 +52,18 @@ npm run web:install
 ./scripts/web-smoke.sh
 ```
 
+Run the lightweight web perf/startup smoke:
+
+```bash
+./scripts/web-perf-smoke.sh
+```
+
+Run the full local release-readiness suite:
+
+```bash
+./scripts/release-readiness.sh
+```
+
 Direct `trunk serve` from an example directory remains useful for manual iteration.
 
 ## What The Examples Intentionally Do Not Promise Yet
@@ -60,7 +72,7 @@ Direct `trunk serve` from an example directory remains useful for manual iterati
 - `todo` intentionally keeps `TextInput` single-line while `kitchen-sink` demonstrates `TextArea`
 - `todo` intentionally keeps the simple owned-children `List` path while `kitchen-sink` exercises the virtualized mode
 - Router usage stays on static paths
-- CI/lighthouse automation is not required to consider the examples healthy in this milestone
+- Final accessibility and browser parity sign-off still includes manual checks beyond the automated workflows
 
 ## Verification
 
@@ -68,6 +80,9 @@ From the repo root, run:
 
 ```bash
 ./scripts/verify-foundation.sh
+./scripts/web-smoke.sh
+./scripts/web-perf-smoke.sh
+./scripts/release-readiness.sh
 ```
 
-That covers the native workspace checks plus wasm compile checks for all four examples. Browser-side smoke coverage is handled separately by `./scripts/web-smoke.sh`.
+That covers the native workspace checks, wasm compile checks for all four examples, the browser smoke suite, and the lightweight perf/startup smoke path used in release readiness. Hosted automation lives in `.github/workflows/ci.yml` and `.github/workflows/release-readiness.yml`.

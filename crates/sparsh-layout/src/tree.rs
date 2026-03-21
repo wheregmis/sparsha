@@ -260,6 +260,87 @@ impl LayoutTree {
     }
 }
 
+#[cfg(test)]
+mod perf_tests {
+    use super::*;
+    use std::time::Instant;
+
+    #[test]
+    #[ignore = "perf smoke"]
+    fn perf_smoke_large_layout_tree() {
+        let start = Instant::now();
+        let mut tree = LayoutTree::new();
+        let mut sections = Vec::new();
+        let mut total_nodes = 0usize;
+
+        for _ in 0..120 {
+            let mut row_children = Vec::new();
+            for _ in 0..8 {
+                let leaf = tree.new_leaf(Style {
+                    size: Size {
+                        width: length(120.0),
+                        height: length(28.0),
+                    },
+                    ..Default::default()
+                });
+                row_children.push(leaf);
+                total_nodes += 1;
+            }
+
+            let section = tree.new_with_children(
+                Style {
+                    display: Display::Flex,
+                    flex_direction: FlexDirection::Row,
+                    gap: Size {
+                        width: length(8.0),
+                        height: length(8.0),
+                    },
+                    ..Default::default()
+                },
+                &row_children,
+            );
+            sections.push(section);
+            total_nodes += 1;
+        }
+
+        let root = tree.new_with_children(
+            Style {
+                display: Display::Flex,
+                flex_direction: FlexDirection::Column,
+                gap: Size {
+                    width: length(12.0),
+                    height: length(12.0),
+                },
+                size: Size {
+                    width: length(1440.0),
+                    height: auto(),
+                },
+                ..Default::default()
+            },
+            &sections,
+        );
+        total_nodes += 1;
+        tree.set_root(root);
+
+        for _ in 0..25 {
+            tree.compute_layout(1440.0, 960.0);
+        }
+
+        let elapsed = start.elapsed();
+        let root_layout = tree
+            .get_layout(root)
+            .expect("root layout should exist after perf smoke");
+        println!(
+            "layout perf smoke: {total_nodes} nodes across {} sections in {:?} (root {:.1}x{:.1})",
+            sections.len(),
+            elapsed,
+            root_layout.bounds.width,
+            root_layout.bounds.height
+        );
+        assert!(root_layout.bounds.width > 0.0);
+    }
+}
+
 /// Computed layout result for a widget.
 #[derive(Clone, Copy, Debug)]
 pub struct ComputedLayout {

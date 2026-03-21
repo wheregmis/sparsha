@@ -584,17 +584,17 @@ impl Widget for List {
                 pos,
                 delta,
                 modifiers,
-            } if ctx.contains(*pos) => {
-                if state.model.scroll_by(
+            } if ctx.contains(*pos)
+                && state.model.scroll_by(
                     viewport,
                     content_size,
                     state.axes(self.direction),
                     *delta,
                     *modifiers,
-                ) {
-                    ctx.stop_propagation();
-                    ctx.request_layout();
-                }
+                ) =>
+            {
+                ctx.stop_propagation();
+                ctx.request_layout();
             }
             InputEvent::PointerDown { pos, .. } if ctx.contains(*pos) => {
                 let result = state.model.pointer_down(

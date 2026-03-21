@@ -33,7 +33,7 @@ Milestone checkboxes track implementation landing in the repo. The unchecked ite
 - [x] `List` now keeps the simple owned-children mode for small data and also supports fixed-extent virtualization for larger data sets.
 - [ ] Router paths are static-only; dynamic route patterns are rejected.
 - [ ] The web runtime now has retained DOM parity work and a semantic DOM layer, but final browser parity and manual sign-off are still open.
-- [ ] There is no checked-in CI workflow or release automation, so quality gates are still manual.
+- [ ] GitHub Actions and release-readiness workflows are now checked in, but the first clean sign-off run plus the remaining manual accessibility/web parity checks are still pending.
 - [x] The workspace itself is healthy right now: `cargo check --workspace` and `cargo test --workspace` both pass.
 
 ## 1.0 Definition
@@ -42,7 +42,7 @@ Milestone checkboxes track implementation landing in the repo. The unchecked ite
 - [ ] Accessibility is implemented for the built-in widgets and is verified on both native and web.
 - [ ] The web path supports the same interaction semantics as native, including text input and composition flows.
 - [ ] The public API is stable enough to document as 1.0 and support semver expectations.
-- [ ] CI, smoke tests, and release checks exist and run automatically.
+- [x] CI, smoke tests, and release checks exist and run automatically.
 
 ## Milestone 1: Freeze The Foundation
 ### Tasks
@@ -101,11 +101,11 @@ Milestone checkboxes track implementation landing in the repo. The unchecked ite
 
 ## Milestone 6: Release Engineering And Quality Gates
 ### Tasks
-- [ ] Add CI workflows for formatting, linting, unit tests, example smoke tests, and web build checks.
-- [ ] Add a release checklist and changelog/release notes so 1.0 is a documented event, not just a git tag.
-- [ ] Add a small set of performance and startup smoke tests for render, layout, text, and web boot.
-- [ ] Decide how task runtime behavior is supported and documented so it is not just a demo-only convenience.
-- [ ] Remove the `winit` beta dependency or explicitly justify why it stays pinned.
+- [x] Add CI workflows for formatting, linting, unit tests, example smoke tests, and web build checks.
+- [x] Add a release checklist and changelog/release notes so 1.0 is a documented event, not just a git tag.
+- [x] Add a small set of performance and startup smoke tests for render, layout, text, and web boot.
+- [x] Decide how task runtime behavior is supported and documented so it is not just a demo-only convenience.
+- [x] Document the current platform/runtime dependency pin rationale, including the stable `winit` pin and its companion adapter versions.
 
 ### Exit Criteria
 - [ ] A clean CI run and the release checklist are both enough to sign off on 1.0.

@@ -1,6 +1,6 @@
-# Milestone 1 API Surface
+# 1.0 Candidate API Surface
 
-This document records the foundation freeze for Milestone 1. The 1.0 contract is the curated crate-root API described here. Raw implementation modules and unfinished subsystems are not part of the semver promise yet.
+This document records the curated crate-root surface that Sparsh treats as the 1.0 contract. Raw implementation modules and unfinished subsystems are not part of the semver promise yet.
 
 ## `sparsh`
 
@@ -11,6 +11,8 @@ Stable for 1.0:
 - `Router`, `Route`, `Navigator`, `hash_to_path`, `path_to_hash`
 - theme and accessibility configuration types re-exported from `sparsh-widgets`
 - task runtime types: `TaskRuntime`, `TaskRuntimeInitError`, `TaskHandle`, `TaskResult`, `TaskStatus`, `TaskKey`, `TaskId`, `TaskPayload`, `TaskPolicy`, `Generation`
+  - supported built-in task kinds in 1.0: `echo`, `sleep_echo`, `analyze_text`
+  - custom task registration is not part of the 1.0 contract
 - `prelude`
 - sub-crate re-exports: `core`, `input`, `layout`, `render`, `signals`, `text`, `widgets`
 - `init_web` on `wasm32`

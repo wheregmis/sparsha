@@ -685,7 +685,11 @@ impl TaskRuntime {
                 return;
             };
             let mut web = lock_recover(web_mutex, "web task runtime");
-            let Some(index) = web.workers.iter().position(|slot| slot.token == worker_token) else {
+            let Some(index) = web
+                .workers
+                .iter()
+                .position(|slot| slot.token == worker_token)
+            else {
                 return;
             };
             let slot = web.workers.remove(index);

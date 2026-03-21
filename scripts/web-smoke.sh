@@ -2,11 +2,15 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ARTIFACT_DIR="${SPARSH_ARTIFACT_DIR:-$ROOT_DIR/artifacts}"
+LOG_DIR="$ARTIFACT_DIR/web-smoke"
 KITCHEN_PORT="${SPARSH_KITCHEN_SINK_PORT:-4173}"
 HYBRID_PORT="${SPARSH_HYBRID_OVERLAY_PORT:-4174}"
 TODO_PORT="${SPARSH_TODO_PORT:-4175}"
 SERVER_PIDS=()
 export PLAYWRIGHT_BROWSERS_PATH="${PLAYWRIGHT_BROWSERS_PATH:-$ROOT_DIR/.playwright-browsers}"
+
+mkdir -p "$LOG_DIR"
 
 cleanup() {
   for pid in "${SERVER_PIDS[@]:-}"; do
@@ -28,11 +32,11 @@ fi
 
 "$ROOT_DIR/scripts/web-build-all.sh"
 
-"$ROOT_DIR/scripts/web-serve-dist.sh" kitchen-sink "$KITCHEN_PORT" >/tmp/sparsh-kitchen-sink.log 2>&1 &
+"$ROOT_DIR/scripts/web-serve-dist.sh" kitchen-sink "$KITCHEN_PORT" >"$LOG_DIR/kitchen-sink.log" 2>&1 &
 SERVER_PIDS+=("$!")
-"$ROOT_DIR/scripts/web-serve-dist.sh" hybrid-overlay "$HYBRID_PORT" >/tmp/sparsh-hybrid-overlay.log 2>&1 &
+"$ROOT_DIR/scripts/web-serve-dist.sh" hybrid-overlay "$HYBRID_PORT" >"$LOG_DIR/hybrid-overlay.log" 2>&1 &
 SERVER_PIDS+=("$!")
-"$ROOT_DIR/scripts/web-serve-dist.sh" todo "$TODO_PORT" >/tmp/sparsh-todo.log 2>&1 &
+"$ROOT_DIR/scripts/web-serve-dist.sh" todo "$TODO_PORT" >"$LOG_DIR/todo.log" 2>&1 &
 SERVER_PIDS+=("$!")
 
 for url in \

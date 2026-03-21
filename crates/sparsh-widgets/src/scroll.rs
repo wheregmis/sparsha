@@ -504,17 +504,17 @@ impl Widget for Scroll {
                 delta,
                 pos,
                 modifiers,
-            } if ctx.contains(*pos) => {
-                if self.model.scroll_by(
+            } if ctx.contains(*pos)
+                && self.model.scroll_by(
                     viewport,
                     self.content_size.get(),
                     self.axes(),
                     *delta,
                     *modifiers,
-                ) {
-                    ctx.stop_propagation();
-                    ctx.request_paint();
-                }
+                ) =>
+            {
+                ctx.stop_propagation();
+                ctx.request_paint();
             }
             InputEvent::PointerDown { pos, .. } if ctx.contains(*pos) => {
                 let result = self.model.pointer_down(

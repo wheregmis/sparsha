@@ -90,7 +90,7 @@ impl EditorCore {
     }
 
     pub(crate) fn selection_range(&self) -> Option<(usize, usize)> {
-        (self.anchor != self.cursor).then(|| {
+        (self.anchor != self.cursor).then_some({
             if self.anchor < self.cursor {
                 (self.anchor, self.cursor)
             } else {

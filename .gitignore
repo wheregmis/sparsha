@@ -22,5 +22,6 @@ test-results/
 .playwright-browsers/
 examples/todo/lighthouse/
 examples/todo/.npm-cache/
+artifacts/
 # CocoIndex Code (ccc)
 /.cocoindex_code/

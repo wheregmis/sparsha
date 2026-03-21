@@ -1085,11 +1085,18 @@ mod tests {
     fn drain_for(runtime: &TaskRuntime, timeout_ms: u64) -> Vec<TaskResult> {
         let mut results = Vec::new();
         let mut elapsed = 0;
+        let mut settled_polls = 0;
         while elapsed <= timeout_ms {
-            runtime.drain_completed(|result| results.push(result));
-            if !runtime.has_in_flight() {
-                runtime.drain_completed(|result| results.push(result));
-                break;
+            let delivered = runtime.drain_completed(|result| results.push(result));
+            if runtime.has_in_flight() || delivered > 0 {
+                settled_polls = 0;
+            } else {
+                // Workers decrement `in_flight` before their result is always readable from the
+                // channel, so require two idle polls before treating the runtime as settled.
+                settled_polls += 1;
+                if settled_polls >= 2 {
+                    break;
+                }
             }
             thread::sleep(StdDuration::from_millis(10));
             elapsed += 10;

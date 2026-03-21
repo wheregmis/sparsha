@@ -1,4 +1,4 @@
-# Sparsh Examples
+# Sparsha Examples
 
 > Runnable reference apps for the current polished 1.0 candidate surface.
 
@@ -28,7 +28,7 @@ Each example directory still contains the checked-in files needed for a Trunk fl
 
 - `index.html`
 - `Trunk.toml`
-- `sparsh-worker.js`
+- `sparsha-worker.js`
 
 Canonical repo-root workflow:
 

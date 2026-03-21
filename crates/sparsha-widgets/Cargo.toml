@@ -1,0 +1,27 @@
+[package]
+name = "sparsha-widgets"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+sparsha-core = { path = "../sparsha-core" }
+sparsha-layout = { path = "../sparsha-layout" }
+sparsha-input = { path = "../sparsha-input" }
+sparsha-text = { path = "../sparsha-text" }
+sparsha-render = { path = "../sparsha-render" }
+taffy = { workspace = true }
+log = { workspace = true }
+glam = { workspace = true }
+wgpu = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-sys = { workspace = true }
+
+[dev-dependencies]
+sparsha-core = { path = "../sparsha-core" }
+sparsha-input = { path = "../sparsha-input" }
+sparsha-layout = { path = "../sparsha-layout" }
+sparsha-render = { path = "../sparsha-render" }
+sparsha-text = { path = "../sparsha-text" }
+pollster = { workspace = true }

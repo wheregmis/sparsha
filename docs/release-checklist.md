@@ -1,6 +1,6 @@
 # Release Checklist
 
-Use this checklist when preparing the Sparsh 1.0 candidate or a later tagged release.
+Use this checklist when preparing the Sparsha 1.0 candidate or a later tagged release.
 
 ## Automated Gates
 

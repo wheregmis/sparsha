@@ -4,7 +4,7 @@ const baseURL = process.env.SPARSH_TODO_URL ?? "http://127.0.0.1:4175";
 
 test("todo route hash changes rebuild the correct screen", async ({ page }) => {
   await page.goto(`${baseURL}#/about`);
-  await expect(page).toHaveTitle(/Todo - Sparsh/);
+  await expect(page).toHaveTitle(/Todo - Sparsha/);
   await expect(page.getByLabel("Todo Route Demo")).toBeVisible();
 
   await page.evaluate(() => {

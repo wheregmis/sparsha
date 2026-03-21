@@ -1,8 +1,8 @@
-# Sparsh
+# Sparsha
 
 > GPU-first, cross-platform UI for Rust.
 
-Sparsh is a Rust UI framework built around a single widget tree that runs on desktop and on the web. The public 1.0 contract is the curated crate-root surface in `sparsh` and the companion crates, not every reachable implementation module path.
+Sparsha is a Rust UI framework built around a single widget tree that runs on desktop and on the web. The public 1.0 contract is the curated crate-root surface in `sparsha` and the companion crates, not every reachable implementation module path.
 
 ## Status
 
@@ -44,7 +44,7 @@ Notable current behavior:
 - Default web path: retained DOM rendering driven by the same widget tree as native
 - Hybrid path: `DrawSurface` embeds GPU-heavy scenes into an otherwise DOM-backed UI
 - Runtime model: DOM rendering stays responsive while background work uses a worker-backed task runtime
-- Repo-owned web workflow: root build/serve/smoke scripts wrap the checked-in example `index.html`, `Trunk.toml`, and `sparsh-worker.js` assets
+- Repo-owned web workflow: root build/serve/smoke scripts wrap the checked-in example `index.html`, `Trunk.toml`, and `sparsha-worker.js` assets
 
 ## Task Runtime
 
@@ -62,14 +62,14 @@ Notable current behavior:
 ## Quick Start
 
 ```rust
-use sparsh::prelude::*;
+use sparsha::prelude::*;
 
-fn main() -> Result<(), sparsh::AppRunError> {
+fn main() -> Result<(), sparsha::AppRunError> {
     #[cfg(target_arch = "wasm32")]
-    sparsh::init_web()?;
+    sparsha::init_web()?;
 
     App::new()
-        .title("Hello Sparsh")
+        .title("Hello Sparsha")
         .size(960, 640)
         .theme(Theme::light())
         .router(
@@ -93,14 +93,14 @@ fn main() -> Result<(), sparsh::AppRunError> {
 
 | Crate | Role |
 |---|---|
-| `sparsh` | App runner, router, task runtime, and public facade |
-| `sparsh-core` | Core primitives and GPU bootstrap helpers |
-| `sparsh-render` | Draw list, shape pass, text pass, batching |
-| `sparsh-layout` | Flexbox layout via `taffy` |
-| `sparsh-text` | Font loading, shaping, glyph atlas management |
-| `sparsh-input` | Input events, focus management, hit testing |
-| `sparsh-signals` | Reactive signal runtime |
-| `sparsh-widgets` | Built-in widgets, theme types, paint/build contexts |
+| `sparsha` | App runner, router, task runtime, and public facade |
+| `sparsha-core` | Core primitives and GPU bootstrap helpers |
+| `sparsha-render` | Draw list, shape pass, text pass, batching |
+| `sparsha-layout` | Flexbox layout via `taffy` |
+| `sparsha-text` | Font loading, shaping, glyph atlas management |
+| `sparsha-input` | Input events, focus management, hit testing |
+| `sparsha-signals` | Reactive signal runtime |
+| `sparsha-widgets` | Built-in widgets, theme types, paint/build contexts |
 
 ## Examples
 
@@ -177,7 +177,7 @@ GitHub Actions is the canonical hosted gate for 1.0:
 - [docs/api-surface.md](docs/api-surface.md)
 - [docs/release-checklist.md](docs/release-checklist.md)
 - [examples/README.md](examples/README.md)
-- [crates/sparsh/src/lib.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsh/src/lib.rs)
+- [crates/sparsha/src/lib.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsha/src/lib.rs)
 
 ## License
 

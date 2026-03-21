@@ -1,4 +1,4 @@
-# Sparsh 1.0 Roadmap
+# Sparsha 1.0 Roadmap
 
 ## Master Checklist
 - [x] Milestone 1: Freeze The Foundation
@@ -11,12 +11,12 @@
 Milestone checkboxes track implementation landing in the repo. The unchecked items below are the remaining verification, release, and sign-off work.
 
 ## Current Baseline
-- Sparsh already has a real end-to-end stack: app runner, router, signals, layout, rendering, text shaping, input, widgets, and core GPU primitives.
-- The main package surface is consolidated through `sparsh::prelude`, so application code can stay small and readable.
+- Sparsha already has a real end-to-end stack: app runner, router, signals, layout, rendering, text shaping, input, widgets, and core GPU primitives.
+- The main package surface is consolidated through `sparsha::prelude`, so application code can stay small and readable.
 - Native and web runtimes both exist, with web supporting retained DOM rendering and a hybrid GPU surface path.
 - The repo ships four runnable example apps that cover the main product shapes: general UI, draw-heavy scenes, hybrid overlays, and a small data-driven app.
 - The widget set is already usable for real apps: `Container`, `Button`, `Checkbox`, `Text`, `TextInput`, `TextArea`, `List`, `Scroll`, and `DrawSurface`.
-- Module-level tests exist across the core crates, which gives Sparsh a good starting quality baseline rather than a blank slate.
+- Module-level tests exist across the core crates, which gives Sparsha a good starting quality baseline rather than a blank slate.
 
 ## What Looks Production-Ready Today
 - Core layout, render, text, and signal plumbing are implemented and exercised in code and tests.
@@ -46,7 +46,7 @@ Milestone checkboxes track implementation landing in the repo. The unchecked ite
 
 ## Milestone 1: Freeze The Foundation
 ### Tasks
-- [x] Freeze the public API surface in `sparsh`, `sparsh-widgets`, `sparsh-input`, `sparsh-layout`, `sparsh-render`, `sparsh-text`, `sparsh-core`, and `sparsh-signals`.
+- [x] Freeze the public API surface in `sparsha`, `sparsha-widgets`, `sparsha-input`, `sparsha-layout`, `sparsha-render`, `sparsha-text`, `sparsha-core`, and `sparsha-signals`.
 - [x] Document the supported platforms, widget set, and web story in the main README and example docs.
 - [x] Audit remaining panic paths, `expect` calls, and `unreachable!` cases that would be unacceptable in a 1.0 release.
 - [x] Decide which APIs are truly public and which ones should stay internal until after 1.0.
@@ -118,10 +118,10 @@ Milestone checkboxes track implementation landing in the repo. The unchecked ite
 - [ ] Finally cut a release candidate, run the full smoke suite, and tag 1.0 only after the candidate has no open release-blocking issues.
 
 ## Repo Evidence
-- Core runtime: [crates/sparsh/src/app.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsh/src/app.rs), [crates/sparsh/src/web_app.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsh/src/web_app.rs), [crates/sparsh/src/tasks.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsh/src/tasks.rs)
-- Widgets: [crates/sparsh-widgets/src/lib.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsh-widgets/src/lib.rs), [crates/sparsh-widgets/src/text_input.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsh-widgets/src/text_input.rs), [crates/sparsh-widgets/src/scroll.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsh-widgets/src/scroll.rs), [crates/sparsh-widgets/src/draw_surface.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsh-widgets/src/draw_surface.rs)
-- Input and focus: [crates/sparsh-input/src/lib.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsh-input/src/lib.rs), [crates/sparsh-input/src/action.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsh-input/src/action.rs), [crates/sparsh-input/src/focus.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsh-input/src/focus.rs)
-- Rendering and text: [crates/sparsh-render/src/renderer.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsh-render/src/renderer.rs), [crates/sparsh-render/src/shape_pass.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsh-render/src/shape_pass.rs), [crates/sparsh-render/src/text_pass.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsh-render/src/text_pass.rs), [crates/sparsh-text/src/system.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsh-text/src/system.rs)
-- Layout and core: [crates/sparsh-layout/src/tree.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsh-layout/src/tree.rs), [crates/sparsh-core/src/types.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsh-core/src/types.rs), [crates/sparsh-core/src/wgpu_init.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsh-core/src/wgpu_init.rs)
-- Accessibility and web: [crates/sparsh/src/accessibility.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsh/src/accessibility.rs), [crates/sparsh/src/dom_renderer.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsh/src/dom_renderer.rs), [crates/sparsh/src/web_surface_manager.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsh/src/web_surface_manager.rs)
+- Core runtime: [crates/sparsha/src/app.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsha/src/app.rs), [crates/sparsha/src/web_app.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsha/src/web_app.rs), [crates/sparsha/src/tasks.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsha/src/tasks.rs)
+- Widgets: [crates/sparsha-widgets/src/lib.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsha-widgets/src/lib.rs), [crates/sparsha-widgets/src/text_input.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsha-widgets/src/text_input.rs), [crates/sparsha-widgets/src/scroll.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsha-widgets/src/scroll.rs), [crates/sparsha-widgets/src/draw_surface.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsha-widgets/src/draw_surface.rs)
+- Input and focus: [crates/sparsha-input/src/lib.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsha-input/src/lib.rs), [crates/sparsha-input/src/action.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsha-input/src/action.rs), [crates/sparsha-input/src/focus.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsha-input/src/focus.rs)
+- Rendering and text: [crates/sparsha-render/src/renderer.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsha-render/src/renderer.rs), [crates/sparsha-render/src/shape_pass.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsha-render/src/shape_pass.rs), [crates/sparsha-render/src/text_pass.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsha-render/src/text_pass.rs), [crates/sparsha-text/src/system.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsha-text/src/system.rs)
+- Layout and core: [crates/sparsha-layout/src/tree.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsha-layout/src/tree.rs), [crates/sparsha-core/src/types.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsha-core/src/types.rs), [crates/sparsha-core/src/wgpu_init.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsha-core/src/wgpu_init.rs)
+- Accessibility and web: [crates/sparsha/src/accessibility.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsha/src/accessibility.rs), [crates/sparsha/src/dom_renderer.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsha/src/dom_renderer.rs), [crates/sparsha/src/web_surface_manager.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsha/src/web_surface_manager.rs)
 - Docs and examples: [README.md](/Users/wheregmis/Documents/GitHub/spark/README.md), [examples/README.md](/Users/wheregmis/Documents/GitHub/spark/examples/README.md)

@@ -1,19 +1,19 @@
-use sparsh::core::glam::Vec2;
-use sparsh::layout::{taffy, WidgetId};
-use sparsh::prelude::*;
-use sparsh::text::TextStyle;
-use sparsh::widgets::{DrawSurfaceContext, EventContext, PaintContext};
+use sparsha::core::glam::Vec2;
+use sparsha::layout::{taffy, WidgetId};
+use sparsha::prelude::*;
+use sparsha::text::TextStyle;
+use sparsha::widgets::{DrawSurfaceContext, EventContext, PaintContext};
 use std::f32::consts::TAU;
 
-fn main() -> Result<(), sparsh::AppRunError> {
+fn main() -> Result<(), sparsha::AppRunError> {
     #[cfg(target_arch = "wasm32")]
-    sparsh::init_web()?;
+    sparsha::init_web()?;
 
     #[cfg(not(target_arch = "wasm32"))]
     env_logger::init();
 
     App::new()
-        .title("Hybrid Overlay - Sparsh")
+        .title("Hybrid Overlay - Sparsha")
         .size(1280, 800)
         .background(Color::from_hex(0x07111D))
         .theme(Theme::light())

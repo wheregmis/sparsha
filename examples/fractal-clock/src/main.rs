@@ -1,24 +1,24 @@
-use sparsh::core::glam::Vec2;
-use sparsh::input::PointerButton;
-use sparsh::layout::{taffy, WidgetId};
-use sparsh::prelude::*;
-use sparsh::text::TextStyle;
-use sparsh::widgets::{DrawSurfaceContext, EventContext, PaintContext};
+use sparsha::core::glam::Vec2;
+use sparsha::input::PointerButton;
+use sparsha::layout::{taffy, WidgetId};
+use sparsha::prelude::*;
+use sparsha::text::TextStyle;
+use sparsha::widgets::{DrawSurfaceContext, EventContext, PaintContext};
 use std::f32::consts::{PI, TAU};
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(target_arch = "wasm32")]
 use web_time::{SystemTime, UNIX_EPOCH};
 
-fn main() -> Result<(), sparsh::AppRunError> {
+fn main() -> Result<(), sparsha::AppRunError> {
     #[cfg(target_arch = "wasm32")]
-    sparsh::init_web()?;
+    sparsha::init_web()?;
 
     #[cfg(not(target_arch = "wasm32"))]
     env_logger::init();
 
     App::new()
-        .title("Fractal Clock - Sparsh")
+        .title("Fractal Clock - Sparsha")
         .size(1440, 960)
         .background(Color::from_hex(0x04060A))
         .theme(Theme::light())

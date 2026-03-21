@@ -1,11 +1,11 @@
-//! Todo example app for Sparsh (native + web) using function components and signals.
+//! Todo example app for Sparsha (native + web) using function components and signals.
 
 use serde_json::json;
-use sparsh::prelude::*;
+use sparsha::prelude::*;
 
-fn main() -> Result<(), sparsh::AppRunError> {
+fn main() -> Result<(), sparsha::AppRunError> {
     #[cfg(target_arch = "wasm32")]
-    sparsh::init_web()?;
+    sparsha::init_web()?;
 
     #[cfg(not(target_arch = "wasm32"))]
     env_logger::init();
@@ -13,7 +13,7 @@ fn main() -> Result<(), sparsh::AppRunError> {
     let theme_mode = Signal::new(ThemeMode::Light);
 
     App::new()
-        .title("Sparsh Todo")
+        .title("Sparsha Todo")
         .size(960, 720)
         .theme(todo_light_theme())
         .dark_theme(todo_dark_theme())
@@ -332,7 +332,11 @@ fn todo_app(cx: &mut ComponentContext<'_>, theme_mode: Signal<ThemeMode>) -> Con
     let snapshot = model.get();
     let theme = cx.theme();
     let is_dark = theme_mode.get() == ThemeMode::Dark;
-    let analysis_text = analysis_summary(&analysis);
+    let analysis_text = if snapshot.draft.trim().is_empty() {
+        String::new()
+    } else {
+        analysis_summary(&analysis)
+    };
     let active_count = snapshot.todos.iter().filter(|todo| !todo.done).count();
     let done_count = snapshot.todos.iter().filter(|todo| todo.done).count();
 
@@ -392,7 +396,7 @@ fn todo_app(cx: &mut ComponentContext<'_>, theme_mode: Signal<ThemeMode>) -> Con
                 .child(toggle_theme_button(theme_mode)),
         )
         .child(
-            Text::new("Sparsh native + web example using signal-driven state.")
+            Text::new("Sparsha native + web example using signal-driven state.")
                 .size(13.0)
                 .color(subdued_text),
         )
@@ -494,7 +498,7 @@ mod tests {
 
     #[test]
     fn apply_action_updates_signal_backed_model() {
-        let runtime = sparsh::signals::RuntimeHandle::new();
+        let runtime = sparsha::signals::RuntimeHandle::new();
         runtime.run_with_current(|| {
             let model = Signal::new(TodoModel::default());
             apply_action(model, TodoAction::SetDraft("Alpha".to_owned()));

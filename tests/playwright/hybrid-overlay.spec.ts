@@ -7,7 +7,7 @@ test("hybrid overlay keeps DOM overlays interactive around the GPU surface", asy
   page,
 }) => {
   await page.goto(baseURL);
-  await expect(page).toHaveTitle(/Hybrid Overlay - Sparsh/);
+  await expect(page).toHaveTitle(/Hybrid Overlay - Sparsha/);
 
   const canvas = page.locator("canvas");
   await expect(canvas).toHaveCount(1);

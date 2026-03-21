@@ -4,12 +4,14 @@
 
 use crate::tasks::{TaskRuntime, TaskStatus};
 use crate::{
+    accessibility::{AccessibilityTreeSnapshot, ACCESSIBILITY_ROOT_ID},
     app::{AppConfig, AppRunError, AppTheme},
     dom_renderer::DomRenderer,
     router::{hash_to_path, path_to_hash, Navigator, Router, RouterHost},
     runtime_widget::{
-        add_widget_to_layout, apply_focus_change, dispatch_widget_event, move_focus_path,
-        remap_path, sync_focus_manager, WidgetPath, WidgetRuntimeRegistry,
+        add_widget_to_layout, apply_focus_change, collect_accessibility_tree, dispatch_widget_event,
+        move_focus_path, remap_path, sync_focus_manager, with_widget_mut, WidgetPath,
+        WidgetRuntimeRegistry,
     },
     web_surface_manager::{HybridSurfaceManager, SurfaceFrame},
 };
@@ -21,15 +23,19 @@ use sparsh_layout::LayoutTree;
 use sparsh_render::DrawList;
 use sparsh_signals::{RuntimeHandle, SubscriberKind};
 use sparsh_text::TextSystem;
-use sparsh_widgets::{set_current_theme, BuildContext, PaintCommands, PaintContext, Widget};
+use sparsh_widgets::{
+    set_current_theme, AccessibilityAction, AccessibilityRole, BuildContext, PaintCommands,
+    PaintContext, Widget,
+};
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
 };
 use wasm_bindgen::{closure::Closure, JsCast};
 use web_sys::{
-    ClipboardEvent, CompositionEvent as WebCompositionEvent, CustomEvent, HtmlTextAreaElement,
-    InputEvent as WebInputEvent, KeyboardEvent as WebKeyboardEvent, MouseEvent, WheelEvent, Window,
+    ClipboardEvent, CompositionEvent as WebCompositionEvent, CustomEvent, Document, HtmlElement,
+    Element, Event, HtmlInputElement, HtmlTextAreaElement, InputEvent as WebInputEvent,
+    KeyboardEvent as WebKeyboardEvent, MouseEvent, WheelEvent, Window,
 };
 
 fn format_js_error(error: &wasm_bindgen::JsValue) -> String {
@@ -50,6 +56,8 @@ pub(crate) fn run_dom_app(
     let surface_manager = HybridSurfaceManager::new(dom_renderer.root())
         .map_err(|err| AppRunError::HybridSurfaceInit(format_js_error(&err)))?;
     let text_input_bridge = WebTextInputBridge::new(&document, dom_renderer.root())
+        .map_err(|err| AppRunError::DomMount(format_js_error(&err)))?;
+    let semantic_dom = WebSemanticDomLayer::new(&document, dom_renderer.root())
         .map_err(|err| AppRunError::DomMount(format_js_error(&err)))?;
     let signal_runtime = RuntimeHandle::current_or_default();
     let task_runtime =
@@ -94,8 +102,10 @@ pub(crate) fn run_dom_app(
         first_paint_emitted: false,
         surface_manager,
         text_input_bridge,
+        semantic_dom,
         pending_clipboard_write: None,
         ime_composing: false,
+        accessibility_text_focus_node: None,
     };
     state.update_viewport();
     state.surface_manager.start_init();
@@ -143,8 +153,10 @@ struct WebAppState {
     first_paint_emitted: bool,
     surface_manager: HybridSurfaceManager,
     text_input_bridge: WebTextInputBridge,
+    semantic_dom: WebSemanticDomLayer,
     pending_clipboard_write: Option<String>,
     ime_composing: bool,
+    accessibility_text_focus_node: Option<u64>,
 }
 
 struct WebTextInputBridge {
@@ -212,6 +224,231 @@ impl WebTextInputBridge {
         }
         self.syncing = false;
     }
+}
+
+struct WebSemanticDomLayer {
+    root: HtmlElement,
+}
+
+impl WebSemanticDomLayer {
+    fn new(document: &Document, parent: &HtmlElement) -> Result<Self, wasm_bindgen::JsValue> {
+        let root = document.create_element("div")?.dyn_into::<HtmlElement>()?;
+        root.set_class_name("sparsh-semantic-root");
+        let style = root.style();
+        style.set_property("position", "absolute")?;
+        style.set_property("inset", "0")?;
+        style.set_property("pointer-events", "none")?;
+        style.set_property("overflow", "visible")?;
+        style.set_property("background", "transparent")?;
+        style.set_property("z-index", "10")?;
+        parent.append_child(&root)?;
+        Ok(Self { root })
+    }
+
+    fn root(&self) -> &HtmlElement {
+        &self.root
+    }
+
+    fn render(
+        &self,
+        snapshot: &AccessibilityTreeSnapshot,
+    ) -> Result<(), wasm_bindgen::JsValue> {
+        self.root.set_inner_html("");
+        let Some(document) = self.root.owner_document() else {
+            return Ok(());
+        };
+
+        let nodes = snapshot
+            .nodes
+            .iter()
+            .map(|node| (node.id, node))
+            .collect::<std::collections::HashMap<_, _>>();
+        for node_id in &snapshot.root_children {
+            self.append_node(&document, &nodes, *node_id, None)?;
+        }
+
+        if snapshot.focus != ACCESSIBILITY_ROOT_ID {
+            if let Some(element) = self
+                .root
+                .query_selector(&format!("[data-sparsh-a11y-node=\"{}\"]", snapshot.focus))?
+                .and_then(|element| element.dyn_into::<HtmlElement>().ok())
+            {
+                let active = document
+                    .active_element()
+                    .and_then(|node| node.get_attribute("data-sparsh-a11y-node"));
+                if active.as_deref() != Some(&snapshot.focus.to_string()) {
+                    let _ = element.focus();
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn append_node(
+        &self,
+        document: &Document,
+        nodes: &std::collections::HashMap<u64, &crate::accessibility::AccessibilityNodeSnapshot>,
+        node_id: u64,
+        parent_bounds: Option<sparsh_core::Rect>,
+    ) -> Result<(), wasm_bindgen::JsValue> {
+        let Some(node) = nodes.get(&node_id).copied() else {
+            return Ok(());
+        };
+        let element = create_semantic_element(document, node)?;
+        apply_semantic_bounds(&element, node.bounds, parent_bounds)?;
+        self.root.append_child(&element)?;
+        for child_id in &node.children {
+            self.append_child_node(document, &element, nodes, *child_id, Some(node.bounds))?;
+        }
+        Ok(())
+    }
+
+    fn append_child_node(
+        &self,
+        document: &Document,
+        parent: &HtmlElement,
+        nodes: &std::collections::HashMap<u64, &crate::accessibility::AccessibilityNodeSnapshot>,
+        node_id: u64,
+        parent_bounds: Option<sparsh_core::Rect>,
+    ) -> Result<(), wasm_bindgen::JsValue> {
+        let Some(node) = nodes.get(&node_id).copied() else {
+            return Ok(());
+        };
+        let element = create_semantic_element(document, node)?;
+        apply_semantic_bounds(&element, node.bounds, parent_bounds)?;
+        parent.append_child(&element)?;
+        for child_id in &node.children {
+            self.append_child_node(document, &element, nodes, *child_id, Some(node.bounds))?;
+        }
+        Ok(())
+    }
+}
+
+fn create_semantic_element(
+    document: &Document,
+    node: &crate::accessibility::AccessibilityNodeSnapshot,
+) -> Result<HtmlElement, wasm_bindgen::JsValue> {
+    let element = match node.role {
+        AccessibilityRole::Button => document.create_element("button")?.dyn_into::<HtmlElement>()?,
+        AccessibilityRole::CheckBox => {
+            let input = document
+                .create_element("input")?
+                .dyn_into::<HtmlInputElement>()?;
+            input.set_type("checkbox");
+            input.set_checked(node.checked.unwrap_or(false));
+            input.unchecked_into::<HtmlElement>()
+        }
+        AccessibilityRole::TextInput => {
+            let input = document
+                .create_element("input")?
+                .dyn_into::<HtmlInputElement>()?;
+            input.set_type("text");
+            input.set_value(node.value.as_deref().unwrap_or_default());
+            input.unchecked_into::<HtmlElement>()
+        }
+        AccessibilityRole::MultilineTextInput => {
+            let textarea = document
+                .create_element("textarea")?
+                .dyn_into::<HtmlTextAreaElement>()?;
+            textarea.set_value(node.value.as_deref().unwrap_or_default());
+            textarea.unchecked_into::<HtmlElement>()
+        }
+        _ => document.create_element("div")?.dyn_into::<HtmlElement>()?,
+    };
+
+    let style = element.style();
+    style.set_property("position", "absolute")?;
+    style.set_property("pointer-events", "none")?;
+    style.set_property("opacity", "0")?;
+    style.set_property("background", "transparent")?;
+    style.set_property("border", "0")?;
+    style.set_property("margin", "0")?;
+    style.set_property("padding", "0")?;
+    style.set_property("overflow", "hidden")?;
+    style.set_property("color", "transparent")?;
+    style.set_property("caret-color", "transparent")?;
+    style.set_property("outline", "none")?;
+
+    element.set_attribute("data-sparsh-a11y-node", &node.id.to_string())?;
+    if node.hidden {
+        style.set_property("display", "none")?;
+    }
+    if node.disabled {
+        element.set_attribute("disabled", "true")?;
+        element.set_attribute("aria-disabled", "true")?;
+    }
+    if let Some(label) = &node.label {
+        element.set_attribute("aria-label", label)?;
+        if matches!(node.role, AccessibilityRole::Label | AccessibilityRole::Button) {
+            element.set_text_content(Some(label));
+        }
+    }
+    if let Some(description) = &node.description {
+        element.set_attribute("aria-description", description)?;
+    }
+    if let Some(value) = &node.value {
+        match node.role {
+            AccessibilityRole::Label => element.set_text_content(Some(value)),
+            AccessibilityRole::ScrollView => {
+                element.set_attribute("aria-valuetext", value)?;
+            }
+            AccessibilityRole::GenericContainer | AccessibilityRole::List => {
+                element.set_attribute("aria-label", value)?;
+            }
+            _ => {}
+        }
+    }
+    if let Some(checked) = node.checked {
+        element.set_attribute("aria-checked", if checked { "true" } else { "false" })?;
+    }
+
+    match node.role {
+        AccessibilityRole::GenericContainer => {
+            element.set_attribute("role", "group")?;
+        }
+        AccessibilityRole::List => {
+            element.set_attribute("role", "list")?;
+        }
+        AccessibilityRole::ScrollView => {
+            element.set_attribute("role", "group")?;
+            element.set_attribute("aria-roledescription", "scroll view")?;
+        }
+        AccessibilityRole::Label => {}
+        AccessibilityRole::Button
+        | AccessibilityRole::CheckBox
+        | AccessibilityRole::TextInput
+        | AccessibilityRole::MultilineTextInput => {}
+    }
+
+    if node.actions.contains(&AccessibilityAction::Focus)
+        && !matches!(
+            node.role,
+            AccessibilityRole::Button
+                | AccessibilityRole::CheckBox
+                | AccessibilityRole::TextInput
+                | AccessibilityRole::MultilineTextInput
+        )
+    {
+        element.set_tab_index(0);
+    }
+
+    Ok(element)
+}
+
+fn apply_semantic_bounds(
+    element: &HtmlElement,
+    bounds: sparsh_core::Rect,
+    parent_bounds: Option<sparsh_core::Rect>,
+) -> Result<(), wasm_bindgen::JsValue> {
+    let origin_x = parent_bounds.map(|rect| rect.x).unwrap_or(0.0);
+    let origin_y = parent_bounds.map(|rect| rect.y).unwrap_or(0.0);
+    let style = element.style();
+    style.set_property("left", &format!("{}px", bounds.x - origin_x))?;
+    style.set_property("top", &format!("{}px", bounds.y - origin_y))?;
+    style.set_property("width", &format!("{}px", bounds.width.max(1.0)))?;
+    style.set_property("height", &format!("{}px", bounds.height.max(1.0)))?;
+    Ok(())
 }
 
 fn paint_widget_subtree(
@@ -311,9 +548,86 @@ impl WebAppState {
         (start < end).then(|| state.text.get(start..end).unwrap_or_default().to_owned())
     }
 
+    fn refresh_accessibility(&mut self) {
+        self.widget_registry.accessibility = collect_accessibility_tree(
+            self.root_widget.as_ref(),
+            &self.layout_tree,
+            self.focused_path.as_ref(),
+        );
+    }
+
+    fn accessibility_text_focus_matches_widget_focus(&self) -> bool {
+        let Some(node_id) = self.accessibility_text_focus_node else {
+            return false;
+        };
+        let Some(path) = self.widget_registry.path_for_accessibility_node(node_id) else {
+            return false;
+        };
+        self.focused_path.as_deref() == Some(path)
+            && self.widget_registry.text_editor_state_for_path(path).is_some()
+    }
+
     fn sync_text_input_bridge(&mut self) {
+        if self.accessibility_text_focus_matches_widget_focus() {
+            self.text_input_bridge.sync(None);
+            return;
+        }
         let editor_state = self.focused_text_editor_state().cloned();
         self.text_input_bridge.sync(editor_state.as_ref());
+    }
+
+    fn handle_accessibility_action(
+        &mut self,
+        node_id: u64,
+        action: AccessibilityAction,
+        value: Option<String>,
+    ) {
+        let Some(path) = self
+            .widget_registry
+            .path_for_accessibility_node(node_id)
+            .map(ToOwned::to_owned)
+        else {
+            return;
+        };
+
+        match action {
+            AccessibilityAction::Focus => {
+                let focus_changed = apply_focus_change(
+                    self.root_widget.as_mut(),
+                    &mut self.focus_manager,
+                    &self.widget_registry,
+                    &mut self.focused_path,
+                    Some(path),
+                );
+                if focus_changed {
+                    self.ime_composing = false;
+                    self.needs_repaint = true;
+                }
+            }
+            action => {
+                let handled = with_widget_mut(self.root_widget.as_mut(), &path, |widget| {
+                    widget.handle_accessibility_action(action, value.clone())
+                })
+                .unwrap_or(false);
+                if handled {
+                    if matches!(action, AccessibilityAction::SetValue) {
+                        self.needs_layout = true;
+                    }
+                    self.needs_repaint = true;
+                }
+            }
+        }
+
+        self.signal_runtime.run_effects(64);
+        let dirty = self.signal_runtime.take_dirty_flags();
+        if dirty.rebuild || dirty.layout {
+            self.needs_layout = true;
+        }
+        if dirty.paint {
+            self.needs_repaint = true;
+        }
+        self.refresh_accessibility();
+        self.sync_text_input_bridge();
     }
 
     fn update_viewport(&mut self) {
@@ -405,6 +719,7 @@ impl WebAppState {
             &self.widget_registry,
             self.focused_path.as_ref(),
         );
+        self.refresh_accessibility();
         self.sync_text_input_bridge();
         self.needs_layout = false;
         self.needs_repaint = true;
@@ -438,6 +753,7 @@ impl WebAppState {
     fn handle_event(&mut self, event: InputEvent) {
         let runtime = self.signal_runtime.clone();
         let mapper = ActionMapper::new();
+        let mut handled_focus_navigation = false;
         if let Some(Action::Standard(action)) = mapper.map_event(&event) {
             match action {
                 StandardAction::FocusNext | StandardAction::FocusPrevious => {
@@ -458,10 +774,14 @@ impl WebAppState {
                         self.sync_text_input_bridge();
                         self.needs_repaint = true;
                     }
-                    return;
+                    handled_focus_navigation = true;
                 }
                 _ => {}
             }
+        }
+        if handled_focus_navigation {
+            self.refresh_accessibility();
+            return;
         }
 
         let current_focus_id = self
@@ -519,6 +839,8 @@ impl WebAppState {
         if dirty.paint {
             self.needs_repaint = true;
         }
+
+        self.refresh_accessibility();
     }
 
     fn frame(&mut self) {
@@ -560,6 +882,11 @@ impl WebAppState {
                     .resolve_background(self.config.background_override),
             ) {
                 log::error!("dom render failed: {:?}", err);
+            } else if let Err(err) = self
+                .semantic_dom
+                .render(self.widget_registry.accessibility_tree())
+            {
+                log::error!("semantic dom render failed: {:?}", err);
             } else {
                 log::trace!(
                     "dom frame: active_nodes={} mutated_nodes={}",
@@ -642,6 +969,7 @@ fn install_event_listeners(
     frame_cb: &Rc<RefCell<Option<Closure<dyn FnMut(f64)>>>>,
 ) {
     let root = state.borrow().dom_renderer.root().clone();
+    let semantic_root = state.borrow().semantic_dom.root().clone();
 
     {
         let state = Rc::clone(state);
@@ -1148,6 +1476,131 @@ fn install_event_listeners(
         let state = Rc::clone(state);
         let pending_animation_frame = Rc::clone(pending_animation_frame);
         let frame_cb = Rc::clone(frame_cb);
+        let window = window.clone();
+        let target = semantic_root.clone();
+        let on_focus_in = Closure::wrap(Box::new(move |event: Event| {
+            let Some(node_id) = event_target_node_id(event.target()) else {
+                return;
+            };
+            let is_text = event_target_is_text_editor(event.target());
+            let mut state_ref = state.borrow_mut();
+            state_ref.accessibility_text_focus_node = is_text.then_some(node_id);
+            state_ref.handle_accessibility_action(node_id, AccessibilityAction::Focus, None);
+            let should_schedule = state_ref.should_schedule_frame();
+            drop(state_ref);
+            if should_schedule {
+                schedule_animation_frame(&window, &pending_animation_frame, &frame_cb);
+            }
+        }) as Box<dyn FnMut(_)>);
+        let _ = target
+            .add_event_listener_with_callback("focusin", on_focus_in.as_ref().unchecked_ref());
+        on_focus_in.forget();
+    }
+
+    {
+        let state = Rc::clone(state);
+        let target = semantic_root.clone();
+        let on_focus_out = Closure::wrap(Box::new(move |_event: Event| {
+            let mut state_ref = state.borrow_mut();
+            state_ref.accessibility_text_focus_node = None;
+            state_ref.sync_text_input_bridge();
+        }) as Box<dyn FnMut(_)>);
+        let _ = target
+            .add_event_listener_with_callback("focusout", on_focus_out.as_ref().unchecked_ref());
+        on_focus_out.forget();
+    }
+
+    {
+        let state = Rc::clone(state);
+        let pending_animation_frame = Rc::clone(pending_animation_frame);
+        let frame_cb = Rc::clone(frame_cb);
+        let window = window.clone();
+        let target = semantic_root.clone();
+        let on_click = Closure::wrap(Box::new(move |event: Event| {
+            if event_target_is_checkbox(event.target()) || event_target_is_text_editor(event.target())
+            {
+                return;
+            }
+            let Some(node_id) = event_target_node_id(event.target()) else {
+                return;
+            };
+            let mut state_ref = state.borrow_mut();
+            state_ref.handle_accessibility_action(node_id, AccessibilityAction::Click, None);
+            let should_schedule = state_ref.should_schedule_frame();
+            drop(state_ref);
+            if should_schedule {
+                schedule_animation_frame(&window, &pending_animation_frame, &frame_cb);
+            }
+        }) as Box<dyn FnMut(_)>);
+        let _ =
+            target.add_event_listener_with_callback("click", on_click.as_ref().unchecked_ref());
+        on_click.forget();
+    }
+
+    {
+        let state = Rc::clone(state);
+        let pending_animation_frame = Rc::clone(pending_animation_frame);
+        let frame_cb = Rc::clone(frame_cb);
+        let window = window.clone();
+        let target = semantic_root.clone();
+        let on_change = Closure::wrap(Box::new(move |event: Event| {
+            if !event_target_is_checkbox(event.target()) {
+                return;
+            }
+            let Some(node_id) = event_target_node_id(event.target()) else {
+                return;
+            };
+            let mut state_ref = state.borrow_mut();
+            state_ref.handle_accessibility_action(node_id, AccessibilityAction::Click, None);
+            let should_schedule = state_ref.should_schedule_frame();
+            drop(state_ref);
+            if should_schedule {
+                schedule_animation_frame(&window, &pending_animation_frame, &frame_cb);
+            }
+        }) as Box<dyn FnMut(_)>);
+        let _ =
+            target.add_event_listener_with_callback("change", on_change.as_ref().unchecked_ref());
+        on_change.forget();
+    }
+
+    {
+        let state = Rc::clone(state);
+        let pending_animation_frame = Rc::clone(pending_animation_frame);
+        let frame_cb = Rc::clone(frame_cb);
+        let window = window.clone();
+        let target = semantic_root.clone();
+        let on_input = Closure::wrap(Box::new(move |event: Event| {
+            if !event_target_is_text_editor(event.target()) {
+                return;
+            }
+            let Some(node_id) = event_target_node_id(event.target()) else {
+                return;
+            };
+            let Some(value) = event_target_text_value(event.target()) else {
+                return;
+            };
+            let mut state_ref = state.borrow_mut();
+            state_ref.accessibility_text_focus_node = Some(node_id);
+            state_ref.handle_accessibility_action(
+                node_id,
+                AccessibilityAction::SetValue,
+                Some(value),
+            );
+            let should_schedule = state_ref.should_schedule_frame();
+            drop(state_ref);
+            if should_schedule {
+                schedule_animation_frame(&window, &pending_animation_frame, &frame_cb);
+            }
+        }) as Box<dyn FnMut(_)>);
+        let _ =
+            target.add_event_listener_with_callback("input", on_input.as_ref().unchecked_ref());
+        on_input.forget();
+    }
+
+    {
+        let state = Rc::clone(state);
+        let pending_animation_frame = Rc::clone(pending_animation_frame);
+        let frame_cb = Rc::clone(frame_cb);
         let window_for_resize = window.clone();
         let on_resize = Closure::wrap(Box::new(move || {
             let mut state_ref = state.borrow_mut();
@@ -1197,6 +1650,47 @@ fn mouse_button(button: i16) -> PointerButton {
         2 => PointerButton::Secondary,
         _ => PointerButton::Primary,
     }
+}
+
+fn event_target_element(target: Option<web_sys::EventTarget>) -> Option<Element> {
+    let target = target?;
+    let element: Element = target.dyn_into().ok()?;
+    element.closest("[data-sparsh-a11y-node]").ok().flatten()
+}
+
+fn event_target_node_id(target: Option<web_sys::EventTarget>) -> Option<u64> {
+    event_target_element(target)?
+        .get_attribute("data-sparsh-a11y-node")?
+        .parse()
+        .ok()
+}
+
+fn event_target_is_checkbox(target: Option<web_sys::EventTarget>) -> bool {
+    event_target_element(target)
+        .and_then(|element| element.dyn_into::<HtmlInputElement>().ok())
+        .is_some_and(|input| input.type_() == "checkbox")
+}
+
+fn event_target_is_text_editor(target: Option<web_sys::EventTarget>) -> bool {
+    if let Some(input) = event_target_element(target.clone())
+        .and_then(|element| element.dyn_into::<HtmlInputElement>().ok())
+    {
+        return input.type_() == "text";
+    }
+    event_target_element(target)
+        .and_then(|element| element.dyn_into::<HtmlTextAreaElement>().ok())
+        .is_some()
+}
+
+fn event_target_text_value(target: Option<web_sys::EventTarget>) -> Option<String> {
+    if let Some(input) = event_target_element(target.clone())
+        .and_then(|element| element.dyn_into::<HtmlInputElement>().ok())
+    {
+        return Some(input.value());
+    }
+    event_target_element(target)
+        .and_then(|element| element.dyn_into::<HtmlTextAreaElement>().ok())
+        .map(|textarea| textarea.value())
 }
 
 fn mouse_pos(root: &web_sys::HtmlElement, event: &MouseEvent) -> glam::Vec2 {

@@ -2,7 +2,10 @@
 
 use crate::text_editor::{EditorCore, TextEditorState};
 use crate::text_input::TextInputStyle;
-use crate::{current_theme, EventContext, PaintContext, Widget};
+use crate::{
+    current_theme, AccessibilityAction, AccessibilityInfo, AccessibilityRole, EventContext,
+    PaintContext, Widget,
+};
 use sparsh_core::Color;
 use sparsh_input::{Action, ActionMapper, InputEvent, Key, NamedKey, StandardAction};
 use sparsh_layout::WidgetId;
@@ -699,6 +702,33 @@ impl Widget for TextArea {
 
     fn text_editor_state(&self) -> Option<TextEditorState> {
         Some(self.editor.state(true))
+    }
+
+    fn accessibility_info(&self) -> Option<AccessibilityInfo> {
+        let mut info = AccessibilityInfo::new(AccessibilityRole::MultilineTextInput)
+            .value(self.editor.text().to_owned())
+            .action(AccessibilityAction::Focus)
+            .action(AccessibilityAction::SetValue);
+        if !self.placeholder.is_empty() {
+            info.label = Some(self.placeholder.clone());
+        }
+        Some(info)
+    }
+
+    fn handle_accessibility_action(
+        &mut self,
+        action: AccessibilityAction,
+        value: Option<String>,
+    ) -> bool {
+        if matches!(action, AccessibilityAction::SetValue) {
+            let next = value.unwrap_or_default();
+            if self.editor.text() != next {
+                self.editor.set_text(next);
+                self.fire_change();
+                return true;
+            }
+        }
+        false
     }
 }
 

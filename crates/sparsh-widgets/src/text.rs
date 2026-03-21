@@ -1,6 +1,8 @@
 //! Text widget for displaying static text.
 
-use crate::{current_theme, EventContext, PaintContext, Widget};
+use crate::{
+    current_theme, AccessibilityInfo, AccessibilityRole, EventContext, PaintContext, Widget,
+};
 use sparsh_core::Color;
 use sparsh_input::InputEvent;
 use sparsh_layout::WidgetId;
@@ -166,6 +168,11 @@ impl Widget for Text {
         let style = self.text_style();
         let (w, h) = ctx.text.measure(&self.content, &style, None);
         Some((w, h))
+    }
+
+    fn accessibility_info(&self) -> Option<AccessibilityInfo> {
+        (!self.content.is_empty())
+            .then(|| AccessibilityInfo::new(AccessibilityRole::Label).label(self.content.clone()))
     }
 }
 

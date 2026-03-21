@@ -1,6 +1,9 @@
 //! Button widget.
 
-use crate::{current_theme, EventContext, PaintContext, Widget};
+use crate::{
+    current_theme, AccessibilityAction, AccessibilityInfo, AccessibilityRole, EventContext,
+    PaintContext, Widget,
+};
 use sparsh_core::Color;
 use sparsh_input::InputEvent;
 use sparsh_layout::WidgetId;
@@ -335,6 +338,35 @@ impl Widget for Button {
             .with_size(resolved.font_size);
         let (w, h) = ctx.text.measure(&self.label, &style, None);
         Some((w + resolved.padding_h * 2.0, h + resolved.padding_v * 2.0))
+    }
+
+    fn accessibility_info(&self) -> Option<AccessibilityInfo> {
+        Some(
+            AccessibilityInfo::new(AccessibilityRole::Button)
+                .label(self.label.clone())
+                .disabled(self.state == ButtonState::Disabled)
+                .action(AccessibilityAction::Focus)
+                .action(AccessibilityAction::Click),
+        )
+    }
+
+    fn handle_accessibility_action(
+        &mut self,
+        action: AccessibilityAction,
+        _value: Option<String>,
+    ) -> bool {
+        if self.state == ButtonState::Disabled {
+            return false;
+        }
+
+        if matches!(action, AccessibilityAction::Click) {
+            if let Some(handler) = &mut self.on_click {
+                handler();
+            }
+            return true;
+        }
+
+        false
     }
 }
 

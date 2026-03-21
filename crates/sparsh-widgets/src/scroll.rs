@@ -1,6 +1,8 @@
 //! Scrollable container widget.
 
-use crate::{EventContext, PaintContext, Widget};
+use crate::{
+    AccessibilityAction, AccessibilityInfo, AccessibilityRole, EventContext, PaintContext, Widget,
+};
 use sparsh_core::{Color, Rect};
 use sparsh_input::InputEvent;
 use sparsh_layout::WidgetId;
@@ -50,6 +52,7 @@ pub struct Scroll {
     offset_x: f32,
     offset_y: f32,
     content_size: Cell<(f32, f32)>,
+    viewport_size: Cell<(f32, f32)>,
     style: ScrollbarStyle,
     layout_style: Style,
     dragging_scrollbar: bool,
@@ -73,6 +76,7 @@ impl Scroll {
             offset_x: 0.0,
             offset_y: 0.0,
             content_size: Cell::new((0.0, 0.0)),
+            viewport_size: Cell::new((0.0, 0.0)),
             style: ScrollbarStyle::default(),
             layout_style: Style {
                 display: Display::Flex,
@@ -323,6 +327,66 @@ impl Scroll {
             }
         }
     }
+
+    fn accessibility_scroll_info(&self) -> AccessibilityInfo {
+        let mut info = AccessibilityInfo::new(AccessibilityRole::ScrollView);
+        match self.direction {
+            ScrollDirection::Vertical => {
+                info = info
+                    .action(AccessibilityAction::ScrollUp)
+                    .action(AccessibilityAction::ScrollDown);
+            }
+            ScrollDirection::Horizontal => {
+                info = info
+                    .action(AccessibilityAction::ScrollLeft)
+                    .action(AccessibilityAction::ScrollRight);
+            }
+            ScrollDirection::Both => {
+                info = info
+                    .action(AccessibilityAction::ScrollUp)
+                    .action(AccessibilityAction::ScrollDown)
+                    .action(AccessibilityAction::ScrollLeft)
+                    .action(AccessibilityAction::ScrollRight);
+            }
+        }
+
+        let (viewport_width, viewport_height) = self.viewport_size.get();
+        let (content_width, content_height) = self.content_size.get();
+        let max_x = (content_width - viewport_width).max(0.0);
+        let max_y = (content_height - viewport_height).max(0.0);
+        let scroll_value = match self.direction {
+            ScrollDirection::Vertical => {
+                let percent = if max_y > 0.0 {
+                    (self.offset_y / max_y * 100.0).round()
+                } else {
+                    0.0
+                };
+                format!("{percent:.0}%")
+            }
+            ScrollDirection::Horizontal => {
+                let percent = if max_x > 0.0 {
+                    (self.offset_x / max_x * 100.0).round()
+                } else {
+                    0.0
+                };
+                format!("{percent:.0}%")
+            }
+            ScrollDirection::Both => {
+                let x_percent = if max_x > 0.0 {
+                    (self.offset_x / max_x * 100.0).round()
+                } else {
+                    0.0
+                };
+                let y_percent = if max_y > 0.0 {
+                    (self.offset_y / max_y * 100.0).round()
+                } else {
+                    0.0
+                };
+                format!("x {x_percent:.0}%, y {y_percent:.0}%")
+            }
+        };
+        info.value(scroll_value)
+    }
 }
 
 impl Widget for Scroll {
@@ -348,6 +412,10 @@ impl Widget for Scroll {
 
     fn paint(&self, ctx: &mut PaintContext) {
         let bounds = ctx.bounds();
+        self.viewport_size.set((
+            bounds.width / ctx.scale_factor.max(1.0),
+            bounds.height / ctx.scale_factor.max(1.0),
+        ));
 
         self.content_size
             .set(self.content_size_from_tree(ctx.layout_tree));
@@ -498,5 +566,31 @@ impl Widget for Scroll {
             Some(c) => std::slice::from_mut(c),
             None => &mut [],
         }
+    }
+
+    fn accessibility_info(&self) -> Option<AccessibilityInfo> {
+        Some(self.accessibility_scroll_info())
+    }
+
+    fn handle_accessibility_action(
+        &mut self,
+        action: AccessibilityAction,
+        _value: Option<String>,
+    ) -> bool {
+        let (viewport_width, viewport_height) = self.viewport_size.get();
+        let viewport = Rect::new(0.0, 0.0, viewport_width.max(0.0), viewport_height.max(0.0));
+        let page_x = (viewport.width * 0.8).max(40.0);
+        let page_y = (viewport.height * 0.8).max(40.0);
+        let old_offset = (self.offset_x, self.offset_y);
+
+        match action {
+            AccessibilityAction::ScrollUp => self.offset_y -= page_y,
+            AccessibilityAction::ScrollDown => self.offset_y += page_y,
+            AccessibilityAction::ScrollLeft => self.offset_x -= page_x,
+            AccessibilityAction::ScrollRight => self.offset_x += page_x,
+            _ => return false,
+        }
+        self.clamp_offset(viewport);
+        old_offset != (self.offset_x, self.offset_y)
     }
 }

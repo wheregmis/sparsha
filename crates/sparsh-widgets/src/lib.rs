@@ -2,6 +2,7 @@
 //!
 //! Stability: the supported 1.0 contract is the crate-root widget/theme/context re-export set.
 
+mod accessibility;
 mod button;
 mod checkbox;
 mod container;
@@ -9,6 +10,7 @@ mod context;
 mod draw_surface;
 mod list;
 mod scroll;
+mod semantics;
 mod text;
 mod text_area;
 mod text_editor;
@@ -16,6 +18,7 @@ mod text_input;
 mod theme;
 mod widget;
 
+pub use accessibility::{AccessibilityAction, AccessibilityInfo, AccessibilityRole};
 pub use button::{Button, ButtonState, ButtonStyle};
 pub use checkbox::{Checkbox, CheckboxStyle};
 pub use container::Container;
@@ -25,6 +28,7 @@ pub use context::{
 pub use draw_surface::{DrawSurface, DrawSurfaceContext};
 pub use list::{List, ListDirection};
 pub use scroll::{Scroll, ScrollDirection, ScrollbarStyle};
+pub use semantics::Semantics;
 pub use text::{Text, TextAlign};
 pub use text_area::{TextArea, TextAreaStyle};
 pub use text_editor::TextEditorState;

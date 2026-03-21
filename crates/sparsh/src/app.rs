@@ -1,12 +1,15 @@
 //! Application runner and main event loop.
 
+#[cfg(not(target_arch = "wasm32"))]
+use crate::accessibility::{action_from_accesskit, AccessibilityTreeSnapshot};
 use crate::router::Router;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::router::RouterHost;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::runtime_widget::{
-    add_widget_to_layout, apply_focus_change, dispatch_widget_event, move_focus_path, remap_path,
-    sync_focus_manager, WidgetPath, WidgetRuntimeRegistry,
+    add_widget_to_layout, apply_focus_change, collect_accessibility_tree, dispatch_widget_event,
+    move_focus_path, remap_path, sync_focus_manager, with_widget_mut, WidgetPath,
+    WidgetRuntimeRegistry,
 };
 use sparsh_core::Color;
 use sparsh_core::WgpuInitError;
@@ -39,11 +42,15 @@ use sparsh_widgets::{BuildContext, PaintCommands, PaintContext};
 use wgpu::{Device, Queue};
 #[cfg(not(target_arch = "wasm32"))]
 use winit::event::WindowEvent;
+#[cfg(not(target_arch = "wasm32"))]
+use winit::event_loop::EventLoopProxy;
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::{Arc, Mutex};
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
+#[cfg(not(target_arch = "wasm32"))]
+use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
 
 /// Application configuration.
 pub struct AppConfig {
@@ -246,6 +253,19 @@ impl From<WgpuInitError> for AppRunError {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug)]
+enum NativeUserEvent {
+    Accessibility(accesskit_winit::Event),
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl From<accesskit_winit::Event> for NativeUserEvent {
+    fn from(value: accesskit_winit::Event) -> Self {
+        Self::Accessibility(value)
+    }
+}
+
 /// The main application struct.
 pub struct App {
     config: AppConfig,
@@ -314,14 +334,17 @@ impl App {
     /// or background task runtime cannot be initialized.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn run(self) -> Result<(), AppRunError> {
-        let event_loop = winit::event_loop::EventLoop::new()
+        let event_loop = winit::event_loop::EventLoop::<NativeUserEvent>::with_user_event()
+            .build()
             .map_err(|err| AppRunError::EventLoopCreation(err.to_string()))?;
+        let event_loop_proxy = event_loop.create_proxy();
         let startup_error = Arc::new(Mutex::new(None));
         let runner = AppRunner::new(
             self.config,
             self.theme,
             self.router,
             Arc::clone(&startup_error),
+            event_loop_proxy,
         );
         let runner_leaked: &'static mut AppRunner = Box::leak(Box::new(runner));
         let run_result = event_loop.run_app(runner_leaked);
@@ -361,11 +384,12 @@ struct AppRunner {
     router: Router,
     state: Option<AppState>,
     startup_error: Arc<Mutex<Option<AppRunError>>>,
+    event_loop_proxy: EventLoopProxy<NativeUserEvent>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 struct AppState {
-    window: &'static dyn winit::window::Window,
+    window: &'static winit::window::Window,
     device: Device,
     queue: Queue,
     surface_state: SurfaceState<'static>,
@@ -387,6 +411,8 @@ struct AppState {
     scale_factor: f32,
     clipboard: Option<arboard::Clipboard>,
     ime_composing: bool,
+    accessibility_snapshot: Arc<Mutex<AccessibilityTreeSnapshot>>,
+    accessibility_adapter: Option<accesskit_winit::Adapter>,
     needs_layout: bool,
     needs_repaint: bool,
 }
@@ -421,12 +447,33 @@ impl AppState {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+struct NativeAccessibilityActivationHandler {
+    title: String,
+    snapshot: Arc<Mutex<AccessibilityTreeSnapshot>>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl accesskit::ActivationHandler for NativeAccessibilityActivationHandler {
+    fn request_initial_tree(&mut self) -> Option<accesskit::TreeUpdate> {
+        let snapshot = match self.snapshot.lock() {
+            Ok(guard) => guard.clone(),
+            Err(poisoned) => {
+                log::warn!("recovering from poisoned accessibility snapshot");
+                poisoned.into_inner().clone()
+            }
+        };
+        Some(snapshot.to_tree_update(&self.title))
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 impl AppRunner {
     fn new(
         config: AppConfig,
         theme: AppTheme,
         router: Router,
         startup_error: Arc<Mutex<Option<AppRunError>>>,
+        event_loop_proxy: EventLoopProxy<NativeUserEvent>,
     ) -> Self {
         Self {
             config,
@@ -434,12 +481,13 @@ impl AppRunner {
             router,
             state: None,
             startup_error,
+            event_loop_proxy,
         }
     }
 
     fn fail_startup(
         &mut self,
-        event_loop: &dyn winit::event_loop::ActiveEventLoop,
+        event_loop: &winit::event_loop::ActiveEventLoop,
         error: AppRunError,
     ) {
         match self.startup_error.lock() {
@@ -454,66 +502,157 @@ impl AppRunner {
         event_loop.exit();
     }
 
-    fn build_layout(&mut self) {
+    fn refresh_accessibility(&mut self) {
         let Some(state) = self.state.as_mut() else {
             return;
         };
-        let runtime = state.signal_runtime.clone();
 
-        // Clear layout tree
-        state.layout_tree = LayoutTree::new();
+        state.widget_registry.accessibility = collect_accessibility_tree(
+            state.root_widget.as_ref(),
+            &state.layout_tree,
+            state.focused_path.as_ref(),
+        );
+        let snapshot = state.widget_registry.accessibility_tree().clone();
+        match state.accessibility_snapshot.lock() {
+            Ok(mut guard) => {
+                *guard = snapshot.clone();
+            }
+            Err(poisoned) => {
+                log::warn!("recovering from poisoned accessibility snapshot");
+                *poisoned.into_inner() = snapshot.clone();
+            }
+        }
 
-        runtime.with_tracking(SubscriberKind::Rebuild, || {
-            set_current_theme(state.theme.resolve_theme());
+        if let Some(adapter) = state.accessibility_adapter.as_mut() {
+            let title = self.config.title.clone();
+            adapter.update_if_active(|| snapshot.to_tree_update(&title));
+        }
+    }
 
-            fn rebuild_widget(widget: &mut dyn Widget, build_ctx: &mut BuildContext) {
-                widget.rebuild(build_ctx);
-                for child in widget.children_mut() {
-                    rebuild_widget(child.as_mut(), build_ctx);
+    fn handle_accessibility_action(
+        &mut self,
+        request: crate::accessibility::RoutedAccessibilityAction,
+    ) {
+        {
+            let Some(state) = self.state.as_mut() else {
+                return;
+            };
+
+            let Some(path) = state
+                .widget_registry
+                .path_for_accessibility_node(request.node_id)
+                .map(ToOwned::to_owned)
+            else {
+                return;
+            };
+
+            match request.action {
+                sparsh_widgets::AccessibilityAction::Focus => {
+                    let focus_changed = apply_focus_change(
+                        state.root_widget.as_mut(),
+                        &mut state.focus_manager,
+                        &state.widget_registry,
+                        &mut state.focused_path,
+                        Some(path),
+                    );
+                    if focus_changed {
+                        set_native_ime_allowed(
+                            state.window,
+                            state.focused_text_editor_state().is_some(),
+                        );
+                        state.needs_repaint = true;
+                    }
+                }
+                action => {
+                    let handled = with_widget_mut(state.root_widget.as_mut(), &path, |widget| {
+                        widget.handle_accessibility_action(action, request.value.clone())
+                    })
+                    .unwrap_or(false);
+                    if handled {
+                        if matches!(action, sparsh_widgets::AccessibilityAction::SetValue) {
+                            state.needs_layout = true;
+                        }
+                        state.needs_repaint = true;
+                    }
                 }
             }
 
-            let mut build_ctx = BuildContext::default();
-            rebuild_widget(state.root_widget.as_mut(), &mut build_ctx);
-        });
+            state.signal_runtime.run_effects(64);
+            let dirty = state.signal_runtime.take_dirty_flags();
+            if dirty.rebuild || dirty.layout {
+                state.needs_layout = true;
+            }
+            if dirty.paint {
+                state.needs_repaint = true;
+            }
+        }
+        self.refresh_accessibility();
+        if let Some(state) = self.state.as_ref() {
+            if state.needs_layout || state.needs_repaint {
+                state.window.request_redraw();
+            }
+        }
+    }
 
-        let mut widget_registry = WidgetRuntimeRegistry::default();
-        let root_id = runtime.with_tracking(SubscriberKind::Layout, || {
-            set_current_theme(state.theme.resolve_theme());
-            let mut path = Vec::new();
-            add_widget_to_layout(
-                state.root_widget.as_mut(),
-                &mut state.layout_tree,
-                &mut state.text_system,
-                &mut widget_registry,
-                &mut path,
-                false,
-            )
-        });
-        state.layout_tree.set_root(root_id);
-        state.widget_registry = widget_registry;
+    fn build_layout(&mut self) {
+        {
+            let Some(state) = self.state.as_mut() else {
+                return;
+            };
+            let runtime = state.signal_runtime.clone();
 
-        // Compute layout
-        // Use surface size - this should be in physical pixels
-        // But we need to convert to logical pixels for layout
-        let size = state.surface_state.size;
-        let logical_width = (size.width as f32) / state.scale_factor;
-        let logical_height = (size.height as f32) / state.scale_factor;
-        state
-            .layout_tree
-            .compute_layout(logical_width, logical_height);
+            state.layout_tree = LayoutTree::new();
 
-        state.focused_path = remap_path(state.focused_path.take(), &state.widget_registry);
-        state.capture_path = remap_path(state.capture_path.take(), &state.widget_registry);
-        sync_focus_manager(
-            &mut state.focus_manager,
-            &state.widget_registry,
-            state.focused_path.as_ref(),
-        );
-        set_native_ime_allowed(state.window, state.focused_text_editor_state().is_some());
+            runtime.with_tracking(SubscriberKind::Rebuild, || {
+                set_current_theme(state.theme.resolve_theme());
 
-        state.needs_layout = false;
-        state.needs_repaint = true;
+                fn rebuild_widget(widget: &mut dyn Widget, build_ctx: &mut BuildContext) {
+                    widget.rebuild(build_ctx);
+                    for child in widget.children_mut() {
+                        rebuild_widget(child.as_mut(), build_ctx);
+                    }
+                }
+
+                let mut build_ctx = BuildContext::default();
+                rebuild_widget(state.root_widget.as_mut(), &mut build_ctx);
+            });
+
+            let mut widget_registry = WidgetRuntimeRegistry::default();
+            let root_id = runtime.with_tracking(SubscriberKind::Layout, || {
+                set_current_theme(state.theme.resolve_theme());
+                let mut path = Vec::new();
+                add_widget_to_layout(
+                    state.root_widget.as_mut(),
+                    &mut state.layout_tree,
+                    &mut state.text_system,
+                    &mut widget_registry,
+                    &mut path,
+                    false,
+                )
+            });
+            state.layout_tree.set_root(root_id);
+            state.widget_registry = widget_registry;
+
+            let size = state.surface_state.size;
+            let logical_width = (size.width as f32) / state.scale_factor;
+            let logical_height = (size.height as f32) / state.scale_factor;
+            state
+                .layout_tree
+                .compute_layout(logical_width, logical_height);
+
+            state.focused_path = remap_path(state.focused_path.take(), &state.widget_registry);
+            state.capture_path = remap_path(state.capture_path.take(), &state.widget_registry);
+            sync_focus_manager(
+                &mut state.focus_manager,
+                &state.widget_registry,
+                state.focused_path.as_ref(),
+            );
+            set_native_ime_allowed(state.window, state.focused_text_editor_state().is_some());
+
+            state.needs_layout = false;
+            state.needs_repaint = true;
+        }
+        self.refresh_accessibility();
     }
 
     fn paint(&mut self) {
@@ -623,111 +762,126 @@ impl AppRunner {
     }
 
     fn handle_event(&mut self, event: InputEvent) {
-        let Some(state) = self.state.as_mut() else {
-            return;
-        };
+        let mut handled_focus_navigation = false;
+        {
+            let Some(state) = self.state.as_mut() else {
+                return;
+            };
 
-        let runtime = state.signal_runtime.clone();
-        let mapper = ActionMapper::new();
-        let mut dispatch_event = event.clone();
+            let runtime = state.signal_runtime.clone();
+            let mapper = ActionMapper::new();
+            let mut dispatch_event = event.clone();
 
-        if let Some(Action::Standard(action)) = mapper.map_event(&event) {
-            match action {
-                StandardAction::FocusNext | StandardAction::FocusPrevious => {
-                    let next_focus = move_focus_path(
-                        state.focused_path.as_ref(),
-                        &state.widget_registry,
-                        matches!(action, StandardAction::FocusNext),
-                    );
+            if let Some(Action::Standard(action)) = mapper.map_event(&event) {
+                match action {
+                    StandardAction::FocusNext | StandardAction::FocusPrevious => {
+                        let next_focus = move_focus_path(
+                            state.focused_path.as_ref(),
+                            &state.widget_registry,
+                            matches!(action, StandardAction::FocusNext),
+                        );
+                        let focus_changed = apply_focus_change(
+                            state.root_widget.as_mut(),
+                            &mut state.focus_manager,
+                            &state.widget_registry,
+                            &mut state.focused_path,
+                            next_focus,
+                        );
+                        if focus_changed {
+                            set_native_ime_allowed(
+                                state.window,
+                                state.focused_text_editor_state().is_some(),
+                            );
+                            state.needs_repaint = true;
+                        }
+                        handled_focus_navigation = true;
+                    }
+                    StandardAction::Paste if state.focused_text_editor_state().is_some() => {
+                        let Some(text) = state.clipboard_text() else {
+                            return;
+                        };
+                        dispatch_event = InputEvent::Paste { text };
+                    }
+                    _ => {}
+                }
+            }
+
+            if !handled_focus_navigation {
+                let current_focus_id = state
+                    .focused_path
+                    .as_ref()
+                    .and_then(|path| state.widget_registry.id_for_path(path));
+                let current_capture_path = state.capture_path.clone();
+                let outcome = runtime.run_with_current(|| {
+                    dispatch_widget_event(
+                        state.root_widget.as_mut(),
+                        &state.layout_tree,
+                        current_focus_id,
+                        current_capture_path.as_ref(),
+                        &dispatch_event,
+                    )
+                });
+
+                if outcome.commands.request_focus || outcome.commands.clear_focus {
                     let focus_changed = apply_focus_change(
                         state.root_widget.as_mut(),
                         &mut state.focus_manager,
                         &state.widget_registry,
                         &mut state.focused_path,
-                        next_focus,
+                        outcome.focus_path.clone(),
                     );
                     if focus_changed {
                         set_native_ime_allowed(
                             state.window,
                             state.focused_text_editor_state().is_some(),
                         );
+                        if state.focused_text_editor_state().is_none() {
+                            state.ime_composing = false;
+                        }
                         state.needs_repaint = true;
                     }
-                    if state.needs_repaint || state.needs_layout {
-                        state.window.request_redraw();
-                    }
-                    return;
                 }
-                StandardAction::Paste if state.focused_text_editor_state().is_some() => {
-                    let Some(text) = state.clipboard_text() else {
-                        return;
-                    };
-                    dispatch_event = InputEvent::Paste { text };
+
+                if outcome.commands.capture_pointer || outcome.commands.release_pointer {
+                    state.capture_path = outcome.capture_path;
+                    state.needs_repaint = true;
                 }
-                _ => {}
+
+                if let Some(text) = outcome.commands.clipboard_write.as_deref() {
+                    state.set_clipboard_text(text);
+                }
+
+                if outcome.commands.request_paint {
+                    state.needs_repaint = true;
+                }
+                if outcome.commands.request_layout {
+                    state.needs_layout = true;
+                }
+
+                runtime.run_effects(64);
+                let dirty = runtime.take_dirty_flags();
+                if dirty.rebuild || dirty.layout {
+                    state.needs_layout = true;
+                }
+                if dirty.paint {
+                    state.needs_repaint = true;
+                }
             }
         }
-
-        let current_focus_id = state
-            .focused_path
-            .as_ref()
-            .and_then(|path| state.widget_registry.id_for_path(path));
-        let current_capture_path = state.capture_path.clone();
-        let outcome = runtime.run_with_current(|| {
-            dispatch_widget_event(
-                state.root_widget.as_mut(),
-                &state.layout_tree,
-                current_focus_id,
-                current_capture_path.as_ref(),
-                &dispatch_event,
-            )
-        });
-
-        if outcome.commands.request_focus || outcome.commands.clear_focus {
-            let focus_changed = apply_focus_change(
-                state.root_widget.as_mut(),
-                &mut state.focus_manager,
-                &state.widget_registry,
-                &mut state.focused_path,
-                outcome.focus_path.clone(),
-            );
-            if focus_changed {
-                set_native_ime_allowed(state.window, state.focused_text_editor_state().is_some());
-                if state.focused_text_editor_state().is_none() {
-                    state.ime_composing = false;
+        if handled_focus_navigation {
+            self.refresh_accessibility();
+            if let Some(state) = self.state.as_ref() {
+                if state.needs_repaint || state.needs_layout {
+                    state.window.request_redraw();
                 }
-                state.needs_repaint = true;
             }
+            return;
         }
-
-        if outcome.commands.capture_pointer || outcome.commands.release_pointer {
-            state.capture_path = outcome.capture_path;
-            state.needs_repaint = true;
-        }
-
-        if let Some(text) = outcome.commands.clipboard_write.as_deref() {
-            state.set_clipboard_text(text);
-        }
-
-        if outcome.commands.request_paint {
-            state.needs_repaint = true;
-        }
-        if outcome.commands.request_layout {
-            state.needs_layout = true;
-        }
-
-        runtime.run_effects(64);
-        let dirty = runtime.take_dirty_flags();
-        if dirty.rebuild || dirty.layout {
-            state.needs_layout = true;
-        }
-        if dirty.paint {
-            state.needs_repaint = true;
-        }
-
-        // Request redraw if we need to repaint or relayout
-        if state.needs_repaint || state.needs_layout {
-            state.window.request_redraw();
+        self.refresh_accessibility();
+        if let Some(state) = self.state.as_ref() {
+            if state.needs_repaint || state.needs_layout {
+                state.window.request_redraw();
+            }
         }
     }
 }
@@ -770,7 +924,7 @@ fn winit_modifiers_to_input(modifiers: winit::keyboard::ModifiersState) -> Modif
     if modifiers.alt_key() {
         converted |= Modifiers::ALT;
     }
-    if modifiers.meta_key() {
+    if modifiers.super_key() {
         converted |= Modifiers::META;
     }
     converted
@@ -786,16 +940,20 @@ fn should_emit_native_text(text: &str, modifiers: Modifiers) -> bool {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(deprecated)]
-fn set_native_ime_allowed(window: &dyn winit::window::Window, allowed: bool) {
+fn set_native_ime_allowed(window: &winit::window::Window, allowed: bool) {
     window.set_ime_allowed(allowed);
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-impl winit::application::ApplicationHandler for AppRunner {
-    fn can_create_surfaces(&mut self, event_loop: &dyn winit::event_loop::ActiveEventLoop) {
+impl winit::application::ApplicationHandler<NativeUserEvent> for AppRunner {
+    fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
+        if self.state.is_some() {
+            return;
+        }
         let window_attributes = winit::window::WindowAttributes::default()
             .with_title(&self.config.title)
-            .with_surface_size(winit::dpi::LogicalSize::new(
+            .with_visible(false)
+            .with_inner_size(winit::dpi::LogicalSize::new(
                 self.config.width,
                 self.config.height,
             ));
@@ -809,9 +967,7 @@ impl winit::application::ApplicationHandler for AppRunner {
             }
         };
 
-        let window_leaked: &'static mut Box<dyn winit::window::Window> =
-            Box::leak(Box::new(window));
-        let window: &'static dyn winit::window::Window = &**window_leaked;
+        let window: &'static winit::window::Window = Box::leak(Box::new(window));
 
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -880,12 +1036,31 @@ impl winit::application::ApplicationHandler for AppRunner {
                 scale_factor,
                 clipboard,
                 ime_composing: false,
+                accessibility_snapshot: Arc::new(Mutex::new(AccessibilityTreeSnapshot::default())),
+                accessibility_adapter: None,
                 needs_layout: true,
                 needs_repaint: true,
             });
 
             // Build initial layout
             self.build_layout();
+
+            if let Some(state) = self.state.as_mut() {
+                let activation_handler = NativeAccessibilityActivationHandler {
+                    title: self.config.title.clone(),
+                    snapshot: Arc::clone(&state.accessibility_snapshot),
+                };
+                let adapter = accesskit_winit::Adapter::with_mixed_handlers(
+                    event_loop,
+                    state.window,
+                    activation_handler,
+                    self.event_loop_proxy.clone(),
+                );
+                state.accessibility_adapter = Some(adapter);
+                state.window.set_visible(true);
+            }
+
+            self.refresh_accessibility();
             // Trigger the very first frame; some platforms won't emit an initial redraw.
             if let Some(state) = self.state.as_ref() {
                 state.window.request_redraw();
@@ -895,15 +1070,21 @@ impl winit::application::ApplicationHandler for AppRunner {
 
     fn window_event(
         &mut self,
-        event_loop: &dyn winit::event_loop::ActiveEventLoop,
+        event_loop: &winit::event_loop::ActiveEventLoop,
         _id: winit::window::WindowId,
         event: WindowEvent,
     ) {
+        if let Some(state) = self.state.as_mut() {
+            if let Some(adapter) = state.accessibility_adapter.as_mut() {
+                adapter.process_event(state.window, &event);
+            }
+        }
+
         match event {
             WindowEvent::CloseRequested => {
                 event_loop.exit();
             }
-            WindowEvent::SurfaceResized(size) => {
+            WindowEvent::Resized(size) => {
                 if let Some(state) = self.state.as_mut() {
                     if size.width > 0 && size.height > 0 {
                         state
@@ -919,7 +1100,7 @@ impl winit::application::ApplicationHandler for AppRunner {
                     state.needs_layout = true;
                 }
             }
-            WindowEvent::PointerMoved { position, .. } => {
+            WindowEvent::CursorMoved { position, .. } => {
                 // Convert physical pixels to logical pixels for event handling
                 let scale_factor = self.state.as_ref().map(|s| s.scale_factor).unwrap_or(1.0);
                 let pos = glam::Vec2::new(
@@ -931,19 +1112,12 @@ impl winit::application::ApplicationHandler for AppRunner {
                 }
                 self.handle_event(InputEvent::PointerMove { pos });
             }
-            WindowEvent::PointerButton {
-                state: btn_state,
-                button,
-                ..
-            } => {
+            WindowEvent::MouseInput { state: btn_state, button, .. } => {
                 let pos = self.state.as_ref().map(|s| s.mouse_pos).unwrap_or_default();
                 let button = match button {
-                    winit::event::ButtonSource::Mouse(mb) => match mb {
-                        winit::event::MouseButton::Left => PointerButton::Primary,
-                        winit::event::MouseButton::Right => PointerButton::Secondary,
-                        winit::event::MouseButton::Middle => PointerButton::Auxiliary,
-                        _ => PointerButton::Primary,
-                    },
+                    winit::event::MouseButton::Left => PointerButton::Primary,
+                    winit::event::MouseButton::Right => PointerButton::Secondary,
+                    winit::event::MouseButton::Middle => PointerButton::Auxiliary,
                     _ => PointerButton::Primary,
                 };
 
@@ -979,7 +1153,8 @@ impl winit::application::ApplicationHandler for AppRunner {
                     .as_ref()
                     .map(|state| state.modifiers)
                     .unwrap_or_default();
-                let Some(key) = map_winit_key(&event.key_without_modifiers.as_ref()) else {
+                let key_without_modifiers = event.key_without_modifiers();
+                let Some(key) = map_winit_key(&key_without_modifiers.as_ref()) else {
                     return;
                 };
 
@@ -1025,7 +1200,6 @@ impl winit::application::ApplicationHandler for AppRunner {
                         state.ime_composing = false;
                         self.handle_event(InputEvent::CompositionEnd { text });
                     }
-                    winit::event::Ime::DeleteSurrounding { .. } => {}
                     winit::event::Ime::Disabled => {
                         if state.ime_composing {
                             state.ime_composing = false;
@@ -1149,7 +1323,33 @@ impl winit::application::ApplicationHandler for AppRunner {
         }
     }
 
-    fn about_to_wait(&mut self, _event_loop: &dyn winit::event_loop::ActiveEventLoop) {
+    fn user_event(
+        &mut self,
+        _event_loop: &winit::event_loop::ActiveEventLoop,
+        user_event: NativeUserEvent,
+    ) {
+        match user_event {
+            NativeUserEvent::Accessibility(event) => {
+                let Some(state) = self.state.as_ref() else {
+                    return;
+                };
+                if event.window_id != state.window.id() {
+                    return;
+                }
+                match event.window_event {
+                    accesskit_winit::WindowEvent::InitialTreeRequested => {}
+                    accesskit_winit::WindowEvent::ActionRequested(request) => {
+                        if let Some(action) = action_from_accesskit(request) {
+                            self.handle_accessibility_action(action);
+                        }
+                    }
+                    accesskit_winit::WindowEvent::AccessibilityDeactivated => {}
+                }
+            }
+        }
+    }
+
+    fn about_to_wait(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {
         if let Some(state) = self.state.as_mut() {
             let mut had_task_results = false;
             state.task_runtime.drain_completed(|result| {

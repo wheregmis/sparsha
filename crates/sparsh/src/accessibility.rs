@@ -1,308 +1,258 @@
-//! Accessibility support using AccessKit.
-//!
-//! This module provides integration with AccessKit for cross-platform
-//! accessibility support (screen readers, alternative input methods, etc.)
-#![allow(dead_code)]
+//! Shared runtime accessibility snapshot and AccessKit conversion.
 
-use accesskit::{Action, Node, NodeId, Role, Tree, TreeId, TreeUpdate};
-use sparsh_layout::WidgetId;
+use sparsh_core::Rect;
+use sparsh_widgets::{AccessibilityAction, AccessibilityInfo, AccessibilityRole};
 use std::collections::HashMap;
 
-/// Maps between Sparsh WidgetIds and AccessKit NodeIds.
-pub struct AccessibilityIdMap {
-    widget_to_node: HashMap<WidgetId, NodeId>,
-    node_to_widget: HashMap<NodeId, WidgetId>,
-    next_id: u64,
-}
+#[cfg(not(target_arch = "wasm32"))]
+use accesskit::{
+    Action, ActionData, ActionRequest, Node, NodeId, Rect as AccessRect, Role, Toggled, Tree,
+    TreeId, TreeUpdate,
+};
 
-impl Default for AccessibilityIdMap {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+pub(crate) const ACCESSIBILITY_ROOT_ID: u64 = 0;
 
-impl AccessibilityIdMap {
-    pub fn new() -> Self {
-        Self {
-            widget_to_node: HashMap::new(),
-            node_to_widget: HashMap::new(),
-            // Start at 1 since 0 is reserved for the root
-            next_id: 1,
-        }
-    }
-
-    /// Get or create a NodeId for a WidgetId.
-    pub fn get_or_create(&mut self, widget_id: WidgetId) -> NodeId {
-        if let Some(&node_id) = self.widget_to_node.get(&widget_id) {
-            node_id
-        } else {
-            let node_id = NodeId(self.next_id);
-            self.next_id += 1;
-            self.widget_to_node.insert(widget_id, node_id);
-            self.node_to_widget.insert(node_id, widget_id);
-            node_id
-        }
-    }
-
-    /// Get the WidgetId for a NodeId.
-    pub fn get_widget(&self, node_id: NodeId) -> Option<WidgetId> {
-        self.node_to_widget.get(&node_id).copied()
-    }
-
-    /// Get the NodeId for a WidgetId.
-    pub fn get_node(&self, widget_id: WidgetId) -> Option<NodeId> {
-        self.widget_to_node.get(&widget_id).copied()
-    }
-
-    /// Clear all mappings.
-    pub fn clear(&mut self) {
-        self.widget_to_node.clear();
-        self.node_to_widget.clear();
-        self.next_id = 1;
-    }
-}
-
-/// Accessibility information that widgets can provide.
-#[derive(Clone, Debug, Default)]
-pub struct AccessibleInfo {
-    /// The role of this element (button, text field, etc.)
-    pub role: AccessibleRole,
-    /// Human-readable name/label
-    pub name: Option<String>,
-    /// Human-readable description
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct AccessibilityNodeSnapshot {
+    pub id: u64,
+    pub path: Vec<usize>,
+    pub role: AccessibilityRole,
+    pub label: Option<String>,
     pub description: Option<String>,
-    /// Current value (for sliders, text fields, etc.)
     pub value: Option<String>,
-    /// Whether the element is focusable
-    pub focusable: bool,
-    /// Whether the element is currently focused
-    pub focused: bool,
-    /// Whether the element is disabled
+    pub hidden: bool,
     pub disabled: bool,
-    /// Available actions
-    pub actions: Vec<AccessibleAction>,
+    pub checked: Option<bool>,
+    pub actions: Vec<AccessibilityAction>,
+    pub bounds: Rect,
+    pub children: Vec<u64>,
 }
 
-/// Role of an accessible element.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum AccessibleRole {
-    /// Generic container
-    #[default]
-    GenericContainer,
-    /// Push button
-    Button,
-    /// Text input field
-    TextField,
-    /// Static text label
-    Label,
-    /// Checkbox
-    CheckBox,
-    /// Radio button
-    RadioButton,
-    /// Slider
-    Slider,
-    /// List
-    List,
-    /// List item
-    ListItem,
-    /// Window
-    Window,
-    /// Scroll view
-    ScrollView,
-    /// Image
-    Image,
+impl AccessibilityNodeSnapshot {
+    pub(crate) fn apply_overrides(&mut self, info: AccessibilityInfo) {
+        if let Some(role) = info.role {
+            self.role = role;
+        }
+        if let Some(label) = info.label {
+            self.label = Some(label);
+        }
+        if let Some(description) = info.description {
+            self.description = Some(description);
+        }
+        if let Some(value) = info.value {
+            self.value = Some(value);
+        }
+        if let Some(checked) = info.checked {
+            self.checked = Some(checked);
+        }
+        self.hidden |= info.hidden;
+        self.disabled |= info.disabled;
+    }
 }
 
-impl From<AccessibleRole> for Role {
-    fn from(role: AccessibleRole) -> Self {
-        match role {
-            AccessibleRole::GenericContainer => Role::GenericContainer,
-            AccessibleRole::Button => Role::Button,
-            AccessibleRole::TextField => Role::TextInput,
-            AccessibleRole::Label => Role::Label,
-            AccessibleRole::CheckBox => Role::CheckBox,
-            AccessibleRole::RadioButton => Role::RadioButton,
-            AccessibleRole::Slider => Role::Slider,
-            AccessibleRole::List => Role::List,
-            AccessibleRole::ListItem => Role::ListItem,
-            AccessibleRole::Window => Role::Window,
-            AccessibleRole::ScrollView => Role::ScrollView,
-            AccessibleRole::Image => Role::Image,
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct AccessibilityTreeSnapshot {
+    pub nodes: Vec<AccessibilityNodeSnapshot>,
+    pub root_children: Vec<u64>,
+    pub focus: u64,
+    pub node_paths: HashMap<u64, Vec<usize>>,
+}
+
+impl AccessibilityTreeSnapshot {
+    pub(crate) fn path_for_node(&self, node_id: u64) -> Option<&[usize]> {
+        self.node_paths.get(&node_id).map(Vec::as_slice)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn to_tree_update(&self, window_title: &str) -> TreeUpdate {
+        let mut root = Node::new(Role::Window);
+        root.set_label(window_title.to_owned());
+        root.set_children(
+            self.root_children
+                .iter()
+                .copied()
+                .map(NodeId)
+                .collect::<Vec<_>>(),
+        );
+
+        let mut nodes = Vec::with_capacity(self.nodes.len() + 1);
+        nodes.push((NodeId(ACCESSIBILITY_ROOT_ID), root));
+        for node in &self.nodes {
+            nodes.push((NodeId(node.id), build_accesskit_node(node)));
+        }
+
+        TreeUpdate {
+            nodes,
+            tree: Some(Tree::new(NodeId(ACCESSIBILITY_ROOT_ID))),
+            tree_id: TreeId::ROOT,
+            focus: NodeId(if self.focus == 0 {
+                ACCESSIBILITY_ROOT_ID
+            } else {
+                self.focus
+            }),
         }
     }
 }
 
-/// Actions that assistive technologies can request.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AccessibleAction {
-    /// Click/activate the element
-    Click,
-    /// Focus the element
-    Focus,
-    /// Set the element's value
-    SetValue,
-    /// Increment (for sliders, etc.)
-    Increment,
-    /// Decrement (for sliders, etc.)
-    Decrement,
-    /// Scroll up
-    ScrollUp,
-    /// Scroll down
-    ScrollDown,
-    /// Scroll left
-    ScrollLeft,
-    /// Scroll right
-    ScrollRight,
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct RoutedAccessibilityAction {
+    pub node_id: u64,
+    pub action: AccessibilityAction,
+    pub value: Option<String>,
 }
 
-impl From<AccessibleAction> for Action {
-    fn from(action: AccessibleAction) -> Self {
-        match action {
-            AccessibleAction::Click => Action::Click,
-            AccessibleAction::Focus => Action::Focus,
-            AccessibleAction::SetValue => Action::SetValue,
-            AccessibleAction::Increment => Action::Increment,
-            AccessibleAction::Decrement => Action::Decrement,
-            AccessibleAction::ScrollUp => Action::ScrollUp,
-            AccessibleAction::ScrollDown => Action::ScrollDown,
-            AccessibleAction::ScrollLeft => Action::ScrollLeft,
-            AccessibleAction::ScrollRight => Action::ScrollRight,
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn action_from_accesskit(
+    request: ActionRequest,
+) -> Option<RoutedAccessibilityAction> {
+    let action = match request.action {
+        Action::Click => AccessibilityAction::Click,
+        Action::Focus => AccessibilityAction::Focus,
+        Action::SetValue => AccessibilityAction::SetValue,
+        Action::ScrollUp => AccessibilityAction::ScrollUp,
+        Action::ScrollDown => AccessibilityAction::ScrollDown,
+        Action::ScrollLeft => AccessibilityAction::ScrollLeft,
+        Action::ScrollRight => AccessibilityAction::ScrollRight,
+        _ => return None,
+    };
+
+    let value = match request.data {
+        Some(ActionData::Value(value)) => Some(value.into_string()),
+        _ => None,
+    };
+
+    Some(RoutedAccessibilityAction {
+        node_id: request.target_node.0,
+        action,
+        value,
+    })
+}
+
+pub(crate) fn accessibility_node_id(path: &[usize]) -> u64 {
+    const OFFSET_BASIS: u64 = 0xcbf29ce484222325;
+    const PRIME: u64 = 0x00000100000001B3;
+
+    let mut hash = OFFSET_BASIS;
+    hash ^= 0xFF;
+    hash = hash.wrapping_mul(PRIME);
+    for index in path {
+        for byte in index.to_le_bytes() {
+            hash ^= byte as u64;
+            hash = hash.wrapping_mul(PRIME);
         }
+        hash ^= 0xFE;
+        hash = hash.wrapping_mul(PRIME);
+    }
+    if hash == ACCESSIBILITY_ROOT_ID {
+        1
+    } else {
+        hash
     }
 }
 
-/// Builds an AccessKit Node from AccessibleInfo.
-pub fn build_node(info: &AccessibleInfo) -> Node {
-    let mut node = Node::new(info.role.into());
+#[cfg(not(target_arch = "wasm32"))]
+fn build_accesskit_node(snapshot: &AccessibilityNodeSnapshot) -> Node {
+    let mut node = Node::new(accesskit_role(snapshot.role));
+    node.set_children(snapshot.children.iter().copied().map(NodeId).collect::<Vec<_>>());
+    node.set_bounds(accesskit_rect(snapshot.bounds));
 
-    if let Some(ref name) = info.name {
-        node.set_label(name.clone());
+    if let Some(label) = &snapshot.label {
+        node.set_label(label.clone());
     }
-
-    if let Some(ref desc) = info.description {
-        node.set_description(desc.clone());
+    if let Some(description) = &snapshot.description {
+        node.set_description(description.clone());
     }
-
-    if let Some(ref value) = info.value {
+    if let Some(value) = &snapshot.value {
         node.set_value(value.clone());
     }
-
-    // Add Focus action to indicate the node is focusable
-    if info.focusable {
-        node.add_action(Action::Focus);
+    if snapshot.hidden {
+        node.set_hidden();
     }
-
-    if info.disabled {
+    if snapshot.disabled {
         node.set_disabled();
     }
-
-    // Add available actions
-    for action in &info.actions {
-        node.add_action((*action).into());
+    if let Some(checked) = snapshot.checked {
+        node.set_toggled(Toggled::from(checked));
+    }
+    for action in &snapshot.actions {
+        node.add_action(accesskit_action(*action));
     }
 
     node
 }
 
-/// Trait for widgets to provide accessibility information.
-pub trait Accessible {
-    /// Get the accessibility info for this widget.
-    fn accessibility_info(&self) -> AccessibleInfo {
-        AccessibleInfo::default()
-    }
-
-    /// Handle an accessibility action request.
-    fn handle_accessibility_action(&mut self, _action: AccessibleAction) -> bool {
-        false
-    }
-}
-
-/// Manages the accessibility tree for the application.
-pub struct AccessibilityManager {
-    id_map: AccessibilityIdMap,
-    root_id: NodeId,
-}
-
-impl Default for AccessibilityManager {
-    fn default() -> Self {
-        Self::new()
+#[cfg(not(target_arch = "wasm32"))]
+fn accesskit_role(value: AccessibilityRole) -> Role {
+    match value {
+        AccessibilityRole::GenericContainer => Role::GenericContainer,
+        AccessibilityRole::Button => Role::Button,
+        AccessibilityRole::CheckBox => Role::CheckBox,
+        AccessibilityRole::Label => Role::Label,
+        AccessibilityRole::TextInput => Role::TextInput,
+        AccessibilityRole::MultilineTextInput => Role::MultilineTextInput,
+        AccessibilityRole::List => Role::List,
+        AccessibilityRole::ScrollView => Role::ScrollView,
     }
 }
 
-impl AccessibilityManager {
-    pub fn new() -> Self {
-        Self {
-            id_map: AccessibilityIdMap::new(),
-            root_id: NodeId(0), // Root is always 0
-        }
-    }
-
-    /// Build an initial tree update for the application.
-    pub fn build_initial_tree(&mut self, app_name: &str) -> TreeUpdate {
-        // Create root window node
-        let mut root_node = Node::new(Role::Window);
-        root_node.set_label(app_name.to_string());
-
-        TreeUpdate {
-            nodes: vec![(self.root_id, root_node)],
-            tree: Some(Tree::new(self.root_id)),
-            tree_id: TreeId::ROOT,
-            focus: self.root_id,
-        }
-    }
-
-    /// Get or create a NodeId for a widget.
-    pub fn get_node_id(&mut self, widget_id: WidgetId) -> NodeId {
-        self.id_map.get_or_create(widget_id)
-    }
-
-    /// Get the WidgetId for a NodeId.
-    pub fn get_widget_id(&self, node_id: NodeId) -> Option<WidgetId> {
-        self.id_map.get_widget(node_id)
-    }
-
-    /// Get the root NodeId.
-    pub fn root_id(&self) -> NodeId {
-        self.root_id
-    }
-
-    /// Clear all mappings (call when rebuilding the tree).
-    pub fn clear(&mut self) {
-        self.id_map.clear();
+#[cfg(not(target_arch = "wasm32"))]
+fn accesskit_action(value: AccessibilityAction) -> Action {
+    match value {
+        AccessibilityAction::Click => Action::Click,
+        AccessibilityAction::Focus => Action::Focus,
+        AccessibilityAction::SetValue => Action::SetValue,
+        AccessibilityAction::ScrollUp => Action::ScrollUp,
+        AccessibilityAction::ScrollDown => Action::ScrollDown,
+        AccessibilityAction::ScrollLeft => Action::ScrollLeft,
+        AccessibilityAction::ScrollRight => Action::ScrollRight,
     }
 }
 
-#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
+fn accesskit_rect(value: Rect) -> AccessRect {
+    AccessRect {
+        x0: value.x as f64,
+        y0: value.y as f64,
+        x1: (value.x + value.width) as f64,
+        y1: (value.y + value.height) as f64,
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_id_mapping() {
-        let mut manager = AccessibilityManager::new();
-        let widget_id = WidgetId::default();
-
-        let node_id1 = manager.get_node_id(widget_id);
-        let node_id2 = manager.get_node_id(widget_id);
-
-        // Same widget should get same node ID
-        assert_eq!(node_id1, node_id2);
-
-        // Should be able to look up widget from node
-        assert_eq!(manager.get_widget_id(node_id1), Some(widget_id));
+    fn node_ids_are_stable_for_widget_paths() {
+        assert_eq!(accessibility_node_id(&[0, 1, 2]), accessibility_node_id(&[0, 1, 2]));
+        assert_ne!(accessibility_node_id(&[0, 1, 2]), accessibility_node_id(&[0, 2, 1]));
     }
 
     #[test]
-    fn test_build_node() {
-        let info = AccessibleInfo {
-            role: AccessibleRole::Button,
-            name: Some("Click Me".to_string()),
-            focusable: true,
-            actions: vec![AccessibleAction::Click],
-            ..Default::default()
+    fn snapshot_converts_to_accesskit_tree() {
+        let snapshot = AccessibilityTreeSnapshot {
+            nodes: vec![AccessibilityNodeSnapshot {
+                id: 42,
+                path: vec![0],
+                role: AccessibilityRole::Button,
+                label: Some("Press".to_owned()),
+                description: None,
+                value: None,
+                hidden: false,
+                disabled: false,
+                checked: None,
+                actions: vec![AccessibilityAction::Click, AccessibilityAction::Focus],
+                bounds: Rect::new(10.0, 20.0, 30.0, 40.0),
+                children: Vec::new(),
+            }],
+            root_children: vec![42],
+            focus: 42,
+            node_paths: HashMap::from([(42, vec![0])]),
         };
 
-        let node = build_node(&info);
-        assert_eq!(node.role(), Role::Button);
-        assert_eq!(node.label(), Some("Click Me"));
+        let update = snapshot.to_tree_update("Test");
+        assert_eq!(update.focus, NodeId(42));
+        assert_eq!(update.nodes.len(), 2);
     }
 }

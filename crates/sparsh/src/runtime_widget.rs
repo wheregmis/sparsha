@@ -1,7 +1,14 @@
+use crate::accessibility::{
+    accessibility_node_id, AccessibilityNodeSnapshot, AccessibilityTreeSnapshot,
+    ACCESSIBILITY_ROOT_ID,
+};
 use sparsh_input::{FocusManager, InputEvent};
 use sparsh_layout::{taffy::Dimension, LayoutTree, WidgetId};
 use sparsh_text::TextSystem;
-use sparsh_widgets::{EventCommands, EventContext, LayoutContext, TextEditorState, Widget};
+use sparsh_widgets::{
+    AccessibilityInfo, AccessibilityRole, EventCommands, EventContext, LayoutContext,
+    TextEditorState, Widget,
+};
 use std::collections::HashMap;
 
 pub(crate) type WidgetPath = Vec<usize>;
@@ -12,6 +19,7 @@ pub(crate) struct WidgetRuntimeRegistry {
     path_to_id: HashMap<WidgetPath, WidgetId>,
     id_to_path: HashMap<WidgetId, WidgetPath>,
     text_editors: HashMap<WidgetPath, TextEditorState>,
+    pub(crate) accessibility: AccessibilityTreeSnapshot,
 }
 
 impl WidgetRuntimeRegistry {
@@ -25,6 +33,14 @@ impl WidgetRuntimeRegistry {
 
     pub(crate) fn text_editor_state_for_path(&self, path: &[usize]) -> Option<&TextEditorState> {
         self.text_editors.get(path)
+    }
+
+    pub(crate) fn accessibility_tree(&self) -> &AccessibilityTreeSnapshot {
+        &self.accessibility
+    }
+
+    pub(crate) fn path_for_accessibility_node(&self, node_id: u64) -> Option<&[usize]> {
+        self.accessibility.path_for_node(node_id)
     }
 }
 
@@ -132,6 +148,147 @@ pub(crate) fn remap_path(
     registry: &WidgetRuntimeRegistry,
 ) -> Option<WidgetPath> {
     path.filter(|candidate| registry.id_for_path(candidate).is_some())
+}
+
+pub(crate) fn collect_accessibility_tree(
+    root_widget: &dyn Widget,
+    layout_tree: &LayoutTree,
+    focused_path: Option<&WidgetPath>,
+) -> AccessibilityTreeSnapshot {
+    #[derive(Default)]
+    struct SubtreeResult {
+        root_nodes: Vec<u64>,
+        first_descendant: Option<u64>,
+        focused_node: Option<u64>,
+    }
+
+    fn build_snapshot(
+        widget: &dyn Widget,
+        layout_tree: &LayoutTree,
+        path: &[usize],
+        info: AccessibilityInfo,
+        children: Vec<u64>,
+    ) -> AccessibilityNodeSnapshot {
+        let bounds = layout_tree
+            .get_absolute_layout(widget.id())
+            .map(|layout| layout.bounds)
+            .unwrap_or(sparsh_core::Rect::ZERO);
+        AccessibilityNodeSnapshot {
+            id: accessibility_node_id(path),
+            path: path.to_vec(),
+            role: info.role.unwrap_or(AccessibilityRole::GenericContainer),
+            label: info.label,
+            description: info.description,
+            value: info.value,
+            hidden: info.hidden,
+            disabled: info.disabled,
+            checked: info.checked,
+            actions: info.actions,
+            bounds,
+            children,
+        }
+    }
+
+    fn visit(
+        widget: &dyn Widget,
+        layout_tree: &LayoutTree,
+        focused_path: Option<&WidgetPath>,
+        path: &mut WidgetPath,
+        nodes: &mut Vec<AccessibilityNodeSnapshot>,
+        node_paths: &mut HashMap<u64, WidgetPath>,
+        node_indices: &mut HashMap<u64, usize>,
+    ) -> SubtreeResult {
+        let mut root_nodes = Vec::new();
+        let mut first_descendant = None;
+        let mut focused_node = None;
+
+        for (index, child) in widget.children().iter().enumerate() {
+            path.push(index);
+            let child_result = visit(
+                child.as_ref(),
+                layout_tree,
+                focused_path,
+                path,
+                nodes,
+                node_paths,
+                node_indices,
+            );
+            path.pop();
+            root_nodes.extend(child_result.root_nodes);
+            if first_descendant.is_none() {
+                first_descendant = child_result.first_descendant;
+            }
+            if focused_node.is_none() {
+                focused_node = child_result.focused_node;
+            }
+        }
+
+        let Some(info) = widget.accessibility_info() else {
+            return SubtreeResult {
+                root_nodes,
+                first_descendant,
+                focused_node,
+            };
+        };
+
+        if widget.accessibility_merge_descendant() {
+            if let Some(target_id) = first_descendant {
+                if let Some(index) = node_indices.get(&target_id).copied() {
+                    nodes[index].apply_overrides(info);
+                }
+                return SubtreeResult {
+                    root_nodes,
+                    first_descendant: Some(target_id),
+                    focused_node,
+                };
+            }
+
+            if !info.has_metadata() {
+                return SubtreeResult {
+                    root_nodes,
+                    first_descendant,
+                    focused_node,
+                };
+            }
+        }
+
+        let snapshot = build_snapshot(widget, layout_tree, path, info, root_nodes.clone());
+        let node_id = snapshot.id;
+        node_paths.insert(node_id, path.clone());
+        node_indices.insert(node_id, nodes.len());
+        nodes.push(snapshot);
+
+        let focused_node = if focused_path == Some(path) {
+            Some(node_id)
+        } else {
+            focused_node
+        };
+
+        SubtreeResult {
+            root_nodes: vec![node_id],
+            first_descendant: Some(node_id),
+            focused_node,
+        }
+    }
+
+    let mut nodes = Vec::new();
+    let mut node_paths = HashMap::new();
+    let mut node_indices = HashMap::new();
+    let result = visit(
+        root_widget,
+        layout_tree,
+        focused_path,
+        &mut Vec::new(),
+        &mut nodes,
+        &mut node_paths,
+        &mut node_indices,
+    );
+    AccessibilityTreeSnapshot {
+        nodes,
+        root_children: result.root_nodes,
+        focus: result.focused_node.unwrap_or(ACCESSIBILITY_ROOT_ID),
+        node_paths,
+    }
 }
 
 pub(crate) fn move_focus_path(
@@ -432,7 +589,7 @@ mod tests {
     use super::*;
     use sparsh_input::{InputEvent, PointerButton};
     use sparsh_layout::taffy::{self, prelude::*};
-    use sparsh_widgets::{Container, PaintContext};
+    use sparsh_widgets::{Button, Container, PaintContext, Semantics, TextInput};
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
@@ -759,5 +916,41 @@ mod tests {
         );
 
         assert_eq!(seen_scroll.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn semantics_overrides_merge_into_descendant_accessible_node() {
+        let mut root = Container::new().child(
+            Semantics::new(Button::new("Save")).label("Explicit accessible label"),
+        );
+        let (layout_tree, _) = build_registry(&mut root);
+        let tree = collect_accessibility_tree(&root, &layout_tree, None);
+
+        assert_eq!(tree.nodes.len(), 1);
+        let node = &tree.nodes[0];
+        assert_eq!(node.role, sparsh_widgets::AccessibilityRole::Button);
+        assert_eq!(node.label.as_deref(), Some("Explicit accessible label"));
+    }
+
+    #[test]
+    fn accessibility_ids_remain_stable_across_relayout() {
+        let mut root = Container::new()
+            .child(Button::new("Primary"))
+            .child(TextInput::new().placeholder("Email"));
+        let (layout_tree_a, _) = build_registry(&mut root);
+        let tree_a = collect_accessibility_tree(&root, &layout_tree_a, Some(&vec![1]));
+
+        let mut tree = LayoutTree::new();
+        let mut registry = WidgetRuntimeRegistry::default();
+        let mut text = TextSystem::new_headless();
+        let mut path = Vec::new();
+        let root_id =
+            add_widget_to_layout(&mut root, &mut tree, &mut text, &mut registry, &mut path, false);
+        tree.set_root(root_id);
+        tree.compute_layout(800.0, 600.0);
+        let tree_b = collect_accessibility_tree(&root, &tree, Some(&vec![1]));
+
+        assert_eq!(tree_a.root_children, tree_b.root_children);
+        assert_eq!(tree_a.focus, tree_b.focus);
     }
 }

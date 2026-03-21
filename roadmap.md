@@ -66,10 +66,10 @@
 
 ## Milestone 3: Make Accessibility Real
 ### Tasks
-- [ ] Connect the `Accessible` trait and `AccessibilityManager` to the widget tree and runtime.
-- [ ] Give built-in widgets stable roles, labels, values, and actions.
-- [ ] Ensure focus state, disabled state, and value state are exposed consistently.
-- [ ] Map the accessibility model to native platform accessibility and to semantic web output.
+- [x] Connect the `Accessible` trait and `AccessibilityManager` to the widget tree and runtime.
+- [x] Give built-in widgets stable roles, labels, values, and actions.
+- [x] Ensure focus state, disabled state, and value state are exposed consistently.
+- [x] Map the accessibility model to native platform accessibility and to semantic web output.
 - [ ] Verify the result with screen readers and focused accessibility smoke tests.
 
 ### Exit Criteria

@@ -57,8 +57,9 @@ mod web_text_metrics;
 pub use app::{App, AppRunError, ThemeInput, ThemeMode, ThemeModeInput};
 pub use router::{hash_to_path, path_to_hash, Navigator, Route, Router};
 pub use sparsh_widgets::{
-    TextArea, TextAreaStyle, TextEditorState, TextInput, TextInputStyle, Theme, ThemeColors,
-    ThemeRadii, ThemeSpacing, ThemeTypography,
+    AccessibilityAction, AccessibilityInfo, AccessibilityRole, Semantics, TextArea,
+    TextAreaStyle, TextEditorState, TextInput, TextInputStyle, Theme, ThemeColors, ThemeRadii,
+    ThemeSpacing, ThemeTypography,
 };
 pub use tasks::{
     Generation, TaskHandle, TaskId, TaskKey, TaskPayload, TaskPolicy, TaskResult, TaskRuntime,
@@ -82,8 +83,9 @@ pub mod prelude {
     pub use sparsh_layout::taffy;
     pub use sparsh_signals::{Effect, Memo, ReadSignal, Signal, WriteSignal};
     pub use sparsh_widgets::{
-        BuildContext, Button, ButtonStyle, Checkbox, CheckboxStyle, Container, DrawSurface,
-        EventCommands, List, ListDirection, Scroll, ScrollDirection, Text, TextAlign, TextArea,
+        AccessibilityAction, AccessibilityInfo, AccessibilityRole, BuildContext, Button,
+        ButtonStyle, Checkbox, CheckboxStyle, Container, DrawSurface, EventCommands, List,
+        ListDirection, Scroll, ScrollDirection, Semantics, Text, TextAlign, TextArea,
         TextAreaStyle, TextEditorState, TextInput, TextInputStyle, Theme, ThemeColors, ThemeRadii,
         ThemeSpacing, ThemeTypography, Widget,
     };

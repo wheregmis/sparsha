@@ -1,6 +1,9 @@
 //! Widget trait and response types.
 
-use crate::text_editor::TextEditorState;
+use crate::{
+    accessibility::{AccessibilityAction, AccessibilityInfo},
+    text_editor::TextEditorState,
+};
 use sparsh_input::InputEvent;
 use sparsh_layout::WidgetId;
 
@@ -66,6 +69,20 @@ pub trait Widget {
         None
     }
 
+    /// Return accessibility metadata for this widget.
+    fn accessibility_info(&self) -> Option<AccessibilityInfo> {
+        None
+    }
+
+    /// Handle an accessibility action routed by the runtime.
+    fn handle_accessibility_action(
+        &mut self,
+        _action: AccessibilityAction,
+        _value: Option<String>,
+    ) -> bool {
+        false
+    }
+
     /// Whether this widget can receive keyboard focus.
     fn focusable(&self) -> bool {
         false
@@ -82,6 +99,12 @@ pub trait Widget {
     /// return the inverse of that paint translation so pointer hit-testing stays aligned.
     fn child_event_offset(&self) -> glam::Vec2 {
         glam::Vec2::ZERO
+    }
+
+    /// Whether accessibility metadata should override the first accessible descendant.
+    #[doc(hidden)]
+    fn accessibility_merge_descendant(&self) -> bool {
+        false
     }
 
     /// Measure the widget's preferred size (for intrinsic sizing).

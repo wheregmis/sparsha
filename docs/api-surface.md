@@ -9,7 +9,7 @@ Stable for 1.0:
 - `App`
 - `AppRunError`
 - `Router`, `Route`, `Navigator`, `hash_to_path`, `path_to_hash`
-- theme configuration types re-exported from `sparsh-widgets`
+- theme and accessibility configuration types re-exported from `sparsh-widgets`
 - task runtime types: `TaskRuntime`, `TaskRuntimeInitError`, `TaskHandle`, `TaskResult`, `TaskStatus`, `TaskKey`, `TaskId`, `TaskPayload`, `TaskPolicy`, `Generation`
 - `prelude`
 - sub-crate re-exports: `core`, `input`, `layout`, `render`, `signals`, `text`, `widgets`
@@ -17,8 +17,9 @@ Stable for 1.0:
 
 Internal/provisional:
 
-- `sparsh::accessibility`
 - wasm DOM renderer internals
+- native AccessKit adapter internals
+- web semantic DOM internals
 - hybrid surface manager internals
 
 ## `sparsh-core`
@@ -94,10 +95,11 @@ Stable for 1.0:
 Stable for 1.0:
 
 - widgets: `Container`, `Button`, `Checkbox`, `Text`, `TextInput`, `List`, `Scroll`, `DrawSurface`
+- editing/accessibility widgets: `TextArea`, `Semantics`
+- accessibility metadata types: `AccessibilityInfo`, `AccessibilityRole`, `AccessibilityAction`
 - widget/theme/context types re-exported from the crate root
 - `styles`, `taffy`, and `WidgetId` convenience re-exports
 
 Internal/provisional:
 
-- unfinished accessibility semantics
-- future widget-state and editing behavior beyond the current shipped implementation
+- future widget-state behavior beyond the current shipped implementation

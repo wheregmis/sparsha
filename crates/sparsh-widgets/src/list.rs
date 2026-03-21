@@ -1,6 +1,6 @@
 //! List widget for dynamic collections of child widgets.
 
-use crate::{EventContext, PaintContext, Widget};
+use crate::{AccessibilityInfo, AccessibilityRole, EventContext, PaintContext, Widget};
 use sparsh_layout::WidgetId;
 use taffy::prelude::*;
 
@@ -170,6 +170,10 @@ impl Widget for List {
 
     fn children_mut(&mut self) -> &mut [Box<dyn Widget>] {
         &mut self.items
+    }
+
+    fn accessibility_info(&self) -> Option<AccessibilityInfo> {
+        Some(AccessibilityInfo::new(AccessibilityRole::List))
     }
 }
 

@@ -42,8 +42,8 @@ The other examples follow the same pattern from their own directories.
 
 ## What The Examples Intentionally Do Not Promise Yet
 
-- Accessibility wiring is not part of the example contract in this milestone
-- `TextInput` examples are single-line only
+- Accessibility smoke verification is still manual in this milestone
+- `todo` intentionally keeps `TextInput` single-line while `kitchen-sink` demonstrates `TextArea`
 - Router usage stays on static paths
 - CI/lighthouse automation is not required to consider the examples healthy for Milestone 1
 

@@ -159,7 +159,9 @@ fn build_input_section() -> Container {
                     .row()
                     .gap(12.0)
                     .align_start()
-                    .child(Checkbox::with_checked(true))
+                    .child(Semantics::new(Checkbox::with_checked(true)).label(
+                        "Focusable checkbox in the same tab order",
+                    ))
                     .child(
                         Text::new("Focusable checkbox in the same tab order")
                             .size(14.0)

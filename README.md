@@ -7,8 +7,8 @@ Sparsh is a Rust UI framework built around a single widget tree that runs on des
 ## Status
 
 - Current milestone: Foundation freeze
-- Public 1.0 surface: app runner, router, themes, task runtime, widgets, signals, input, layout, render, text, and core primitives exposed at crate roots
-- Provisional/internal: accessibility runtime wiring, raw implementation modules, and platform glue like `ui_events_winit`
+- Public 1.0 surface: app runner, router, themes, task runtime, widgets, accessibility metadata, signals, input, layout, render, text, and core primitives exposed at crate roots
+- Provisional/internal: raw implementation modules, platform glue like `ui_events_winit`, and runtime adapters behind the public accessibility surface
 
 See [docs/api-surface.md](docs/api-surface.md) for the crate-by-crate API inventory.
 
@@ -26,9 +26,11 @@ The built-in widget layer currently supports:
 - `Checkbox`
 - `Text`
 - `TextInput`
+- `TextArea`
 - `List`
 - `Scroll`
 - `DrawSurface`
+- `Semantics`
 
 ## Web Story
 
@@ -39,8 +41,6 @@ The built-in widget layer currently supports:
 
 ## Current Limitations
 
-- Accessibility data structures exist, but end-to-end accessibility integration is not part of the frozen 1.0 surface yet
-- `TextInput` is still single-line and does not yet provide the full editing surface planned for later milestones
 - Router paths are static-only; dynamic route patterns are not supported
 - CI and release automation are intentionally out of scope for this milestone; verification is local and documented below
 

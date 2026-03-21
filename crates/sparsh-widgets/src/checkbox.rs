@@ -1,6 +1,9 @@
 //! Checkbox widget.
 
-use crate::{current_theme, EventContext, PaintContext, Widget};
+use crate::{
+    current_theme, AccessibilityAction, AccessibilityInfo, AccessibilityRole, EventContext,
+    PaintContext, Widget,
+};
 use sparsh_core::Color;
 use sparsh_input::InputEvent;
 use sparsh_layout::WidgetId;
@@ -286,6 +289,33 @@ impl Widget for Checkbox {
     fn measure(&self, _ctx: &mut crate::LayoutContext) -> Option<(f32, f32)> {
         let style = self.resolved_style();
         Some((style.size, style.size))
+    }
+
+    fn accessibility_info(&self) -> Option<AccessibilityInfo> {
+        Some(
+            AccessibilityInfo::new(AccessibilityRole::CheckBox)
+                .checked(self.checked)
+                .disabled(self.disabled)
+                .action(AccessibilityAction::Focus)
+                .action(AccessibilityAction::Click),
+        )
+    }
+
+    fn handle_accessibility_action(
+        &mut self,
+        action: AccessibilityAction,
+        _value: Option<String>,
+    ) -> bool {
+        if self.disabled {
+            return false;
+        }
+
+        if matches!(action, AccessibilityAction::Click) {
+            self.toggle();
+            return true;
+        }
+
+        false
     }
 }
 

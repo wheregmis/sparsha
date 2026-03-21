@@ -31,9 +31,9 @@ impl core::fmt::Display for WgpuInitError {
 impl std::error::Error for WgpuInitError {}
 
 pub async fn init_wgpu<'a>(
-    window: &'a dyn Window,
+    window: &'a Window,
 ) -> Result<(Device, Queue, SurfaceState<'a>), WgpuInitError> {
-    let size = window.surface_size();
+    let size = window.inner_size();
 
     // On web, prefer WebGPU. On native, use primary backends.
     #[cfg(target_arch = "wasm32")]

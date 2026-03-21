@@ -89,4 +89,4 @@ From the repo root, run:
 ./scripts/release-readiness.sh
 ```
 
-That covers the native workspace checks, wasm compile checks for all five example binaries, the browser smoke suite, and the lightweight perf/startup smoke path used in release readiness. Hosted automation lives in `.github/workflows/ci.yml`, `.github/workflows/release-readiness.yml`, and `.github/workflows/showcase-pages.yml`.
+That covers the native workspace checks, wasm compile checks for all five example binaries, the showcase-focused browser smoke suite, and the lightweight perf/startup smoke path used in release readiness. Hosted automation lives in `.github/workflows/ci.yml`, `.github/workflows/release-readiness.yml`, and `.github/workflows/showcase-pages.yml`.

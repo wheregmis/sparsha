@@ -3,8 +3,15 @@
 use sparsha_layout::taffy::prelude::{percent, Size, Style};
 use sparsha_layout::WidgetId;
 use sparsha_signals::Signal;
-use sparsha_widgets::{Container, IntoWidget, Text, Widget};
-use std::sync::Arc;
+use sparsha_widgets::{
+    current_theme, AnimationEasing, Container, ImplicitAnimation, IntoWidget, Text, Widget,
+    WidgetChildMode,
+};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+    sync::Arc,
+};
 
 #[derive(Clone)]
 pub struct Route {
@@ -28,10 +35,51 @@ impl Route {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct RouterTransition {
+    pub duration_seconds: f32,
+    pub easing: AnimationEasing,
+    pub slide_distance: f32,
+    pub overlay_alpha_peak: f32,
+}
+
+impl RouterTransition {
+    pub fn slide_overlay() -> Self {
+        Self {
+            duration_seconds: 0.24,
+            easing: AnimationEasing::EaseInOut,
+            slide_distance: 24.0,
+            overlay_alpha_peak: 0.16,
+        }
+    }
+
+    fn sanitized(&self) -> Self {
+        Self {
+            duration_seconds: self.duration_seconds.max(0.000_001),
+            easing: self.easing,
+            slide_distance: self.slide_distance.max(0.0),
+            overlay_alpha_peak: self.overlay_alpha_peak.clamp(0.0, 1.0),
+        }
+    }
+}
+
+impl Default for RouterTransition {
+    fn default() -> Self {
+        Self::slide_overlay()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum NavigationDirection {
+    Forward,
+    Backward,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct RouterState {
     history: Vec<String>,
     index: usize,
+    last_direction: NavigationDirection,
 }
 
 impl RouterState {
@@ -39,6 +87,7 @@ impl RouterState {
         Self {
             history: vec![path],
             index: 0,
+            last_direction: NavigationDirection::Forward,
         }
     }
 
@@ -50,6 +99,7 @@ impl RouterState {
     }
 
     fn push(&mut self, path: String) {
+        self.last_direction = NavigationDirection::Forward;
         if self.current() == path {
             return;
         }
@@ -59,6 +109,7 @@ impl RouterState {
     }
 
     fn replace(&mut self, path: String) {
+        self.last_direction = NavigationDirection::Forward;
         if self.history.is_empty() {
             self.history.push(path);
             self.index = 0;
@@ -72,6 +123,7 @@ impl RouterState {
             return false;
         }
         self.index -= 1;
+        self.last_direction = NavigationDirection::Backward;
         true
     }
 
@@ -80,6 +132,7 @@ impl RouterState {
             return false;
         }
         self.index += 1;
+        self.last_direction = NavigationDirection::Forward;
         true
     }
 }
@@ -88,6 +141,7 @@ impl RouterState {
 pub struct Router {
     routes: Vec<Route>,
     fallback_path: Option<String>,
+    transition: Option<RouterTransition>,
     state: Signal<RouterState>,
 }
 
@@ -96,6 +150,7 @@ impl Router {
         Self {
             routes: Vec::new(),
             fallback_path: None,
+            transition: None,
             state: Signal::new(RouterState::new(String::from("/"))),
         }
     }
@@ -122,6 +177,11 @@ impl Router {
             self.routes.push(route);
         }
 
+        self
+    }
+
+    pub fn transition(mut self, transition: RouterTransition) -> Self {
+        self.transition = Some(transition.sanitized());
         self
     }
 
@@ -181,6 +241,14 @@ impl Router {
     pub(crate) fn build_for_current_path(&self) -> Box<dyn Widget> {
         let path = self.current_path();
         self.build_for_path(&path)
+    }
+
+    pub(crate) fn last_direction(&self) -> NavigationDirection {
+        self.state.with(|state| state.last_direction)
+    }
+
+    pub(crate) fn transition_config(&self) -> Option<RouterTransition> {
+        self.transition.clone()
     }
 
     fn build_for_path(&self, path: &str) -> Box<dyn Widget> {
@@ -266,25 +334,196 @@ impl Navigator {
     }
 }
 
+#[derive(Default)]
+struct RouteLayerState {
+    offset_x: Cell<f32>,
+}
+
+struct RouteLayer {
+    id: WidgetId,
+    interactive: bool,
+    state: Rc<RouteLayerState>,
+    child: Box<dyn Widget>,
+    translated: Cell<bool>,
+}
+
+impl RouteLayer {
+    fn new(child: Box<dyn Widget>, state: Rc<RouteLayerState>, interactive: bool) -> Self {
+        Self {
+            id: WidgetId::default(),
+            interactive,
+            state,
+            child,
+            translated: Cell::new(false),
+        }
+    }
+}
+
+impl Widget for RouteLayer {
+    fn id(&self) -> WidgetId {
+        self.id
+    }
+
+    fn set_id(&mut self, id: WidgetId) {
+        self.id = id;
+    }
+
+    fn style(&self) -> Style {
+        Style {
+            size: Size {
+                width: percent(1.0),
+                height: percent(1.0),
+            },
+            ..Default::default()
+        }
+    }
+
+    fn paint(&self, ctx: &mut sparsha_widgets::PaintContext) {
+        let bounds = ctx.bounds();
+        ctx.push_clip(bounds);
+
+        let offset_x = self.state.offset_x.get();
+        if offset_x.abs() > f32::EPSILON {
+            ctx.push_translation((offset_x * ctx.scale_factor, 0.0));
+            self.translated.set(true);
+        } else {
+            self.translated.set(false);
+        }
+    }
+
+    fn paint_after_children(&self, ctx: &mut sparsha_widgets::PaintContext) {
+        if self.translated.replace(false) {
+            ctx.pop_translation();
+        }
+        ctx.pop_clip();
+    }
+
+    fn children(&self) -> &[Box<dyn Widget>] {
+        std::slice::from_ref(&self.child)
+    }
+
+    fn children_mut(&mut self) -> &mut [Box<dyn Widget>] {
+        std::slice::from_mut(&mut self.child)
+    }
+
+    fn child_mode(&self, _child_position: usize) -> WidgetChildMode {
+        if self.interactive {
+            WidgetChildMode::Active
+        } else {
+            WidgetChildMode::PaintOnly
+        }
+    }
+
+    fn child_event_offset(&self) -> glam::Vec2 {
+        if self.interactive {
+            glam::vec2(-self.state.offset_x.get(), 0.0)
+        } else {
+            glam::Vec2::ZERO
+        }
+    }
+}
+
+struct HostTransition {
+    animation: ImplicitAnimation,
+    initialized: bool,
+    cleanup_requested: bool,
+    config: RouterTransition,
+    direction: NavigationDirection,
+    outgoing_state: Rc<RouteLayerState>,
+    incoming_state: Rc<RouteLayerState>,
+}
+
+impl HostTransition {
+    fn new(
+        config: RouterTransition,
+        direction: NavigationDirection,
+        outgoing_state: Rc<RouteLayerState>,
+        incoming_state: Rc<RouteLayerState>,
+    ) -> Self {
+        Self {
+            animation: ImplicitAnimation::new(0.0),
+            initialized: false,
+            cleanup_requested: false,
+            config,
+            direction,
+            outgoing_state,
+            incoming_state,
+        }
+    }
+}
+
 pub(crate) struct RouterHost {
     id: WidgetId,
     router: Router,
     active_path: String,
     children: Vec<Box<dyn Widget>>,
+    transition: RefCell<Option<HostTransition>>,
 }
 
 impl RouterHost {
     pub(crate) fn new(router: Router) -> Self {
         let active_path = router.resolve_path(&router.current_path());
         router.replace(active_path.clone());
-        let child = router.build_for_current_path();
+        let child = build_route_layer(router.build_for_current_path(), true);
         Self {
             id: WidgetId::default(),
             router,
             active_path,
             children: vec![child],
+            transition: RefCell::new(None),
         }
     }
+
+    fn apply_transition_offsets(transition: &HostTransition, progress: f32) {
+        let direction = match transition.direction {
+            NavigationDirection::Forward => 1.0,
+            NavigationDirection::Backward => -1.0,
+        };
+        let distance = transition.config.slide_distance;
+        let incoming = direction * (1.0 - progress) * distance;
+        let outgoing = -direction * progress * distance;
+        transition.incoming_state.offset_x.set(incoming);
+        transition.outgoing_state.offset_x.set(outgoing);
+    }
+
+    fn collapse_transition_layers(&mut self) {
+        if self.children.len() == 2 {
+            let active = self.children.pop().unwrap();
+            self.children = vec![active];
+        }
+        *self.transition.get_mut() = None;
+    }
+}
+
+fn build_route_layer(child: Box<dyn Widget>, interactive: bool) -> Box<dyn Widget> {
+    Box::new(RouteLayer::new(
+        child,
+        Rc::new(RouteLayerState::default()),
+        interactive,
+    ))
+}
+
+fn build_transition_layers(
+    router: &Router,
+    from_path: &str,
+    to_path: &str,
+    config: RouterTransition,
+    direction: NavigationDirection,
+) -> (Vec<Box<dyn Widget>>, HostTransition) {
+    let outgoing_state = Rc::new(RouteLayerState::default());
+    let incoming_state = Rc::new(RouteLayerState::default());
+    let outgoing = Box::new(RouteLayer::new(
+        router.build_for_path(from_path),
+        Rc::clone(&outgoing_state),
+        false,
+    ));
+    let incoming = Box::new(RouteLayer::new(
+        router.build_for_path(to_path),
+        Rc::clone(&incoming_state),
+        true,
+    ));
+    let transition = HostTransition::new(config, direction, outgoing_state, incoming_state);
+    (vec![outgoing, incoming], transition)
 }
 
 impl Widget for RouterHost {
@@ -308,14 +547,78 @@ impl Widget for RouterHost {
 
     fn rebuild(&mut self, _ctx: &mut sparsha_widgets::BuildContext) {
         let path = self.router.resolve_path(&self.router.current_path());
-        if path != self.active_path || self.children.is_empty() {
-            self.router.replace(path.clone());
+
+        if self
+            .transition
+            .borrow()
+            .as_ref()
+            .is_some_and(|transition| transition.cleanup_requested)
+        {
+            self.collapse_transition_layers();
+        }
+
+        if path == self.active_path && !self.children.is_empty() {
+            return;
+        }
+
+        self.router.replace(path.clone());
+        if self.children.is_empty() {
+            self.children = vec![build_route_layer(self.router.build_for_path(&path), true)];
             self.active_path = path;
-            self.children = vec![self.router.build_for_current_path()];
+            *self.transition.get_mut() = None;
+            return;
+        }
+
+        let previous_path = self.active_path.clone();
+        self.active_path = path.clone();
+
+        if let Some(config) = self.router.transition_config() {
+            let direction = self.router.last_direction();
+            let (children, transition) =
+                build_transition_layers(&self.router, &previous_path, &path, config, direction);
+            self.children = children;
+            *self.transition.get_mut() = Some(transition);
+        } else {
+            self.children = vec![build_route_layer(self.router.build_for_path(&path), true)];
+            *self.transition.get_mut() = None;
         }
     }
 
-    fn paint(&self, _ctx: &mut sparsha_widgets::PaintContext) {}
+    fn paint(&self, ctx: &mut sparsha_widgets::PaintContext) {
+        let mut transition_slot = self.transition.borrow_mut();
+        let Some(transition) = transition_slot.as_mut() else {
+            return;
+        };
+
+        if !transition.initialized {
+            transition.animation.set_target(
+                1.0,
+                ctx.elapsed_time,
+                transition.config.duration_seconds,
+                transition.config.easing,
+            );
+            transition.initialized = true;
+        }
+
+        let progress = transition.animation.sample(ctx.elapsed_time);
+        Self::apply_transition_offsets(transition, progress);
+
+        let overlay_alpha =
+            page_transition_overlay_alpha(progress, transition.config.overlay_alpha_peak);
+        if overlay_alpha > 0.0 {
+            let overlay = current_theme().colors.background.with_alpha(overlay_alpha);
+            ctx.fill_rect(ctx.bounds(), overlay);
+        }
+
+        if transition.animation.is_animating() {
+            ctx.request_next_frame();
+        } else if !transition.cleanup_requested {
+            transition.incoming_state.offset_x.set(0.0);
+            transition.outgoing_state.offset_x.set(0.0);
+            transition.cleanup_requested = true;
+            ctx.request_layout();
+        }
+    }
 
     fn children(&self) -> &[Box<dyn Widget>] {
         &self.children
@@ -323,6 +626,22 @@ impl Widget for RouterHost {
 
     fn children_mut(&mut self) -> &mut [Box<dyn Widget>] {
         &mut self.children
+    }
+
+    fn child_path_key(&self, child_position: usize) -> usize {
+        match self.children.len() {
+            1 if child_position == 0 => 1,
+            _ => child_position,
+        }
+    }
+
+    fn child_slot_for_path_key(&self, key: usize) -> Option<usize> {
+        match self.children.len() {
+            1 if key == 1 => Some(0),
+            1 => None,
+            _ if key < self.children.len() => Some(key),
+            _ => None,
+        }
     }
 }
 
@@ -359,6 +678,12 @@ fn is_static_path(path: &str) -> bool {
     path.starts_with('/') && !path.contains(':') && !path.contains('*')
 }
 
+fn page_transition_overlay_alpha(progress: f32, peak_alpha: f32) -> f32 {
+    let progress = progress.clamp(0.0, 1.0);
+    let triangle = 1.0 - (progress * 2.0 - 1.0).abs();
+    (triangle * peak_alpha).clamp(0.0, peak_alpha)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -374,11 +699,46 @@ mod tests {
     }
 
     #[test]
+    fn router_transition_is_opt_in() {
+        with_runtime(|| {
+            let router = Router::new().route("/", || screen("home")).fallback("/");
+            assert!(router.transition.is_none());
+
+            let transitioned = Router::new()
+                .route("/", || screen("home"))
+                .transition(RouterTransition::slide_overlay())
+                .fallback("/");
+            assert_eq!(
+                transitioned.transition,
+                Some(RouterTransition::slide_overlay())
+            );
+        });
+    }
+
+    #[test]
+    fn router_transition_sanitizes_invalid_values() {
+        with_runtime(|| {
+            let router = Router::new().transition(RouterTransition {
+                duration_seconds: 0.0,
+                easing: AnimationEasing::Linear,
+                slide_distance: -12.0,
+                overlay_alpha_peak: 4.0,
+            });
+
+            let transition = router.transition.unwrap();
+            assert!(transition.duration_seconds > 0.0);
+            assert_eq!(transition.slide_distance, 0.0);
+            assert_eq!(transition.overlay_alpha_peak, 1.0);
+        });
+    }
+
+    #[test]
     fn unknown_route_resolves_to_fallback() {
         with_runtime(|| {
             let router = Router::new()
                 .route("/", || screen("home"))
                 .route("/settings", || screen("settings"))
+                .transition(RouterTransition::slide_overlay())
                 .fallback("/");
 
             router.go("/missing");
@@ -409,6 +769,29 @@ mod tests {
     }
 
     #[test]
+    fn navigation_direction_tracks_history_and_replacements() {
+        with_runtime(|| {
+            let router = Router::new()
+                .route("/", || screen("home"))
+                .route("/a", || screen("a"))
+                .route("/b", || screen("b"))
+                .fallback("/");
+
+            router.go("/a");
+            assert_eq!(router.last_direction(), NavigationDirection::Forward);
+
+            assert!(router.back());
+            assert_eq!(router.last_direction(), NavigationDirection::Backward);
+
+            assert!(router.forward());
+            assert_eq!(router.last_direction(), NavigationDirection::Forward);
+
+            router.replace("/b");
+            assert_eq!(router.last_direction(), NavigationDirection::Forward);
+        });
+    }
+
+    #[test]
     fn dynamic_patterns_are_ignored() {
         with_runtime(|| {
             let router = Router::new()
@@ -427,5 +810,17 @@ mod tests {
         assert_eq!(hash_to_path(""), "/");
         assert_eq!(path_to_hash("/"), "#/");
         assert_eq!(path_to_hash("settings"), "#/settings");
+    }
+
+    #[test]
+    fn page_transition_alpha_peaks_midway() {
+        let start = page_transition_overlay_alpha(0.0, 0.16);
+        let mid = page_transition_overlay_alpha(0.5, 0.16);
+        let end = page_transition_overlay_alpha(1.0, 0.16);
+        assert_eq!(start, 0.0);
+        assert_eq!(end, 0.0);
+        assert!(mid > 0.0);
+        assert!(mid > start);
+        assert!(mid > end);
     }
 }

@@ -20,6 +20,7 @@ fn main() -> Result<(), sparsha::AppRunError> {
         .theme_mode(theme_mode)
         .router(
             Router::new()
+                .transition(RouterTransition::slide_overlay())
                 .route("/", move || component(move |cx| todo_app(cx, theme_mode)))
                 .route("/about", || component(todo_about))
                 .fallback("/"),

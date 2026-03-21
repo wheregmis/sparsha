@@ -759,6 +759,7 @@ impl WebAppState {
                 &mut widget_registry,
                 &mut path,
                 false,
+                true,
             )
         });
         self.layout_tree.set_root(root_id);

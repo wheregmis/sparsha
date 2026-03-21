@@ -679,6 +679,7 @@ impl AppRunner {
                     &mut widget_registry,
                     &mut path,
                     false,
+                    true,
                 )
             });
             state.layout_tree.set_root(root_id);

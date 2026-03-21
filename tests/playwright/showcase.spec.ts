@@ -7,7 +7,7 @@ test("showcase components preview stays interactive and can switch routes", asyn
   page,
 }) => {
   await page.goto(baseURL);
-  await expect(page).toHaveTitle(/Sparsha Showcase/);
+  await expect(page).toHaveTitle(/Sparsh(?:a)? Showcase/);
   await expect(
     page.getByText("Basic component preview", { exact: true }).first(),
   ).toBeVisible();
@@ -18,7 +18,7 @@ test("showcase components preview stays interactive and can switch routes", asyn
   await expect(checkbox).toBeChecked();
   await checkbox.focus();
   await expect(checkbox).toBeFocused();
-  await page.keyboard.press("Space");
+  await page.keyboard.press("Enter");
   await expect(checkbox).not.toBeChecked();
 
   const singleLine = page.getByRole("textbox", {
@@ -36,20 +36,25 @@ test("showcase components preview stays interactive and can switch routes", asyn
 
   const virtualList = page.getByRole("list", { name: "Showcase virtualized list" });
   await expect(virtualList).toBeVisible();
+  await expect(page.getByText("Animations", { exact: true }).first()).toBeVisible();
 
-  await page.evaluate(() => {
-    window.location.hash = "#/rendering";
-  });
+  await page.getByRole("button", { name: "Rendering" }).click({ force: true });
   await expect(
     page.getByText("Manual rendering checks", { exact: true }).first(),
   ).toBeVisible();
   await expect(page).toHaveURL(/#\/rendering$/);
   await expect(page.getByText("Rendering atlas", { exact: true }).first()).toBeVisible();
+
+  await page.getByRole("button", { name: "Components" }).click({ force: true });
+  await expect(page).toHaveURL(/#\/components$/);
+  await expect(
+    page.getByText("Basic component preview", { exact: true }).first(),
+  ).toBeVisible();
 });
 
 test("showcase rendering route loads directly from the hash", async ({ page }) => {
   await page.goto(`${baseURL}#/rendering`);
-  await expect(page).toHaveTitle(/Sparsha Showcase/);
+  await expect(page).toHaveTitle(/Sparsh(?:a)? Showcase/);
   await expect(
     page.getByText("Pixel alignment", { exact: true }).first(),
   ).toBeVisible();

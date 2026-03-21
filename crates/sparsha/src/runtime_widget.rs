@@ -7,14 +7,15 @@ use sparsha_layout::{taffy::Dimension, LayoutTree, WidgetId};
 use sparsha_text::TextSystem;
 use sparsha_widgets::{
     AccessibilityInfo, AccessibilityRole, EventCommands, EventContext, LayoutContext,
-    TextEditorState, Widget,
+    TextEditorState, Widget, WidgetChildMode,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub(crate) type WidgetPath = Vec<usize>;
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct WidgetRuntimeRegistry {
+    active_paths: HashSet<WidgetPath>,
     focus_order: Vec<WidgetPath>,
     path_to_id: HashMap<WidgetPath, WidgetId>,
     id_to_path: HashMap<WidgetId, WidgetPath>,
@@ -42,6 +43,10 @@ impl WidgetRuntimeRegistry {
     pub(crate) fn path_for_accessibility_node(&self, node_id: u64) -> Option<&[usize]> {
         self.accessibility.path_for_node(node_id)
     }
+
+    pub(crate) fn is_active_path(&self, path: &[usize]) -> bool {
+        self.active_paths.contains(path)
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -58,6 +63,7 @@ pub(crate) fn add_widget_to_layout(
     registry: &mut WidgetRuntimeRegistry,
     path: &mut WidgetPath,
     in_scroll: bool,
+    runtime_active: bool,
 ) -> WidgetId {
     let mut style = widget.style();
     if in_scroll {
@@ -68,12 +74,17 @@ pub(crate) fn add_widget_to_layout(
     let child_keys: Vec<_> = (0..widget.children().len())
         .map(|index| widget.child_path_key(index))
         .collect();
+    let child_modes: Vec<_> = (0..widget.children().len())
+        .map(|index| widget.child_mode(index))
+        .collect();
     let children_ids: Vec<_> = widget
         .children_mut()
         .iter_mut()
         .enumerate()
         .map(|(index, child)| {
             path.push(child_keys[index]);
+            let child_runtime_active =
+                runtime_active && child_modes[index] == WidgetChildMode::Active;
             let id = add_widget_to_layout(
                 child.as_mut(),
                 tree,
@@ -81,6 +92,7 @@ pub(crate) fn add_widget_to_layout(
                 registry,
                 path,
                 in_scroll || is_scroll,
+                child_runtime_active,
             );
             path.pop();
             id
@@ -114,13 +126,18 @@ pub(crate) fn add_widget_to_layout(
 
     widget.set_id(id);
     let widget_path = path.clone();
+    if runtime_active {
+        registry.active_paths.insert(widget_path.clone());
+    }
     registry.path_to_id.insert(widget_path.clone(), id);
     registry.id_to_path.insert(id, widget_path.clone());
-    if widget.focusable() {
+    if runtime_active && widget.focusable() {
         registry.focus_order.push(widget_path.clone());
     }
-    if let Some(editor_state) = widget.text_editor_state() {
-        registry.text_editors.insert(widget_path, editor_state);
+    if runtime_active {
+        if let Some(editor_state) = widget.text_editor_state() {
+            registry.text_editors.insert(widget_path, editor_state);
+        }
     }
     id
 }
@@ -137,7 +154,9 @@ pub(crate) fn sync_focus_manager(
         }
     }
 
-    if let Some(path) = focused_path.and_then(|path| registry.id_for_path(path).map(|_| path)) {
+    if let Some(path) =
+        focused_path.filter(|path| registry.focus_order.iter().any(|entry| entry == *path))
+    {
         if let Some(id) = registry.id_for_path(path) {
             focus_manager.set_focus(id);
             return;
@@ -150,7 +169,7 @@ pub(crate) fn remap_path(
     path: Option<WidgetPath>,
     registry: &WidgetRuntimeRegistry,
 ) -> Option<WidgetPath> {
-    path.filter(|candidate| registry.id_for_path(candidate).is_some())
+    path.filter(|candidate| registry.is_active_path(candidate))
 }
 
 pub(crate) fn collect_accessibility_tree(
@@ -165,132 +184,136 @@ pub(crate) fn collect_accessibility_tree(
         focused_node: Option<u64>,
     }
 
-    fn build_snapshot(
-        widget: &dyn Widget,
-        layout_tree: &LayoutTree,
-        path: &[usize],
-        info: AccessibilityInfo,
-        children: Vec<u64>,
-    ) -> AccessibilityNodeSnapshot {
-        let bounds = layout_tree
-            .get_absolute_layout(widget.id())
-            .map(|layout| layout.bounds)
-            .unwrap_or(sparsha_core::Rect::ZERO);
-        AccessibilityNodeSnapshot {
-            id: accessibility_node_id(path),
-            path: path.to_vec(),
-            role: info.role.unwrap_or(AccessibilityRole::GenericContainer),
-            label: info.label,
-            description: info.description,
-            value: info.value,
-            hidden: info.hidden,
-            disabled: info.disabled,
-            checked: info.checked,
-            actions: info.actions,
-            bounds,
-            children,
-        }
+    struct AccessibilityCollector<'a> {
+        layout_tree: &'a LayoutTree,
+        focused_path: Option<&'a WidgetPath>,
+        nodes: Vec<AccessibilityNodeSnapshot>,
+        node_paths: HashMap<u64, WidgetPath>,
+        node_indices: HashMap<u64, usize>,
     }
 
-    fn visit(
-        widget: &dyn Widget,
-        layout_tree: &LayoutTree,
-        focused_path: Option<&WidgetPath>,
-        path: &mut WidgetPath,
-        nodes: &mut Vec<AccessibilityNodeSnapshot>,
-        node_paths: &mut HashMap<u64, WidgetPath>,
-        node_indices: &mut HashMap<u64, usize>,
-    ) -> SubtreeResult {
-        let mut root_nodes = Vec::new();
-        let mut first_descendant = None;
-        let mut focused_node = None;
-
-        for (index, child) in widget.children().iter().enumerate() {
-            path.push(widget.child_path_key(index));
-            let child_result = visit(
-                child.as_ref(),
-                layout_tree,
-                focused_path,
-                path,
-                nodes,
-                node_paths,
-                node_indices,
-            );
-            path.pop();
-            root_nodes.extend(child_result.root_nodes);
-            if first_descendant.is_none() {
-                first_descendant = child_result.first_descendant;
-            }
-            if focused_node.is_none() {
-                focused_node = child_result.focused_node;
+    impl<'a> AccessibilityCollector<'a> {
+        fn build_snapshot(
+            &self,
+            widget: &dyn Widget,
+            path: &[usize],
+            info: AccessibilityInfo,
+            children: Vec<u64>,
+        ) -> AccessibilityNodeSnapshot {
+            let bounds = self
+                .layout_tree
+                .get_absolute_layout(widget.id())
+                .map(|layout| layout.bounds)
+                .unwrap_or(sparsha_core::Rect::ZERO);
+            AccessibilityNodeSnapshot {
+                id: accessibility_node_id(path),
+                path: path.to_vec(),
+                role: info.role.unwrap_or(AccessibilityRole::GenericContainer),
+                label: info.label,
+                description: info.description,
+                value: info.value,
+                hidden: info.hidden,
+                disabled: info.disabled,
+                checked: info.checked,
+                actions: info.actions,
+                bounds,
+                children,
             }
         }
 
-        let Some(info) = widget.accessibility_info() else {
-            return SubtreeResult {
-                root_nodes,
-                first_descendant,
-                focused_node,
-            };
-        };
-
-        if widget.accessibility_merge_descendant() {
-            if let Some(target_id) = first_descendant {
-                if let Some(index) = node_indices.get(&target_id).copied() {
-                    nodes[index].apply_overrides(info);
-                }
-                return SubtreeResult {
-                    root_nodes,
-                    first_descendant: Some(target_id),
-                    focused_node,
-                };
+        fn visit(
+            &mut self,
+            widget: &dyn Widget,
+            runtime_active: bool,
+            path: &mut WidgetPath,
+        ) -> SubtreeResult {
+            if !runtime_active {
+                return SubtreeResult::default();
             }
 
-            if !info.has_metadata() {
+            let mut root_nodes = Vec::new();
+            let mut first_descendant = None;
+            let mut focused_node = None;
+
+            for (index, child) in widget.children().iter().enumerate() {
+                path.push(widget.child_path_key(index));
+                let child_result = self.visit(
+                    child.as_ref(),
+                    widget.child_mode(index) == WidgetChildMode::Active,
+                    path,
+                );
+                path.pop();
+                root_nodes.extend(child_result.root_nodes);
+                if first_descendant.is_none() {
+                    first_descendant = child_result.first_descendant;
+                }
+                if focused_node.is_none() {
+                    focused_node = child_result.focused_node;
+                }
+            }
+
+            let Some(info) = widget.accessibility_info() else {
                 return SubtreeResult {
                     root_nodes,
                     first_descendant,
                     focused_node,
                 };
+            };
+
+            if widget.accessibility_merge_descendant() {
+                if let Some(target_id) = first_descendant {
+                    if let Some(index) = self.node_indices.get(&target_id).copied() {
+                        self.nodes[index].apply_overrides(info);
+                    }
+                    return SubtreeResult {
+                        root_nodes,
+                        first_descendant: Some(target_id),
+                        focused_node,
+                    };
+                }
+
+                if !info.has_metadata() {
+                    return SubtreeResult {
+                        root_nodes,
+                        first_descendant,
+                        focused_node,
+                    };
+                }
             }
-        }
 
-        let snapshot = build_snapshot(widget, layout_tree, path, info, root_nodes.clone());
-        let node_id = snapshot.id;
-        node_paths.insert(node_id, path.clone());
-        node_indices.insert(node_id, nodes.len());
-        nodes.push(snapshot);
+            let snapshot = self.build_snapshot(widget, path, info, root_nodes.clone());
+            let node_id = snapshot.id;
+            self.node_paths.insert(node_id, path.clone());
+            self.node_indices.insert(node_id, self.nodes.len());
+            self.nodes.push(snapshot);
 
-        let focused_node = if focused_path == Some(path) {
-            Some(node_id)
-        } else {
-            focused_node
-        };
+            let focused_node = if self.focused_path == Some(path) {
+                Some(node_id)
+            } else {
+                focused_node
+            };
 
-        SubtreeResult {
-            root_nodes: vec![node_id],
-            first_descendant: Some(node_id),
-            focused_node,
+            SubtreeResult {
+                root_nodes: vec![node_id],
+                first_descendant: Some(node_id),
+                focused_node,
+            }
         }
     }
 
-    let mut nodes = Vec::new();
-    let mut node_paths = HashMap::new();
-    let mut node_indices = HashMap::new();
-    let result = visit(
-        root_widget,
+    let mut collector = AccessibilityCollector {
         layout_tree,
         focused_path,
-        &mut Vec::new(),
-        &mut nodes,
-        &mut node_paths,
-        &mut node_indices,
-    );
+        nodes: Vec::new(),
+        node_paths: HashMap::new(),
+        node_indices: HashMap::new(),
+    };
+    let result = collector.visit(root_widget, true, &mut Vec::new());
     AccessibilityTreeSnapshot {
-        nodes,
+        nodes: collector.nodes,
         root_children: result.root_nodes,
         focus: result.focused_node.unwrap_or(ACCESSIBILITY_ROOT_ID),
-        node_paths,
+        node_paths: collector.node_paths,
     }
 }
 
@@ -455,6 +478,9 @@ fn dispatch_widget_event_recursive(
     let child_keys: Vec<_> = (0..widget.children().len())
         .map(|index| widget.child_path_key(index))
         .collect();
+    let child_modes: Vec<_> = (0..widget.children().len())
+        .map(|index| widget.child_mode(index))
+        .collect();
 
     if widget.is_scroll_container() && scroll_container_prehandles_event(event) {
         dispatch_widget_event_here(
@@ -473,6 +499,9 @@ fn dispatch_widget_event_recursive(
 
     if should_descend {
         for (index, child) in widget.children_mut().iter_mut().enumerate() {
+            if child_modes[index] != WidgetChildMode::Active {
+                continue;
+            }
             path.push(child_keys[index]);
             dispatch_widget_event_recursive(
                 child.as_mut(),
@@ -538,6 +567,10 @@ fn dispatch_widget_event_at_path(
     let Some(child_slot) = widget.child_slot_for_path_key(target_path[0]) else {
         return false;
     };
+
+    if widget.child_mode(child_slot) != WidgetChildMode::Active {
+        return false;
+    }
 
     let Some(child) = widget.children_mut().get_mut(child_slot) else {
         return false;
@@ -632,7 +665,10 @@ mod tests {
     use super::*;
     use sparsha_input::{InputEvent, PointerButton};
     use sparsha_layout::taffy::{self, prelude::*};
-    use sparsha_widgets::{Button, Container, PaintContext, Semantics, TextInput};
+    use sparsha_render::DrawList;
+    use sparsha_widgets::{
+        Button, Container, PaintCommands, PaintContext, Semantics, TextInput, WidgetChildMode,
+    };
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
@@ -812,6 +848,150 @@ mod tests {
         }
     }
 
+    struct ChildModeWrapper {
+        id: WidgetId,
+        mode: WidgetChildMode,
+        child: Box<dyn Widget>,
+    }
+
+    impl ChildModeWrapper {
+        fn new(mode: WidgetChildMode, child: impl Widget + 'static) -> Self {
+            Self {
+                id: WidgetId::default(),
+                mode,
+                child: Box::new(child),
+            }
+        }
+    }
+
+    impl Widget for ChildModeWrapper {
+        fn id(&self) -> WidgetId {
+            self.id
+        }
+
+        fn set_id(&mut self, id: WidgetId) {
+            self.id = id;
+        }
+
+        fn style(&self) -> taffy::Style {
+            taffy::Style {
+                size: Size {
+                    width: length(200.0),
+                    height: length(60.0),
+                },
+                display: Display::Flex,
+                flex_direction: FlexDirection::Column,
+                ..Default::default()
+            }
+        }
+
+        fn paint(&self, _ctx: &mut PaintContext) {}
+
+        fn children(&self) -> &[Box<dyn Widget>] {
+            std::slice::from_ref(&self.child)
+        }
+
+        fn children_mut(&mut self) -> &mut [Box<dyn Widget>] {
+            std::slice::from_mut(&mut self.child)
+        }
+
+        fn child_mode(&self, _child_position: usize) -> WidgetChildMode {
+            self.mode
+        }
+    }
+
+    struct EventProbe {
+        id: WidgetId,
+        hits: Arc<AtomicUsize>,
+    }
+
+    impl EventProbe {
+        fn new() -> (Self, Arc<AtomicUsize>) {
+            let hits = Arc::new(AtomicUsize::new(0));
+            (
+                Self {
+                    id: WidgetId::default(),
+                    hits: Arc::clone(&hits),
+                },
+                hits,
+            )
+        }
+    }
+
+    impl Widget for EventProbe {
+        fn id(&self) -> WidgetId {
+            self.id
+        }
+
+        fn set_id(&mut self, id: WidgetId) {
+            self.id = id;
+        }
+
+        fn style(&self) -> taffy::Style {
+            taffy::Style {
+                size: Size {
+                    width: length(120.0),
+                    height: length(40.0),
+                },
+                ..Default::default()
+            }
+        }
+
+        fn paint(&self, _ctx: &mut PaintContext) {}
+
+        fn event(&mut self, ctx: &mut EventContext, event: &InputEvent) {
+            if let InputEvent::PointerDown { pos, .. } = event {
+                if ctx.contains(*pos) {
+                    self.hits.fetch_add(1, Ordering::SeqCst);
+                    ctx.stop_propagation();
+                }
+            }
+        }
+    }
+
+    struct PaintProbe {
+        id: WidgetId,
+        paints: Arc<AtomicUsize>,
+    }
+
+    impl PaintProbe {
+        fn new() -> (Self, Arc<AtomicUsize>) {
+            let paints = Arc::new(AtomicUsize::new(0));
+            (
+                Self {
+                    id: WidgetId::default(),
+                    paints: Arc::clone(&paints),
+                },
+                paints,
+            )
+        }
+    }
+
+    impl Widget for PaintProbe {
+        fn id(&self) -> WidgetId {
+            self.id
+        }
+
+        fn set_id(&mut self, id: WidgetId) {
+            self.id = id;
+        }
+
+        fn style(&self) -> taffy::Style {
+            taffy::Style {
+                size: Size {
+                    width: length(120.0),
+                    height: length(40.0),
+                },
+                ..Default::default()
+            }
+        }
+
+        fn paint(&self, ctx: &mut PaintContext) {
+            self.paints.fetch_add(1, Ordering::SeqCst);
+            ctx.fill_rect(ctx.bounds(), sparsha_core::Color::from_hex(0x3366FF));
+        }
+    }
+
     impl Widget for ScrollContainerProbe {
         fn id(&self) -> WidgetId {
             self.id
@@ -908,11 +1088,67 @@ mod tests {
         let mut registry = WidgetRuntimeRegistry::default();
         let mut text = TextSystem::new_headless();
         let mut path = Vec::new();
-        let root_id =
-            add_widget_to_layout(root, &mut tree, &mut text, &mut registry, &mut path, false);
+        let root_id = add_widget_to_layout(
+            root,
+            &mut tree,
+            &mut text,
+            &mut registry,
+            &mut path,
+            false,
+            true,
+        );
         tree.set_root(root_id);
         tree.compute_layout(480.0, 320.0);
         (tree, registry)
+    }
+
+    fn paint_widget_subtree(root: &dyn Widget, layout_tree: &LayoutTree) -> DrawList {
+        fn paint_recursive(
+            widget: &dyn Widget,
+            layout_tree: &LayoutTree,
+            focus: &FocusManager,
+            draw_list: &mut DrawList,
+            text_system: &mut TextSystem,
+        ) {
+            let Some(layout) = layout_tree.get_absolute_layout(widget.id()) else {
+                return;
+            };
+
+            let mut commands = PaintCommands::default();
+            let mut ctx = PaintContext {
+                draw_list,
+                layout: sparsha_layout::ComputedLayout::new(layout.bounds),
+                layout_tree,
+                focus,
+                widget_id: widget.id(),
+                scale_factor: 1.0,
+                text_system,
+                elapsed_time: 0.0,
+                commands: &mut commands,
+            };
+            widget.paint(&mut ctx);
+            for child in widget.children() {
+                paint_recursive(child.as_ref(), layout_tree, focus, draw_list, text_system);
+            }
+            let mut ctx = PaintContext {
+                draw_list,
+                layout: sparsha_layout::ComputedLayout::new(layout.bounds),
+                layout_tree,
+                focus,
+                widget_id: widget.id(),
+                scale_factor: 1.0,
+                text_system,
+                elapsed_time: 0.0,
+                commands: &mut commands,
+            };
+            widget.paint_after_children(&mut ctx);
+        }
+
+        let mut draw_list = DrawList::new();
+        let mut text_system = TextSystem::new_headless();
+        let focus = FocusManager::new();
+        paint_recursive(root, layout_tree, &focus, &mut draw_list, &mut text_system);
+        draw_list
     }
 
     #[test]
@@ -927,6 +1163,56 @@ mod tests {
 
         let (_, registry) = build_registry(&mut root);
         assert_eq!(registry.focus_order(), &[vec![0], vec![2]]);
+    }
+
+    #[test]
+    fn paint_only_children_still_layout_and_paint() {
+        let (probe, paints) = PaintProbe::new();
+        let mut root = ChildModeWrapper::new(WidgetChildMode::PaintOnly, probe);
+
+        let (layout_tree, registry) = build_registry(&mut root);
+        assert!(registry.id_for_path(&[0]).is_some());
+
+        let draw_list = paint_widget_subtree(&root, &layout_tree);
+        assert_eq!(paints.load(Ordering::SeqCst), 1);
+        assert!(!draw_list.is_empty());
+    }
+
+    #[test]
+    fn paint_only_children_do_not_receive_events() {
+        let (probe, hits) = EventProbe::new();
+        let mut root = ChildModeWrapper::new(WidgetChildMode::PaintOnly, probe);
+        let (layout_tree, _) = build_registry(&mut root);
+
+        let _ = dispatch_widget_event(
+            &mut root,
+            &layout_tree,
+            None,
+            None,
+            &InputEvent::PointerDown {
+                pos: glam::vec2(10.0, 10.0),
+                button: PointerButton::Primary,
+            },
+        );
+
+        assert_eq!(hits.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn paint_only_children_are_excluded_from_runtime_metadata() {
+        let mut root = ChildModeWrapper::new(
+            WidgetChildMode::PaintOnly,
+            TextInput::new().placeholder("Email"),
+        );
+        let (layout_tree, registry) = build_registry(&mut root);
+
+        assert!(registry.focus_order().is_empty());
+        assert!(registry.text_editor_state_for_path(&[0]).is_none());
+        assert!(remap_path(Some(vec![0]), &registry).is_none());
+
+        let tree = collect_accessibility_tree(&root, &layout_tree, None);
+        assert!(tree.nodes.is_empty());
+        assert!(tree.root_children.is_empty());
     }
 
     #[test]
@@ -1089,6 +1375,7 @@ mod tests {
             &mut registry,
             &mut path,
             false,
+            true,
         );
         tree.set_root(root_id);
         tree.compute_layout(800.0, 600.0);

@@ -10,7 +10,6 @@
     <title>Sparsha Showcase</title>
     <link rel="icon" href="data:," />
     <base data-trunk-public-url />
-    <link data-trunk rel="rust" href="src/main.rs" />
     <link data-trunk rel="copy-file" href="sparsha-worker.js" />
     <style>
       html, body {
@@ -22,5 +21,7 @@
       }
     </style>
   </head>
-  <body></body>
+  <body>
+    <script data-trunk src="src/main.rs" type="rust"></script>
+  </body>
 </html>

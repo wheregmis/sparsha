@@ -3,7 +3,7 @@ use sparsha::layout::taffy::prelude::{length, percent, AlignItems, JustifyConten
 use sparsha::prelude::*;
 use sparsha::text::TextStyle;
 use sparsha::widgets::{current_theme, ButtonStyle, PaintContext, WidgetId};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 fn main() -> Result<(), sparsha::AppRunError> {
@@ -18,6 +18,7 @@ fn main() -> Result<(), sparsha::AppRunError> {
     let rendering_slot = navigator_slot.clone();
 
     let router = Router::new()
+        .transition(RouterTransition::slide_overlay())
         .route("/components", move || {
             let navigator = components_slot
                 .borrow()
@@ -342,6 +343,7 @@ fn build_components_page() -> Container {
             ShowcaseRoute::Components,
             "The goal is a quick, reliable read on the default widget set.\nThe page favors intentional samples over a wall of controls.",
         ))
+        .child(build_animation_card())
         .child(build_controls_card())
         .child(build_typography_card())
         .child(build_inputs_card())
@@ -425,36 +427,63 @@ fn build_controls_card() -> Container {
     section_card(
         "Controls",
         "Primary, secondary, and disabled actions using the shipped theme tokens,\nplus a single checkbox that stays in the normal focus order.",
+        component(move |cx| {
+            let checked = cx.signal(true);
+            let is_checked = checked.get();
+            Container::new()
+                .column()
+                .gap(16.0)
+                .child(
+                    Container::new()
+                        .row()
+                        .gap(12.0)
+                        .wrap()
+                        .child(Button::new("Primary Action").on_click(|| {}))
+                        .child(
+                            Button::new("Secondary Action")
+                                .with_style(secondary_style.clone())
+                                .on_click(|| {}),
+                        )
+                        .child(Button::new("Disabled State").disabled(true)),
+                )
+                .child(
+                    Container::new()
+                        .row()
+                        .gap(12.0)
+                        .align_items(AlignItems::Center)
+                        .child(
+                            Semantics::new(
+                                Checkbox::with_checked(is_checked).on_toggle(move |next| {
+                                    checked.set(next);
+                                }),
+                            )
+                            .label("Showcase interactive checkbox"),
+                        )
+                        .child(Text::new("Interactive checkbox").size(14.0)),
+                )
+                .child(
+                    Text::new(
+                        "The goal is to show the default feel quickly.\nDeeper interaction coverage still lives in the other examples.",
+                    )
+                    .size(13.0)
+                    .color(theme.colors.text_muted),
+                )
+        }),
+    )
+}
+
+fn build_animation_card() -> Container {
+    let theme = current_theme();
+    section_card(
+        "Animations",
+        "The showcase now carries the same motion language as the rest of the examples.\nPage swaps use router slide transitions, and this preview uses the normal widget animation helpers.",
         Container::new()
             .column()
             .gap(16.0)
-            .child(
-                Container::new()
-                    .row()
-                    .gap(12.0)
-                    .wrap()
-                    .child(Button::new("Primary Action").on_click(|| {}))
-                    .child(
-                        Button::new("Secondary Action")
-                            .with_style(secondary_style)
-                            .on_click(|| {}),
-                    )
-                    .child(Button::new("Disabled State").disabled(true)),
-            )
-            .child(
-                Container::new()
-                    .row()
-                    .gap(12.0)
-                    .align_items(AlignItems::Center)
-                    .child(
-                        Semantics::new(Checkbox::with_checked(true))
-                            .label("Showcase interactive checkbox"),
-                    )
-                    .child(Text::new("Interactive checkbox").size(14.0)),
-            )
+            .child(MotionPreview::new())
             .child(
                 Text::new(
-                    "The goal is to show the default feel quickly.\nDeeper interaction coverage still lives in the other examples.",
+                    "Route changes use the shared slide + overlay transition.\nWithin the page, the preview cycles a single implicit timeline so motion stays intentional and quiet.",
                 )
                 .size(13.0)
                 .color(theme.colors.text_muted),
@@ -734,6 +763,126 @@ impl RenderingAtlas {
         Self {
             id: WidgetId::default(),
         }
+    }
+}
+
+struct MotionPreview {
+    id: WidgetId,
+    progress: RefCell<ImplicitAnimation>,
+    initialized: Cell<bool>,
+    rising: Cell<bool>,
+}
+
+impl MotionPreview {
+    fn new() -> Self {
+        Self {
+            id: WidgetId::default(),
+            progress: RefCell::new(ImplicitAnimation::new(0.0)),
+            initialized: Cell::new(false),
+            rising: Cell::new(true),
+        }
+    }
+}
+
+impl Widget for MotionPreview {
+    fn id(&self) -> WidgetId {
+        self.id
+    }
+
+    fn set_id(&mut self, id: WidgetId) {
+        self.id = id;
+    }
+
+    fn style(&self) -> Style {
+        Style {
+            size: Size {
+                width: percent(1.0),
+                height: length(132.0),
+            },
+            min_size: Size {
+                width: percent(1.0),
+                height: length(132.0),
+            },
+            ..Default::default()
+        }
+    }
+
+    fn paint(&self, ctx: &mut PaintContext) {
+        let theme = current_theme();
+        let bounds = ctx.bounds().inset(2.0);
+        let mut progress = self.progress.borrow_mut();
+
+        if !self.initialized.get() {
+            progress.set_target(1.0, ctx.elapsed_time, 1.25, AnimationEasing::EaseInOut);
+            self.initialized.set(true);
+        }
+
+        let value = progress.sample(ctx.elapsed_time);
+        if !progress.is_animating() {
+            let next = if self.rising.get() { 0.0 } else { 1.0 };
+            self.rising.set(!self.rising.get());
+            progress.set_target(next, ctx.elapsed_time, 1.25, AnimationEasing::EaseInOut);
+        }
+        ctx.request_next_frame();
+
+        let panel = lerp_color(
+            theme.colors.surface_done,
+            theme.colors.primary.with_alpha(0.18),
+            value,
+        );
+        ctx.fill_bordered_rect(bounds, panel, 14.0, 1.0, theme.colors.border);
+
+        let beam_width = bounds.width * 0.3;
+        let beam_x = bounds.x + 14.0 + (bounds.width - beam_width - 28.0) * value;
+        ctx.fill_rounded_rect(
+            Rect::new(beam_x, bounds.y + 14.0, beam_width, bounds.height - 28.0),
+            theme.colors.primary.with_alpha(0.2),
+            12.0,
+        );
+
+        let chip_y = bounds.y + bounds.height - 34.0;
+        let chip_gap = 10.0;
+        for index in 0..3 {
+            let offset = ((value + index as f32 * 0.18).fract() - 0.5).abs() * 2.0;
+            let alpha = 0.28 + (1.0 - offset) * 0.42;
+            let width = 92.0 + index as f32 * 18.0;
+            let x = bounds.x + 16.0 + index as f32 * (width + chip_gap);
+            ctx.fill_rounded_rect(
+                Rect::new(x, chip_y, width, 12.0),
+                theme.colors.border_focus.with_alpha(alpha.clamp(0.0, 0.72)),
+                6.0,
+            );
+        }
+
+        let font_family = theme.typography.font_family.clone();
+        let title = TextStyle::default()
+            .with_family(font_family.clone())
+            .with_size(15.0)
+            .with_color(theme.colors.text_primary)
+            .bold();
+        let body = TextStyle::default()
+            .with_family(font_family)
+            .with_size(12.0)
+            .with_color(theme.colors.text_muted);
+
+        ctx.draw_text(
+            "Implicit animation preview",
+            &title,
+            bounds.x + 18.0,
+            bounds.y + 20.0,
+        );
+        ctx.draw_text(
+            "Shared timing, calm motion, and a clear visual handoff between routes.",
+            &body,
+            bounds.x + 18.0,
+            bounds.y + 48.0,
+        );
+        ctx.draw_text(
+            "Router transition: slide + overlay fade",
+            &body,
+            bounds.x + 18.0,
+            bounds.y + 68.0,
+        );
     }
 }
 

@@ -162,7 +162,7 @@ Canonical verification entrypoints:
 - `cargo test --workspace`
 - `cargo check -p kitchen-sink -p fractal-clock -p hybrid-overlay -p showcase -p todo --target wasm32-unknown-unknown`
 
-`web-smoke.sh` builds the checked-in web examples, serves the generated `dist/` output for `kitchen-sink`, `hybrid-overlay`, `showcase`, and `todo`, then runs the Playwright smoke suite against those pages.
+`web-smoke.sh` builds `examples/showcase`, serves its generated `dist/` output, and runs the Playwright showcase smoke against that page.
 
 `web-perf-smoke.sh` builds the checked-in `todo` web example, serves it locally, and stores Lighthouse reports under `artifacts/lighthouse/`.
 

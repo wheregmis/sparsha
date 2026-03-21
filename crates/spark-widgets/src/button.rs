@@ -1,6 +1,6 @@
 //! Button widget.
 
-use crate::{EventContext, EventResponse, PaintContext, Widget};
+use crate::{EventContext, PaintContext, Widget};
 use spark_core::Color;
 use spark_input::InputEvent;
 use spark_layout::WidgetId;
@@ -65,7 +65,7 @@ pub struct Button {
     label: String,
     style: ButtonStyle,
     state: ButtonState,
-    on_click: Option<Box<dyn FnMut() + Send + Sync>>,
+    on_click: Option<Box<dyn FnMut()>>,
 }
 
 impl Button {
@@ -97,7 +97,7 @@ impl Button {
     }
 
     /// Set the click handler.
-    pub fn on_click(mut self, handler: impl FnMut() + Send + Sync + 'static) -> Self {
+    pub fn on_click(mut self, handler: impl FnMut() + 'static) -> Self {
         self.on_click = Some(Box::new(handler));
         self
     }
@@ -227,13 +227,14 @@ impl Widget for Button {
         ctx.draw_text_centered(&self.label, &text_style, bounds);
     }
 
-    fn event(&mut self, ctx: &mut EventContext, event: &InputEvent) -> EventResponse {
+    fn event(&mut self, ctx: &mut EventContext, event: &InputEvent) {
         if self.state == ButtonState::Disabled {
-            return EventResponse::default();
+            return;
         }
 
         match event {
             InputEvent::PointerMove { pos } => {
+                let old_state = self.state;
                 if ctx.contains(*pos) {
                     if self.state != ButtonState::Pressed {
                         self.state = ButtonState::Hovered;
@@ -241,17 +242,15 @@ impl Widget for Button {
                 } else {
                     self.state = ButtonState::Normal;
                 }
-                EventResponse {
-                    repaint: true,
-                    ..Default::default()
+                if old_state != self.state {
+                    ctx.request_paint();
                 }
             }
             InputEvent::PointerDown { pos, .. } => {
                 if ctx.contains(*pos) {
                     self.state = ButtonState::Pressed;
-                    return EventResponse::capture();
+                    ctx.capture_pointer();
                 }
-                EventResponse::default()
             }
             InputEvent::PointerUp { pos, .. } => {
                 if self.state == ButtonState::Pressed {
@@ -264,9 +263,8 @@ impl Widget for Button {
                     } else {
                         self.state = ButtonState::Normal;
                     }
-                    return EventResponse::release();
+                    ctx.release_pointer();
                 }
-                EventResponse::default()
             }
             InputEvent::KeyDown { .. } => {
                 if ctx.has_focus() {
@@ -276,12 +274,12 @@ impl Widget for Button {
                         if let Some(handler) = &mut self.on_click {
                             handler();
                         }
-                        return EventResponse::handled();
+                        ctx.stop_propagation();
+                        ctx.request_paint();
                     }
                 }
-                EventResponse::default()
             }
-            _ => EventResponse::default(),
+            _ => {}
         }
     }
 
@@ -326,7 +324,7 @@ mod tests {
 
         let mut ctx = mock_event_context(layout, &layout_tree, &mut focus, button.id(), false);
         let inside = (x + w / 2.0, y + h / 2.0);
-        let _ = button.event(&mut ctx, &pointer_move_at(inside.0, inside.1));
+        button.event(&mut ctx, &pointer_move_at(inside.0, inside.1));
         assert_eq!(button.state(), ButtonState::Hovered);
     }
 
@@ -340,9 +338,10 @@ mod tests {
         button.set_id(Default::default());
 
         let mut ctx = mock_event_context(layout, &layout_tree, &mut focus, button.id(), false);
-        let _ = button.event(&mut ctx, &pointer_move_at(x + w / 2.0, y + h / 2.0));
+        button.event(&mut ctx, &pointer_move_at(x + w / 2.0, y + h / 2.0));
         assert_eq!(button.state(), ButtonState::Hovered);
-        let _ = button.event(&mut ctx, &pointer_move_at(-10.0, -10.0));
+        ctx.commands = Default::default();
+        button.event(&mut ctx, &pointer_move_at(-10.0, -10.0));
         assert_eq!(button.state(), ButtonState::Normal);
     }
 
@@ -361,14 +360,18 @@ mod tests {
         let mut ctx = mock_event_context(layout, &layout_tree, &mut focus, button.id(), false);
         let inside = (x + w / 2.0, y + h / 2.0);
 
-        let r = button.event(&mut ctx, &pointer_down_at(inside.0, inside.1));
+        button.event(&mut ctx, &pointer_down_at(inside.0, inside.1));
         assert_eq!(button.state(), ButtonState::Pressed);
-        crate::assert_event_response!(r, handled: true, repaint: true, capture_pointer: true);
+        assert!(ctx.commands.capture_pointer);
+        assert!(ctx.commands.request_paint);
+        assert!(ctx.commands.stop_propagation);
 
-        let r = button.event(&mut ctx, &pointer_up_at(inside.0, inside.1));
+        ctx.commands = Default::default();
+        button.event(&mut ctx, &pointer_up_at(inside.0, inside.1));
         assert!(clicked.load(Ordering::SeqCst));
         assert_eq!(button.state(), ButtonState::Hovered);
-        crate::assert_event_response!(r, handled: true, repaint: true, release_pointer: true);
+        assert!(ctx.commands.release_pointer);
+        assert!(ctx.commands.request_paint);
     }
 
     #[test]
@@ -382,13 +385,13 @@ mod tests {
 
         let mut ctx = mock_event_context(layout, &layout_tree, &mut focus, button.id(), false);
         let inside = (x + w / 2.0, y + h / 2.0);
-        let r = button.event(&mut ctx, &pointer_move_at(inside.0, inside.1));
+        button.event(&mut ctx, &pointer_move_at(inside.0, inside.1));
         assert_eq!(button.state(), ButtonState::Disabled);
-        assert!(!r.handled && !r.repaint);
+        assert_eq!(ctx.commands, Default::default());
 
-        let r = button.event(&mut ctx, &pointer_down_at(inside.0, inside.1));
+        button.event(&mut ctx, &pointer_down_at(inside.0, inside.1));
         assert_eq!(button.state(), ButtonState::Disabled);
-        assert!(!r.handled);
+        assert_eq!(ctx.commands, Default::default());
     }
 
     #[test]
@@ -410,8 +413,8 @@ mod tests {
                 ..Default::default()
             },
         };
-        let r = button.event(&mut ctx, &event);
+        button.event(&mut ctx, &event);
         assert!(clicked.load(Ordering::SeqCst));
-        assert!(r.handled);
+        assert!(ctx.commands.stop_propagation);
     }
 }

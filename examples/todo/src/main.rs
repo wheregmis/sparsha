@@ -1,9 +1,7 @@
-//! Todo example app for Spark (native + web).
+//! Todo example app for Spark (native + web) using signal-based state.
 
 use spark::prelude::*;
-use spark::widgets::{EventContext, LayoutContext, PaintContext, WidgetId};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use spark::widgets::{BuildContext, EventContext, PaintContext, WidgetId};
 
 fn main() {
     #[cfg(target_arch = "wasm32")]
@@ -44,7 +42,7 @@ enum TodoAction {
     ClearCompleted,
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 struct TodoModel {
     todos: Vec<TodoItem>,
     filter: Filter,
@@ -53,56 +51,38 @@ struct TodoModel {
 }
 
 impl TodoModel {
-    fn apply(&mut self, action: TodoAction) -> bool {
+    fn apply(&mut self, action: TodoAction) {
         match action {
             TodoAction::SetDraft(text) => {
-                if self.draft != text {
-                    self.draft = text;
-                    true
-                } else {
-                    false
-                }
+                self.draft = text;
             }
             TodoAction::AddDraft => {
-                let text = self.draft.trim();
+                let text = self.draft.trim().to_owned();
                 if text.is_empty() {
-                    return false;
+                    return;
                 }
                 let id = self.next_id;
                 self.next_id += 1;
                 self.todos.push(TodoItem {
                     id,
-                    text: text.to_owned(),
+                    text,
                     done: false,
                 });
                 self.draft.clear();
-                true
             }
             TodoAction::Toggle(id) => {
                 if let Some(todo) = self.todos.iter_mut().find(|todo| todo.id == id) {
                     todo.done = !todo.done;
-                    true
-                } else {
-                    false
                 }
             }
             TodoAction::Delete(id) => {
-                let before = self.todos.len();
                 self.todos.retain(|todo| todo.id != id);
-                before != self.todos.len()
             }
             TodoAction::SetFilter(filter) => {
-                if self.filter != filter {
-                    self.filter = filter;
-                    true
-                } else {
-                    false
-                }
+                self.filter = filter;
             }
             TodoAction::ClearCompleted => {
-                let before = self.todos.len();
                 self.todos.retain(|todo| !todo.done);
-                before != self.todos.len()
             }
         }
     }
@@ -116,10 +96,15 @@ impl TodoModel {
     }
 }
 
+fn apply_action(model: Signal<TodoModel>, action: TodoAction) {
+    model.with_mut(|m| {
+        m.apply(action);
+    });
+}
+
 struct TodoApp {
     id: WidgetId,
-    model: TodoModel,
-    actions: Arc<Mutex<Vec<TodoAction>>>,
+    model: Signal<TodoModel>,
     children: Vec<Box<dyn Widget>>,
 }
 
@@ -127,8 +112,7 @@ impl TodoApp {
     fn new() -> Self {
         let mut app = Self {
             id: WidgetId::default(),
-            model: TodoModel::default(),
-            actions: Arc::new(Mutex::new(Vec::new())),
+            model: Signal::new(TodoModel::default()),
             children: Vec::new(),
         };
         app.rebuild_children();
@@ -136,40 +120,17 @@ impl TodoApp {
     }
 
     #[cfg(test)]
-    fn visible_count(&self) -> usize {
-        self.model.filtered_todos().count()
-    }
-
-    fn process_action_queue(&mut self) -> bool {
-        let actions: Vec<_> = {
-            let mut queue = self
-                .actions
-                .lock()
-                .expect("todo action queue mutex should not be poisoned");
-            std::mem::take(&mut *queue)
-        };
-        if actions.is_empty() {
-            return false;
-        }
-
-        let mut changed = false;
-        for action in actions {
-            changed |= self.model.apply(action);
-        }
-
-        if changed {
-            self.rebuild_children();
-        }
-
-        changed
+    fn snapshot_model(&self) -> TodoModel {
+        self.model.get()
     }
 
     fn rebuild_children(&mut self) {
-        let active_count = self.model.todos.iter().filter(|todo| !todo.done).count();
-        let done_count = self.model.todos.iter().filter(|todo| todo.done).count();
+        let model = self.model.get();
+        let active_count = model.todos.iter().filter(|todo| !todo.done).count();
+        let done_count = model.todos.iter().filter(|todo| todo.done).count();
 
         let mut list = List::new().vertical().gap(10.0).fill_width();
-        let visible: Vec<TodoItem> = self.model.filtered_todos().cloned().collect();
+        let visible: Vec<TodoItem> = model.filtered_todos().cloned().collect();
         if visible.is_empty() {
             list.push_item(
                 Container::new()
@@ -197,12 +158,12 @@ impl TodoApp {
             .corner_radius(14.0)
             .child(Text::new("Todo").size(28.0).bold().color(Color::WHITE))
             .child(
-                Text::new("Spark native + web example using reusable Checkbox and List widgets.")
+                Text::new("Spark native + web example using signal-driven state.")
                     .size(13.0)
                     .color(Color::from_hex(0x9CA3AF)),
             )
-            .child(self.input_row())
-            .child(self.filter_row())
+            .child(self.input_row(&model))
+            .child(self.filter_row(model.filter))
             .child(
                 Scroll::new()
                     .vertical()
@@ -221,18 +182,12 @@ impl TodoApp {
                             "{} active / {} done / {} total",
                             active_count,
                             done_count,
-                            self.model.todos.len()
+                            model.todos.len()
                         ))
                         .size(13.0)
                         .color(Color::from_hex(0x9CA3AF)),
                     )
-                    .child(ActionButton::from_button(
-                        Button::new("Clear Completed")
-                            .background(Color::from_hex(0x475569))
-                            .text_color(Color::WHITE),
-                        Arc::clone(&self.actions),
-                        TodoAction::ClearCompleted,
-                    )),
+                    .child(self.clear_completed_button()),
             );
 
         self.children = vec![Box::new(
@@ -244,59 +199,75 @@ impl TodoApp {
         )];
     }
 
-    fn input_row(&self) -> Container {
+    fn input_row(&self, model: &TodoModel) -> Container {
+        let model_for_change = self.model;
+        let model_for_submit = self.model;
+        let model_for_add = self.model;
+
         Container::new()
             .row()
             .fill_width()
             .gap(10.0)
             .align_items(taffy::prelude::AlignItems::Center)
-            .child(ActionTextInput::new(
-                self.model.draft.clone(),
-                Arc::clone(&self.actions),
-            ))
-            .child(ActionButton::from_button(
+            .child(
+                TextInput::new()
+                    .value(model.draft.clone())
+                    .fill_width()
+                    .placeholder("Add a task...")
+                    .on_change(move |value| {
+                        apply_action(model_for_change, TodoAction::SetDraft(value.to_owned()));
+                    })
+                    .on_submit(move |_| {
+                        apply_action(model_for_submit, TodoAction::AddDraft);
+                    }),
+            )
+            .child(
                 Button::new("Add")
                     .background(Color::from_hex(0x2563EB))
-                    .text_color(Color::WHITE),
-                Arc::clone(&self.actions),
-                TodoAction::AddDraft,
-            ))
+                    .text_color(Color::WHITE)
+                    .on_click(move || {
+                        apply_action(model_for_add, TodoAction::AddDraft);
+                    }),
+            )
     }
 
-    fn filter_row(&self) -> Container {
-        let queue = Arc::clone(&self.actions);
+    fn filter_row(&self, current_filter: Filter) -> Container {
         Container::new()
             .row()
             .fill_width()
             .gap(8.0)
-            .child(self.filter_button("All", Filter::All, Arc::clone(&queue)))
-            .child(self.filter_button("Active", Filter::Active, Arc::clone(&queue)))
-            .child(self.filter_button("Done", Filter::Done, queue))
+            .child(self.filter_button("All", Filter::All, current_filter))
+            .child(self.filter_button("Active", Filter::Active, current_filter))
+            .child(self.filter_button("Done", Filter::Done, current_filter))
     }
 
-    fn filter_button(
-        &self,
-        label: &str,
-        filter: Filter,
-        queue: Arc<Mutex<Vec<TodoAction>>>,
-    ) -> ActionButton {
-        let selected = self.model.filter == filter;
+    fn filter_button(&self, label: &str, filter: Filter, current_filter: Filter) -> Button {
+        let selected = current_filter == filter;
         let background = if selected {
             Color::from_hex(0x2563EB)
         } else {
             Color::from_hex(0x334155)
         };
-        ActionButton::from_button(
-            Button::new(label)
-                .background(background)
-                .text_color(Color::WHITE),
-            queue,
-            TodoAction::SetFilter(filter),
-        )
+        let model = self.model;
+        Button::new(label)
+            .background(background)
+            .text_color(Color::WHITE)
+            .on_click(move || {
+                apply_action(model, TodoAction::SetFilter(filter));
+            })
+    }
+
+    fn clear_completed_button(&self) -> Button {
+        let model = self.model;
+        Button::new("Clear Completed")
+            .background(Color::from_hex(0x475569))
+            .text_color(Color::WHITE)
+            .on_click(move || {
+                apply_action(model, TodoAction::ClearCompleted);
+            })
     }
 
     fn todo_row(&self, todo: TodoItem) -> Container {
-        let queue = Arc::clone(&self.actions);
         let text_color = if todo.done {
             Color::from_hex(0x64748B)
         } else {
@@ -308,6 +279,10 @@ impl TodoApp {
             Color::from_hex(0x1E293B)
         };
 
+        let id = todo.id;
+        let model_for_toggle = self.model;
+        let model_for_delete = self.model;
+
         Container::new()
             .row()
             .fill_width()
@@ -316,23 +291,22 @@ impl TodoApp {
             .background(row_bg)
             .corner_radius(10.0)
             .align_items(taffy::prelude::AlignItems::Center)
-            .child(ActionCheckbox::from_checkbox(
-                Checkbox::with_checked(todo.done),
-                Arc::clone(&queue),
-                TodoAction::Toggle(todo.id),
-            ))
+            .child(Checkbox::with_checked(todo.done).on_toggle(move |_| {
+                apply_action(model_for_toggle, TodoAction::Toggle(id));
+            }))
             .child(
                 Container::new()
                     .flex_grow(1.0)
                     .child(Text::new(todo.text).size(15.0).color(text_color)),
             )
-            .child(ActionButton::from_button(
+            .child(
                 Button::new("Delete")
                     .background(Color::from_hex(0x7F1D1D))
-                    .text_color(Color::WHITE),
-                queue,
-                TodoAction::Delete(todo.id),
-            ))
+                    .text_color(Color::WHITE)
+                    .on_click(move || {
+                        apply_action(model_for_delete, TodoAction::Delete(id));
+                    }),
+            )
     }
 }
 
@@ -355,19 +329,13 @@ impl Widget for TodoApp {
         }
     }
 
+    fn rebuild(&mut self, _ctx: &mut BuildContext) {
+        self.rebuild_children();
+    }
+
     fn paint(&self, _ctx: &mut PaintContext) {}
 
-    fn event(&mut self, _ctx: &mut EventContext, _event: &InputEvent) -> EventResponse {
-        if self.process_action_queue() {
-            EventResponse {
-                repaint: true,
-                relayout: true,
-                ..Default::default()
-            }
-        } else {
-            EventResponse::default()
-        }
-    }
+    fn event(&mut self, _ctx: &mut EventContext, _event: &InputEvent) {}
 
     fn children(&self) -> &[Box<dyn Widget>] {
         &self.children
@@ -378,201 +346,6 @@ impl Widget for TodoApp {
     }
 }
 
-struct ActionButton {
-    inner: Button,
-    fired: Arc<AtomicBool>,
-}
-
-impl ActionButton {
-    fn from_button(button: Button, queue: Arc<Mutex<Vec<TodoAction>>>, action: TodoAction) -> Self {
-        let fired = Arc::new(AtomicBool::new(false));
-        let fired_cb = Arc::clone(&fired);
-        let queued_action = action.clone();
-        let inner = button.on_click(move || {
-            queue
-                .lock()
-                .expect("todo action queue mutex should not be poisoned")
-                .push(queued_action.clone());
-            fired_cb.store(true, Ordering::SeqCst);
-        });
-        Self { inner, fired }
-    }
-}
-
-impl Widget for ActionButton {
-    fn id(&self) -> WidgetId {
-        self.inner.id()
-    }
-
-    fn set_id(&mut self, id: WidgetId) {
-        self.inner.set_id(id);
-    }
-
-    fn style(&self) -> taffy::Style {
-        self.inner.style()
-    }
-
-    fn paint(&self, ctx: &mut PaintContext) {
-        self.inner.paint(ctx);
-    }
-
-    fn event(&mut self, ctx: &mut EventContext, event: &InputEvent) -> EventResponse {
-        let mut response = self.inner.event(ctx, event);
-        if self.fired.swap(false, Ordering::SeqCst) {
-            response.handled = false;
-            response.relayout = true;
-            response.repaint = true;
-        }
-        response
-    }
-
-    fn focusable(&self) -> bool {
-        self.inner.focusable()
-    }
-
-    fn measure(&self, ctx: &mut LayoutContext) -> Option<(f32, f32)> {
-        self.inner.measure(ctx)
-    }
-}
-
-struct ActionCheckbox {
-    inner: Checkbox,
-    fired: Arc<AtomicBool>,
-}
-
-impl ActionCheckbox {
-    fn from_checkbox(
-        checkbox: Checkbox,
-        queue: Arc<Mutex<Vec<TodoAction>>>,
-        action: TodoAction,
-    ) -> Self {
-        let fired = Arc::new(AtomicBool::new(false));
-        let fired_cb = Arc::clone(&fired);
-        let queued_action = action.clone();
-        let inner = checkbox.on_toggle(move |_| {
-            queue
-                .lock()
-                .expect("todo action queue mutex should not be poisoned")
-                .push(queued_action.clone());
-            fired_cb.store(true, Ordering::SeqCst);
-        });
-        Self { inner, fired }
-    }
-}
-
-impl Widget for ActionCheckbox {
-    fn id(&self) -> WidgetId {
-        self.inner.id()
-    }
-
-    fn set_id(&mut self, id: WidgetId) {
-        self.inner.set_id(id);
-    }
-
-    fn style(&self) -> taffy::Style {
-        self.inner.style()
-    }
-
-    fn paint(&self, ctx: &mut PaintContext) {
-        self.inner.paint(ctx);
-    }
-
-    fn event(&mut self, ctx: &mut EventContext, event: &InputEvent) -> EventResponse {
-        let mut response = self.inner.event(ctx, event);
-        if self.fired.swap(false, Ordering::SeqCst) {
-            response.handled = false;
-            response.relayout = true;
-            response.repaint = true;
-        }
-        response
-    }
-
-    fn focusable(&self) -> bool {
-        self.inner.focusable()
-    }
-
-    fn measure(&self, ctx: &mut LayoutContext) -> Option<(f32, f32)> {
-        self.inner.measure(ctx)
-    }
-}
-
-struct ActionTextInput {
-    inner: TextInput,
-    fired: Arc<AtomicBool>,
-}
-
-impl ActionTextInput {
-    fn new(draft: String, queue: Arc<Mutex<Vec<TodoAction>>>) -> Self {
-        let fired = Arc::new(AtomicBool::new(false));
-        let fired_change = Arc::clone(&fired);
-        let fired_submit = Arc::clone(&fired);
-        let queue_change = Arc::clone(&queue);
-        let inner = TextInput::new()
-            .value(draft)
-            .fill_width()
-            .placeholder("Add a task...")
-            .on_change(move |value| {
-                queue_change
-                    .lock()
-                    .expect("todo action queue mutex should not be poisoned")
-                    .push(TodoAction::SetDraft(value.to_owned()));
-                fired_change.store(true, Ordering::SeqCst);
-            })
-            .on_submit(move |_| {
-                queue
-                    .lock()
-                    .expect("todo action queue mutex should not be poisoned")
-                    .push(TodoAction::AddDraft);
-                fired_submit.store(true, Ordering::SeqCst);
-            });
-        Self { inner, fired }
-    }
-}
-
-impl Widget for ActionTextInput {
-    fn id(&self) -> WidgetId {
-        self.inner.id()
-    }
-
-    fn set_id(&mut self, id: WidgetId) {
-        self.inner.set_id(id);
-    }
-
-    fn style(&self) -> taffy::Style {
-        self.inner.style()
-    }
-
-    fn paint(&self, ctx: &mut PaintContext) {
-        self.inner.paint(ctx);
-    }
-
-    fn event(&mut self, ctx: &mut EventContext, event: &InputEvent) -> EventResponse {
-        let mut response = self.inner.event(ctx, event);
-        if self.fired.swap(false, Ordering::SeqCst) {
-            response.handled = false;
-            response.relayout = true;
-            response.repaint = true;
-        }
-        response
-    }
-
-    fn focusable(&self) -> bool {
-        self.inner.focusable()
-    }
-
-    fn measure(&self, ctx: &mut LayoutContext) -> Option<(f32, f32)> {
-        self.inner.measure(ctx)
-    }
-
-    fn on_focus(&mut self) {
-        self.inner.on_focus();
-    }
-
-    fn on_blur(&mut self) {
-        self.inner.on_blur();
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -580,55 +353,40 @@ mod tests {
     #[test]
     fn todo_model_core_flow() {
         let mut model = TodoModel::default();
-        assert!(model.apply(TodoAction::SetDraft("Write tests".to_owned())));
-        assert!(model.apply(TodoAction::AddDraft));
+        model.apply(TodoAction::SetDraft("Write tests".to_owned()));
+        model.apply(TodoAction::AddDraft);
         assert_eq!(model.todos.len(), 1);
         assert_eq!(model.draft, "");
         assert_eq!(model.todos[0].text, "Write tests");
 
         let id = model.todos[0].id;
-        assert!(model.apply(TodoAction::Toggle(id)));
+        model.apply(TodoAction::Toggle(id));
         assert!(model.todos[0].done);
-        assert!(model.apply(TodoAction::SetFilter(Filter::Done)));
+        model.apply(TodoAction::SetFilter(Filter::Done));
         assert_eq!(model.filtered_todos().count(), 1);
-        assert!(model.apply(TodoAction::ClearCompleted));
+        model.apply(TodoAction::ClearCompleted);
         assert!(model.todos.is_empty());
     }
 
     #[test]
-    fn todo_app_queue_processing_applies_actions_deterministically() {
-        let mut app = TodoApp::new();
-        app.actions
-            .lock()
-            .expect("todo action queue mutex should not be poisoned")
-            .push(TodoAction::SetDraft("Alpha".to_owned()));
-        app.actions
-            .lock()
-            .expect("todo action queue mutex should not be poisoned")
-            .push(TodoAction::AddDraft);
-        assert!(app.process_action_queue());
-        assert_eq!(app.model.todos.len(), 1);
-        assert_eq!(app.model.todos[0].text, "Alpha");
+    fn todo_app_signal_actions_update_state() {
+        let runtime = spark::signals::RuntimeHandle::new();
+        runtime.run_with_current(|| {
+            let app = TodoApp::new();
+            apply_action(app.model, TodoAction::SetDraft("Alpha".to_owned()));
+            apply_action(app.model, TodoAction::AddDraft);
 
-        let id = app.model.todos[0].id;
-        app.actions
-            .lock()
-            .expect("todo action queue mutex should not be poisoned")
-            .push(TodoAction::Toggle(id));
-        app.actions
-            .lock()
-            .expect("todo action queue mutex should not be poisoned")
-            .push(TodoAction::SetFilter(Filter::Done));
-        assert!(app.process_action_queue());
-        assert_eq!(app.visible_count(), 1);
-        assert!(app.model.todos[0].done);
+            let snapshot = app.snapshot_model();
+            assert_eq!(snapshot.todos.len(), 1);
+            assert_eq!(snapshot.todos[0].text, "Alpha");
 
-        app.actions
-            .lock()
-            .expect("todo action queue mutex should not be poisoned")
-            .push(TodoAction::Delete(id));
-        assert!(app.process_action_queue());
-        assert_eq!(app.model.todos.len(), 0);
-        assert_eq!(app.children.len(), 1);
+            let id = snapshot.todos[0].id;
+            apply_action(app.model, TodoAction::Toggle(id));
+            apply_action(app.model, TodoAction::SetFilter(Filter::Done));
+
+            let updated = app.snapshot_model();
+            assert_eq!(updated.filter, Filter::Done);
+            assert!(updated.todos[0].done);
+        });
     }
 }

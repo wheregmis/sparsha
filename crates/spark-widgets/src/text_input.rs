@@ -1,6 +1,6 @@
 //! Text input widget.
 
-use crate::{EventContext, EventResponse, PaintContext, Widget};
+use crate::{EventContext, PaintContext, Widget};
 use spark_core::Color;
 use spark_input::{shortcuts, InputEvent, Key};
 use spark_layout::WidgetId;
@@ -9,7 +9,7 @@ use std::cell::RefCell;
 use taffy::prelude::*;
 
 /// Callback type for text change and submit handlers.
-type TextInputCallback = Box<dyn FnMut(&str) + Send + Sync>;
+type TextInputCallback = Box<dyn FnMut(&str)>;
 
 /// Style configuration for text input.
 #[derive(Clone, Debug)]
@@ -94,13 +94,13 @@ impl TextInput {
     }
 
     /// Set the change handler.
-    pub fn on_change(mut self, handler: impl FnMut(&str) + Send + Sync + 'static) -> Self {
+    pub fn on_change(mut self, handler: impl FnMut(&str) + 'static) -> Self {
         self.on_change = Some(Box::new(handler));
         self
     }
 
     /// Set the submit handler (called on Enter).
-    pub fn on_submit(mut self, handler: impl FnMut(&str) + Send + Sync + 'static) -> Self {
+    pub fn on_submit(mut self, handler: impl FnMut(&str) + 'static) -> Self {
         self.on_submit = Some(Box::new(handler));
         self
     }
@@ -457,7 +457,7 @@ impl Widget for TextInput {
         }
     }
 
-    fn event(&mut self, ctx: &mut EventContext, event: &InputEvent) -> EventResponse {
+    fn event(&mut self, ctx: &mut EventContext, event: &InputEvent) {
         match event {
             InputEvent::PointerDown { pos, .. } => {
                 if ctx.contains(*pos) {
@@ -466,13 +466,13 @@ impl Widget for TextInput {
                     let click_x = (local.x - self.style.padding_h).max(0.0);
                     self.cursor_pos = self.cursor_index_for_x(click_x);
                     self.selection_start = None;
-                    return EventResponse::focus();
+                    ctx.stop_propagation();
+                    ctx.request_paint();
                 }
-                EventResponse::default()
             }
             InputEvent::KeyDown { event } => {
                 if !ctx.has_focus() {
-                    return EventResponse::default();
+                    return;
                 }
 
                 use spark_input::NamedKey;
@@ -480,28 +480,38 @@ impl Widget for TextInput {
                 // Handle shortcuts
                 if shortcuts::is_select_all(event) {
                     self.select_all();
-                    return EventResponse::handled();
+                    ctx.stop_propagation();
+                    ctx.request_paint();
+                    return;
                 }
 
                 if shortcuts::is_backspace(event) {
                     self.backspace();
-                    return EventResponse::handled();
+                    ctx.stop_propagation();
+                    ctx.request_layout();
+                    return;
                 }
 
                 if shortcuts::is_delete(event) {
                     self.delete();
-                    return EventResponse::handled();
+                    ctx.stop_propagation();
+                    ctx.request_layout();
+                    return;
                 }
 
                 // Arrow keys
                 match &event.key {
                     Key::Named(NamedKey::ArrowLeft) => {
                         self.move_cursor_left(event.modifiers.shift());
-                        return EventResponse::handled();
+                        ctx.stop_propagation();
+                        ctx.request_paint();
+                        return;
                     }
                     Key::Named(NamedKey::ArrowRight) => {
                         self.move_cursor_right(event.modifiers.shift());
-                        return EventResponse::handled();
+                        ctx.stop_propagation();
+                        ctx.request_paint();
+                        return;
                     }
                     Key::Named(NamedKey::Home) => {
                         if !event.modifiers.shift() {
@@ -510,7 +520,9 @@ impl Widget for TextInput {
                             self.selection_start = Some(self.cursor_pos);
                         }
                         self.cursor_pos = 0;
-                        return EventResponse::handled();
+                        ctx.stop_propagation();
+                        ctx.request_paint();
+                        return;
                     }
                     Key::Named(NamedKey::End) => {
                         if !event.modifiers.shift() {
@@ -519,26 +531,26 @@ impl Widget for TextInput {
                             self.selection_start = Some(self.cursor_pos);
                         }
                         self.cursor_pos = self.value.len();
-                        return EventResponse::handled();
+                        ctx.stop_propagation();
+                        ctx.request_paint();
+                        return;
                     }
                     Key::Named(NamedKey::Enter) => {
                         if let Some(handler) = &mut self.on_submit {
                             handler(&self.value);
                         }
-                        return EventResponse::handled();
+                        ctx.stop_propagation();
+                        ctx.request_paint();
+                        return;
                     }
                     Key::Named(NamedKey::Escape) => {
                         ctx.release_focus();
-                        return EventResponse {
-                            release_focus: true,
-                            repaint: true,
-                            ..Default::default()
-                        };
+                        ctx.stop_propagation();
+                        ctx.request_paint();
+                        return;
                     }
                     _ => {}
                 }
-
-                EventResponse::default()
             }
             InputEvent::TextInput { text } => {
                 if ctx.has_focus() {
@@ -548,11 +560,11 @@ impl Widget for TextInput {
                             self.insert_char(c);
                         }
                     }
-                    return EventResponse::handled();
+                    ctx.stop_propagation();
+                    ctx.request_layout();
                 }
-                EventResponse::default()
             }
-            _ => EventResponse::default(),
+            _ => {}
         }
     }
 

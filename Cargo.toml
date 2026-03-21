@@ -5,6 +5,7 @@ members = [
     "crates/spark-layout",
     "crates/spark-text",
     "crates/spark-input",
+    "crates/spark-signals",
     "crates/spark-widgets",
     "crates/spark",
     "examples/kitchen-sink",
@@ -34,6 +35,7 @@ swash = "0.2.6"
 # Utilities
 slotmap = "1.1.1"
 rustc-hash = "2.1.1"
+generational-box = "0.7.3"
 
 # Input events
 ui-events = "0.3.0"
@@ -49,6 +51,7 @@ spark-render = { path = "crates/spark-render" }
 spark-layout = { path = "crates/spark-layout" }
 spark-text = { path = "crates/spark-text" }
 spark-input = { path = "crates/spark-input" }
+spark-signals = { path = "crates/spark-signals" }
 spark-widgets = { path = "crates/spark-widgets" }
 
 # Web dependencies (add to workspace.dependencies for individual crates)

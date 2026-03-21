@@ -1,6 +1,6 @@
 //! Container widget for laying out children.
 
-use crate::{EventContext, EventResponse, PaintContext, Widget};
+use crate::{EventContext, PaintContext, Widget};
 use spark_core::Color;
 use spark_input::InputEvent;
 use spark_layout::WidgetId;
@@ -277,10 +277,7 @@ impl Widget for Container {
         // Note: Children are painted by the framework traversal
     }
 
-    fn event(&mut self, _ctx: &mut EventContext, _event: &InputEvent) -> EventResponse {
-        // Containers typically don't handle events directly
-        EventResponse::default()
-    }
+    fn event(&mut self, _ctx: &mut EventContext, _event: &InputEvent) {}
 
     fn children(&self) -> &[Box<dyn Widget>] {
         &self.children

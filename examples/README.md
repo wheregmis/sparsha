@@ -60,7 +60,7 @@ Then open `http://127.0.0.1:8080`.
 **Path:** `examples/todo`
 
 A cross-platform todo app demonstrating dynamic list rendering with reusable `Checkbox` and `List`
-widgets, filter controls, and action-driven state updates.
+widgets, filter controls, and signal-driven state updates (no `Arc/Mutex` action queue).
 
 **Run:**
 ```bash

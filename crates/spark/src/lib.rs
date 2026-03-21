@@ -40,8 +40,9 @@ pub mod prelude {
     pub use spark_core::{Color, Rect};
     pub use spark_input::{InputEvent, Key, Modifiers, PointerButton};
     pub use spark_layout::taffy;
+    pub use spark_signals::{Effect, Memo, ReadSignal, Signal, WriteSignal};
     pub use spark_widgets::{
-        Button, ButtonStyle, Checkbox, CheckboxStyle, Container, EventResponse, List,
+        BuildContext, Button, ButtonStyle, Checkbox, CheckboxStyle, Container, EventCommands, List,
         ListDirection, Scroll, ScrollDirection, Text, TextAlign, TextInput, Widget,
     };
 }
@@ -51,5 +52,6 @@ pub use spark_core as core;
 pub use spark_input as input;
 pub use spark_layout as layout;
 pub use spark_render as render;
+pub use spark_signals as signals;
 pub use spark_text as text;
 pub use spark_widgets as widgets;

@@ -6,6 +6,10 @@ use spark_layout::{ComputedLayout, LayoutTree, WidgetId};
 use spark_render::DrawList;
 use spark_text::{TextStyle, TextSystem};
 
+/// Context for rebuilding dynamic widget children.
+#[derive(Default)]
+pub struct BuildContext {}
+
 /// Context for layout measurement.
 pub struct LayoutContext<'a> {
     /// The text system for measuring text.
@@ -179,6 +183,30 @@ impl<'a> PaintContext<'a> {
     }
 }
 
+/// Commands emitted by a widget during event handling.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct EventCommands {
+    pub stop_propagation: bool,
+    pub capture_pointer: bool,
+    pub release_pointer: bool,
+    pub request_focus: bool,
+    pub clear_focus: bool,
+    pub request_layout: bool,
+    pub request_paint: bool,
+}
+
+impl EventCommands {
+    pub fn merge(&mut self, other: EventCommands) {
+        self.stop_propagation |= other.stop_propagation;
+        self.capture_pointer |= other.capture_pointer;
+        self.release_pointer |= other.release_pointer;
+        self.request_focus |= other.request_focus;
+        self.clear_focus |= other.clear_focus;
+        self.request_layout |= other.request_layout;
+        self.request_paint |= other.request_paint;
+    }
+}
+
 /// Context for handling events.
 pub struct EventContext<'a> {
     /// The computed layout for this widget.
@@ -191,6 +219,8 @@ pub struct EventContext<'a> {
     pub widget_id: WidgetId,
     /// Whether this widget has pointer capture.
     pub has_capture: bool,
+    /// Commands requested by this event handler.
+    pub commands: EventCommands,
 }
 
 impl<'a> EventContext<'a> {
@@ -207,12 +237,14 @@ impl<'a> EventContext<'a> {
     /// Request keyboard focus for this widget.
     pub fn request_focus(&mut self) {
         self.focus.set_focus(self.widget_id);
+        self.commands.request_focus = true;
     }
 
     /// Release keyboard focus.
     pub fn release_focus(&mut self) {
         if self.has_focus() {
             self.focus.clear_focus();
+            self.commands.clear_focus = true;
         }
     }
 
@@ -224,5 +256,35 @@ impl<'a> EventContext<'a> {
     /// Convert a point to local coordinates.
     pub fn to_local(&self, pos: glam::Vec2) -> glam::Vec2 {
         glam::Vec2::new(pos.x - self.layout.bounds.x, pos.y - self.layout.bounds.y)
+    }
+
+    /// Stop further event propagation.
+    pub fn stop_propagation(&mut self) {
+        self.commands.stop_propagation = true;
+    }
+
+    /// Request pointer capture.
+    pub fn capture_pointer(&mut self) {
+        self.commands.capture_pointer = true;
+        self.commands.request_paint = true;
+        self.commands.stop_propagation = true;
+    }
+
+    /// Request pointer capture release.
+    pub fn release_pointer(&mut self) {
+        self.commands.release_pointer = true;
+        self.commands.request_paint = true;
+        self.commands.stop_propagation = true;
+    }
+
+    /// Request a repaint.
+    pub fn request_paint(&mut self) {
+        self.commands.request_paint = true;
+    }
+
+    /// Request relayout + repaint.
+    pub fn request_layout(&mut self) {
+        self.commands.request_layout = true;
+        self.commands.request_paint = true;
     }
 }

@@ -6,8 +6,11 @@ use crate::{app::AppConfig, dom_renderer::DomRenderer};
 use spark_input::{FocusManager, InputEvent, PointerButton};
 use spark_layout::LayoutTree;
 use spark_render::DrawList;
+use spark_signals::{RuntimeHandle, SubscriberKind};
 use spark_text::TextSystem;
-use spark_widgets::{EventContext, LayoutContext, PaintContext, Widget};
+use spark_widgets::{
+    BuildContext, EventCommands, EventContext, LayoutContext, PaintContext, Widget,
+};
 use std::{cell::RefCell, rc::Rc};
 use wasm_bindgen::{closure::Closure, JsCast};
 use web_sys::{CustomEvent, KeyboardEvent as WebKeyboardEvent, MouseEvent, WheelEvent, Window};
@@ -19,7 +22,8 @@ where
     let window = web_sys::window().expect("window should be available");
     let document = window.document().expect("document should be available");
     let dom_renderer = DomRenderer::mount_to_body(&document).expect("failed to mount DOM renderer");
-    let root_widget = build_ui();
+    let signal_runtime = RuntimeHandle::new();
+    let root_widget = signal_runtime.run_with_current(build_ui);
 
     let mut state = WebAppState {
         config,
@@ -28,6 +32,7 @@ where
         draw_list: DrawList::new(),
         layout_tree: LayoutTree::new(),
         focus_manager: FocusManager::new(),
+        signal_runtime,
         root_widget,
         start_time: web_time::Instant::now(),
         mouse_pos: glam::Vec2::ZERO,
@@ -51,6 +56,7 @@ struct WebAppState {
     draw_list: DrawList,
     layout_tree: LayoutTree,
     focus_manager: FocusManager,
+    signal_runtime: RuntimeHandle,
     root_widget: Box<dyn Widget>,
     start_time: web_time::Instant,
     mouse_pos: glam::Vec2,
@@ -94,7 +100,20 @@ impl WebAppState {
     }
 
     fn build_layout(&mut self) {
+        let runtime = self.signal_runtime.clone();
         self.layout_tree = LayoutTree::new();
+
+        runtime.with_tracking(SubscriberKind::Rebuild, || {
+            fn rebuild_widget(widget: &mut dyn Widget, build_ctx: &mut BuildContext) {
+                widget.rebuild(build_ctx);
+                for child in widget.children_mut() {
+                    rebuild_widget(child.as_mut(), build_ctx);
+                }
+            }
+
+            let mut build_ctx = BuildContext::default();
+            rebuild_widget(self.root_widget.as_mut(), &mut build_ctx);
+        });
 
         fn add_to_layout(
             widget: &mut dyn Widget,
@@ -146,12 +165,14 @@ impl WebAppState {
             id
         }
 
-        let root_id = add_to_layout(
-            self.root_widget.as_mut(),
-            &mut self.layout_tree,
-            &mut self.text_system,
-            false,
-        );
+        let root_id = runtime.with_tracking(SubscriberKind::Layout, || {
+            add_to_layout(
+                self.root_widget.as_mut(),
+                &mut self.layout_tree,
+                &mut self.text_system,
+                false,
+            )
+        });
         self.layout_tree.set_root(root_id);
         self.layout_tree
             .compute_layout(self.viewport_width.max(1.0), self.viewport_height.max(1.0));
@@ -160,6 +181,7 @@ impl WebAppState {
     }
 
     fn paint(&mut self) {
+        let runtime = self.signal_runtime.clone();
         self.draw_list.clear();
         let elapsed_time = self.start_time.elapsed().as_secs_f32();
         let text_system_ptr = &mut self.text_system as *mut TextSystem;
@@ -200,14 +222,16 @@ impl WebAppState {
             }
         }
 
-        paint_widget(
-            self.root_widget.as_ref(),
-            &self.layout_tree,
-            &self.focus_manager,
-            &mut self.draw_list,
-            text_system_ptr,
-            elapsed_time,
-        );
+        runtime.with_tracking(SubscriberKind::Paint, || {
+            paint_widget(
+                self.root_widget.as_ref(),
+                &self.layout_tree,
+                &self.focus_manager,
+                &mut self.draw_list,
+                text_system_ptr,
+                elapsed_time,
+            );
+        });
         self.needs_repaint = false;
     }
 
@@ -217,20 +241,20 @@ impl WebAppState {
             layout_tree: &LayoutTree,
             focus_id: Option<spark_layout::WidgetId>,
             event: &InputEvent,
-        ) -> (spark_widgets::EventResponse, Option<spark_layout::WidgetId>) {
+            aggregate: &mut EventCommands,
+        ) -> Option<spark_layout::WidgetId> {
             let id = widget.id();
             let layout = match layout_tree.get_absolute_layout(id) {
                 Some(l) => l,
-                None => return (spark_widgets::EventResponse::default(), focus_id),
+                None => return focus_id,
             };
 
             let mut new_focus = focus_id;
             for child in widget.children_mut() {
-                let (response, focus) =
-                    dispatch_event(child.as_mut(), layout_tree, new_focus, event);
-                new_focus = focus;
-                if response.handled {
-                    return (response, new_focus);
+                new_focus =
+                    dispatch_event(child.as_mut(), layout_tree, new_focus, event, aggregate);
+                if aggregate.stop_propagation {
+                    return new_focus;
                 }
             }
 
@@ -245,24 +269,31 @@ impl WebAppState {
                 focus: &mut temp_focus,
                 widget_id: id,
                 has_capture: false,
+                commands: EventCommands::default(),
             };
-            let response = widget.event(&mut ctx, event);
+            widget.event(&mut ctx, event);
 
-            if response.request_focus {
+            if ctx.commands.request_focus {
                 new_focus = Some(id);
-            } else if response.release_focus && new_focus == Some(id) {
+            } else if ctx.commands.clear_focus && new_focus == Some(id) {
                 new_focus = None;
             }
-            (response, new_focus)
+            aggregate.merge(ctx.commands);
+            new_focus
         }
 
+        let runtime = self.signal_runtime.clone();
         let current_focus = self.focus_manager.focused();
-        let (response, new_focus) = dispatch_event(
-            self.root_widget.as_mut(),
-            &self.layout_tree,
-            current_focus,
-            &event,
-        );
+        let mut commands = EventCommands::default();
+        let new_focus = runtime.run_with_current(|| {
+            dispatch_event(
+                self.root_widget.as_mut(),
+                &self.layout_tree,
+                current_focus,
+                &event,
+                &mut commands,
+            )
+        });
 
         if let Some(fid) = new_focus {
             self.focus_manager.set_focus(fid);
@@ -270,15 +301,33 @@ impl WebAppState {
             self.focus_manager.clear_focus();
         }
 
-        if response.repaint {
+        if commands.request_paint {
             self.needs_repaint = true;
         }
-        if response.relayout {
+        if commands.request_layout {
             self.needs_layout = true;
+        }
+
+        runtime.run_effects(64);
+        let dirty = runtime.take_dirty_flags();
+        if dirty.rebuild || dirty.layout {
+            self.needs_layout = true;
+        }
+        if dirty.paint {
+            self.needs_repaint = true;
         }
     }
 
     fn frame(&mut self) {
+        self.signal_runtime.run_effects(64);
+        let dirty = self.signal_runtime.take_dirty_flags();
+        if dirty.rebuild || dirty.layout {
+            self.needs_layout = true;
+        }
+        if dirty.paint {
+            self.needs_repaint = true;
+        }
+
         if self.needs_layout {
             self.build_layout();
         }

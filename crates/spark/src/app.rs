@@ -14,9 +14,11 @@ use spark_render::DrawList;
 #[cfg(not(target_arch = "wasm32"))]
 use spark_render::Renderer;
 #[cfg(not(target_arch = "wasm32"))]
+use spark_signals::{RuntimeHandle, SubscriberKind};
+#[cfg(not(target_arch = "wasm32"))]
 use spark_text::TextSystem;
 #[cfg(not(target_arch = "wasm32"))]
-use spark_widgets::{EventContext, LayoutContext, PaintContext};
+use spark_widgets::{BuildContext, EventCommands, EventContext, LayoutContext, PaintContext};
 #[cfg(not(target_arch = "wasm32"))]
 use wgpu::{Device, Queue};
 #[cfg(not(target_arch = "wasm32"))]
@@ -133,6 +135,7 @@ struct AppState {
     draw_list: DrawList,
     layout_tree: LayoutTree,
     focus_manager: FocusManager,
+    signal_runtime: RuntimeHandle,
     root_widget: Box<dyn Widget>,
     start_time: Instant,
     mouse_pos: glam::Vec2,
@@ -153,9 +156,22 @@ impl<F: FnOnce() -> Box<dyn Widget>> AppRunner<F> {
 
     fn build_layout(&mut self) {
         let state = self.state.as_mut().unwrap();
+        let runtime = state.signal_runtime.clone();
 
         // Clear layout tree
         state.layout_tree = LayoutTree::new();
+
+        runtime.with_tracking(SubscriberKind::Rebuild, || {
+            fn rebuild_widget(widget: &mut dyn Widget, build_ctx: &mut BuildContext) {
+                widget.rebuild(build_ctx);
+                for child in widget.children_mut() {
+                    rebuild_widget(child.as_mut(), build_ctx);
+                }
+            }
+
+            let mut build_ctx = BuildContext::default();
+            rebuild_widget(state.root_widget.as_mut(), &mut build_ctx);
+        });
 
         // Build layout tree from widget tree
         fn add_to_layout(
@@ -210,12 +226,14 @@ impl<F: FnOnce() -> Box<dyn Widget>> AppRunner<F> {
             id
         }
 
-        let root_id = add_to_layout(
-            state.root_widget.as_mut(),
-            &mut state.layout_tree,
-            &mut state.text_system,
-            false,
-        );
+        let root_id = runtime.with_tracking(SubscriberKind::Layout, || {
+            add_to_layout(
+                state.root_widget.as_mut(),
+                &mut state.layout_tree,
+                &mut state.text_system,
+                false,
+            )
+        });
         state.layout_tree.set_root(root_id);
 
         // Compute layout
@@ -234,6 +252,7 @@ impl<F: FnOnce() -> Box<dyn Widget>> AppRunner<F> {
 
     fn paint(&mut self) {
         let state = self.state.as_mut().unwrap();
+        let runtime = state.signal_runtime.clone();
         state.draw_list.clear();
 
         // Get elapsed time for animations
@@ -298,15 +317,17 @@ impl<F: FnOnce() -> Box<dyn Widget>> AppRunner<F> {
             }
         }
 
-        paint_widget(
-            state.root_widget.as_ref(),
-            &state.layout_tree,
-            &state.focus_manager,
-            &mut state.draw_list,
-            state.scale_factor,
-            text_system_ptr,
-            elapsed_time,
-        );
+        runtime.with_tracking(SubscriberKind::Paint, || {
+            paint_widget(
+                state.root_widget.as_ref(),
+                &state.layout_tree,
+                &state.focus_manager,
+                &mut state.draw_list,
+                state.scale_factor,
+                text_system_ptr,
+                elapsed_time,
+            );
+        });
 
         state.needs_repaint = false;
     }
@@ -316,33 +337,28 @@ impl<F: FnOnce() -> Box<dyn Widget>> AppRunner<F> {
             return;
         };
 
-        // Simple event dispatch - dispatch to all widgets, let them check bounds
         fn dispatch_event(
             widget: &mut dyn Widget,
             layout_tree: &LayoutTree,
             focus_id: Option<spark_layout::WidgetId>,
             event: &InputEvent,
-        ) -> (spark_widgets::EventResponse, Option<spark_layout::WidgetId>) {
+            aggregate: &mut EventCommands,
+        ) -> Option<spark_layout::WidgetId> {
             let id = widget.id();
             let layout = match layout_tree.get_absolute_layout(id) {
                 Some(l) => l,
-                None => {
-                    return (spark_widgets::EventResponse::default(), focus_id);
-                }
+                None => return focus_id,
             };
 
-            // First dispatch to children (bubble up)
             let mut new_focus = focus_id;
             for child in widget.children_mut() {
-                let (response, focus) =
-                    dispatch_event(child.as_mut(), layout_tree, new_focus, event);
-                new_focus = focus;
-                if response.handled {
-                    return (response, new_focus);
+                new_focus =
+                    dispatch_event(child.as_mut(), layout_tree, new_focus, event, aggregate);
+                if aggregate.stop_propagation {
+                    return new_focus;
                 }
             }
 
-            // Create a temporary focus manager for this dispatch
             let mut temp_focus = FocusManager::new();
             if let Some(fid) = new_focus {
                 temp_focus.set_focus(fid);
@@ -354,27 +370,32 @@ impl<F: FnOnce() -> Box<dyn Widget>> AppRunner<F> {
                 focus: &mut temp_focus,
                 widget_id: id,
                 has_capture: false,
+                commands: EventCommands::default(),
             };
+            widget.event(&mut ctx, event);
 
-            let response = widget.event(&mut ctx, event);
-
-            // Update focus
-            if response.request_focus {
+            if ctx.commands.request_focus {
                 new_focus = Some(id);
-            } else if response.release_focus && new_focus == Some(id) {
+            } else if ctx.commands.clear_focus && new_focus == Some(id) {
                 new_focus = None;
             }
 
-            (response, new_focus)
+            aggregate.merge(ctx.commands);
+            new_focus
         }
 
+        let runtime = state.signal_runtime.clone();
         let current_focus = state.focus_manager.focused();
-        let (response, new_focus) = dispatch_event(
-            state.root_widget.as_mut(),
-            &state.layout_tree,
-            current_focus,
-            &event,
-        );
+        let mut commands = EventCommands::default();
+        let new_focus = runtime.run_with_current(|| {
+            dispatch_event(
+                state.root_widget.as_mut(),
+                &state.layout_tree,
+                current_focus,
+                &event,
+                &mut commands,
+            )
+        });
 
         // Update focus manager
         if let Some(fid) = new_focus {
@@ -383,11 +404,20 @@ impl<F: FnOnce() -> Box<dyn Widget>> AppRunner<F> {
             state.focus_manager.clear_focus();
         }
 
-        if response.repaint {
+        if commands.request_paint {
             state.needs_repaint = true;
         }
-        if response.relayout {
+        if commands.request_layout {
             state.needs_layout = true;
+        }
+
+        runtime.run_effects(64);
+        let dirty = runtime.take_dirty_flags();
+        if dirty.rebuild || dirty.layout {
+            state.needs_layout = true;
+        }
+        if dirty.paint {
+            state.needs_repaint = true;
         }
 
         // Request redraw if we need to repaint or relayout
@@ -434,10 +464,15 @@ impl<F: FnOnce() -> Box<dyn Widget>> winit::application::ApplicationHandler for 
             let draw_list = DrawList::new();
             let layout_tree = LayoutTree::new();
             let focus_manager = FocusManager::new();
+            let signal_runtime = RuntimeHandle::new();
+            let window_for_scheduler = window;
+            signal_runtime.set_scheduler(move || {
+                window_for_scheduler.request_redraw();
+            });
 
             // Build the UI
             let build_ui = self.build_ui.take().expect("build_ui already called");
-            let root_widget = build_ui();
+            let root_widget = signal_runtime.run_with_current(build_ui);
 
             let scale_factor = window.scale_factor() as f32;
 
@@ -451,6 +486,7 @@ impl<F: FnOnce() -> Box<dyn Widget>> winit::application::ApplicationHandler for 
                 draw_list,
                 layout_tree,
                 focus_manager,
+                signal_runtime,
                 root_widget,
                 start_time: Instant::now(),
                 mouse_pos: glam::Vec2::ZERO,
@@ -751,8 +787,15 @@ impl<F: FnOnce() -> Box<dyn Widget>> winit::application::ApplicationHandler for 
             }
         }
 
-        // Keep rendering event-driven: redraw only when something is dirty.
-        if let Some(state) = self.state.as_ref() {
+        if let Some(state) = self.state.as_mut() {
+            state.signal_runtime.run_effects(64);
+            let dirty = state.signal_runtime.take_dirty_flags();
+            if dirty.rebuild || dirty.layout {
+                state.needs_layout = true;
+            }
+            if dirty.paint {
+                state.needs_repaint = true;
+            }
             if state.needs_layout || state.needs_repaint {
                 state.window.request_redraw();
             }

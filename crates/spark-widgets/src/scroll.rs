@@ -1,6 +1,6 @@
 //! Scrollable container widget.
 
-use crate::{EventContext, EventResponse, PaintContext, Widget};
+use crate::{EventContext, PaintContext, Widget};
 use spark_core::{Color, Rect};
 use spark_input::InputEvent;
 use spark_layout::WidgetId;
@@ -446,7 +446,7 @@ impl Widget for Scroll {
         }
     }
 
-    fn event(&mut self, ctx: &mut EventContext, event: &InputEvent) -> EventResponse {
+    fn event(&mut self, ctx: &mut EventContext, event: &InputEvent) {
         let bounds = ctx.bounds();
 
         self.update_content_size(ctx.layout_tree);
@@ -466,24 +466,20 @@ impl Widget for Scroll {
                     }
                 }
                 self.clamp_offset(bounds);
-                return EventResponse::handled();
+                ctx.stop_propagation();
+                ctx.request_paint();
             }
             InputEvent::PointerMove { pos } => {
                 if let Some(scrollbar) = self.scrollbar_rect(bounds) {
                     let was_hover = self.hover_scrollbar;
                     self.hover_scrollbar = scrollbar.contains(*pos);
                     if was_hover != self.hover_scrollbar {
-                        return EventResponse {
-                            repaint: true,
-                            ..Default::default()
-                        };
+                        ctx.request_paint();
                     }
                 }
             }
             _ => {}
         }
-
-        EventResponse::default()
     }
 
     fn children(&self) -> &[Box<dyn Widget>] {

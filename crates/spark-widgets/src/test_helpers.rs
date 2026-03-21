@@ -20,6 +20,7 @@ pub fn mock_event_context<'a>(
         focus,
         widget_id,
         has_capture,
+        commands: Default::default(),
     }
 }
 
@@ -49,29 +50,4 @@ pub fn pointer_up_at(x: f32, y: f32) -> InputEvent {
         pos: glam::Vec2::new(x, y),
         button: PointerButton::Primary,
     }
-}
-
-/// Assert expected fields on an `EventResponse`. Use in tests to check handled, repaint, capture, etc.
-#[macro_export]
-macro_rules! assert_event_response {
-    ($resp:expr, handled: $handled:expr, repaint: $repaint:expr) => {
-        assert_eq!($resp.handled, $handled, "handled");
-        assert_eq!($resp.repaint, $repaint, "repaint");
-    };
-    ($resp:expr, handled: $handled:expr, repaint: $repaint:expr, capture_pointer: $cap:expr) => {
-        assert_eq!($resp.handled, $handled, "handled");
-        assert_eq!($resp.repaint, $repaint, "repaint");
-        assert_eq!($resp.capture_pointer, $cap, "capture_pointer");
-    };
-    ($resp:expr, handled: $handled:expr, repaint: $repaint:expr, release_pointer: $rel:expr) => {
-        assert_eq!($resp.handled, $handled, "handled");
-        assert_eq!($resp.repaint, $repaint, "repaint");
-        assert_eq!($resp.release_pointer, $rel, "release_pointer");
-    };
-    ($resp:expr, handled: $handled:expr, repaint: $repaint:expr, capture_pointer: $cap:expr, release_pointer: $rel:expr) => {
-        assert_eq!($resp.handled, $handled, "handled");
-        assert_eq!($resp.repaint, $repaint, "repaint");
-        assert_eq!($resp.capture_pointer, $cap, "capture_pointer");
-        assert_eq!($resp.release_pointer, $rel, "release_pointer");
-    };
 }

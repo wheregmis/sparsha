@@ -1,6 +1,6 @@
 //! Checkbox widget.
 
-use crate::{EventContext, EventResponse, PaintContext, Widget};
+use crate::{EventContext, PaintContext, Widget};
 use spark_core::Color;
 use spark_input::InputEvent;
 use spark_layout::WidgetId;
@@ -50,7 +50,7 @@ pub struct Checkbox {
     hovered: bool,
     pressed: bool,
     style: CheckboxStyle,
-    on_toggle: Option<Box<dyn FnMut(bool) + Send + Sync>>,
+    on_toggle: Option<Box<dyn FnMut(bool)>>,
 }
 
 impl Checkbox {
@@ -97,7 +97,7 @@ impl Checkbox {
     }
 
     /// Set toggle callback.
-    pub fn on_toggle(mut self, handler: impl FnMut(bool) + Send + Sync + 'static) -> Self {
+    pub fn on_toggle(mut self, handler: impl FnMut(bool) + 'static) -> Self {
         self.on_toggle = Some(Box::new(handler));
         self
     }
@@ -203,9 +203,9 @@ impl Widget for Checkbox {
         }
     }
 
-    fn event(&mut self, ctx: &mut EventContext, event: &InputEvent) -> EventResponse {
+    fn event(&mut self, ctx: &mut EventContext, event: &InputEvent) {
         if self.disabled {
-            return EventResponse::default();
+            return;
         }
 
         match event {
@@ -213,34 +213,25 @@ impl Widget for Checkbox {
                 let hovered = ctx.contains(*pos);
                 if self.hovered != hovered {
                     self.hovered = hovered;
-                    return EventResponse {
-                        repaint: true,
-                        ..Default::default()
-                    };
+                    ctx.request_paint();
                 }
-                EventResponse::default()
             }
             InputEvent::PointerDown { pos, .. } => {
                 if ctx.contains(*pos) {
                     self.pressed = true;
-                    return EventResponse::capture();
+                    ctx.capture_pointer();
                 }
-                EventResponse::default()
             }
             InputEvent::PointerUp { pos, .. } => {
                 if self.pressed {
                     self.pressed = false;
                     if ctx.contains(*pos) {
                         self.toggle();
-                        return EventResponse::release();
+                        ctx.release_pointer();
+                    } else {
+                        ctx.release_pointer();
                     }
-                    return EventResponse {
-                        release_pointer: true,
-                        repaint: true,
-                        ..Default::default()
-                    };
                 }
-                EventResponse::default()
             }
             InputEvent::KeyDown { .. } => {
                 if ctx.has_focus() {
@@ -248,12 +239,12 @@ impl Widget for Checkbox {
                     let mapper = ActionMapper::new();
                     if mapper.is_action(event, StandardAction::Activate) {
                         self.toggle();
-                        return EventResponse::handled();
+                        ctx.stop_propagation();
+                        ctx.request_paint();
                     }
                 }
-                EventResponse::default()
             }
-            _ => EventResponse::default(),
+            _ => {}
         }
     }
 
@@ -293,11 +284,12 @@ mod tests {
         let (layout_tree, mut focus, layout) = checkbox_env();
         let mut ctx = mock_event_context(layout, &layout_tree, &mut focus, checkbox.id(), false);
 
-        let down = checkbox.event(&mut ctx, &pointer_down_at(10.0, 10.0));
-        assert!(down.capture_pointer);
+        checkbox.event(&mut ctx, &pointer_down_at(10.0, 10.0));
+        assert!(ctx.commands.capture_pointer);
 
-        let up = checkbox.event(&mut ctx, &pointer_up_at(10.0, 10.0));
-        assert!(up.release_pointer);
+        ctx.commands = Default::default();
+        checkbox.event(&mut ctx, &pointer_up_at(10.0, 10.0));
+        assert!(ctx.commands.release_pointer);
         assert!(checkbox.is_checked());
         assert!(toggled.load(Ordering::SeqCst));
     }
@@ -316,8 +308,8 @@ mod tests {
                 spark_input::ui_events::keyboard::Code::Unidentified,
             ),
         };
-        let response = checkbox.event(&mut ctx, &event);
-        assert!(response.handled);
+        checkbox.event(&mut ctx, &event);
+        assert!(ctx.commands.stop_propagation);
         assert!(checkbox.is_checked());
     }
 
@@ -328,8 +320,8 @@ mod tests {
         let (layout_tree, mut focus, layout) = checkbox_env();
         let mut ctx = mock_event_context(layout, &layout_tree, &mut focus, checkbox.id(), false);
 
-        let _ = checkbox.event(&mut ctx, &pointer_down_at(10.0, 10.0));
-        let _ = checkbox.event(&mut ctx, &pointer_up_at(10.0, 10.0));
+        checkbox.event(&mut ctx, &pointer_down_at(10.0, 10.0));
+        checkbox.event(&mut ctx, &pointer_up_at(10.0, 10.0));
         assert!(!checkbox.is_checked());
     }
 }

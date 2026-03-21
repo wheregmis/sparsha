@@ -10,6 +10,7 @@ A GPU-first cross-platform UI framework in Rust, built on `wgpu` and `winit`.
 - **Modern Text Rendering** - Using [parley](https://github.com/linebender/parley) + [swash](https://github.com/dfrg/swash) for shaping and rasterization
 - **W3C-Compliant Events** - Using [ui-events](https://github.com/endoli/ui-events) for input handling
 - **Accessibility** - Using [accesskit](https://github.com/AccessKit/accesskit) for native assistive tech
+- **Reactive Signals** - Signal-driven state with automatic frame invalidation
 
 ## Architecture
 
@@ -21,8 +22,8 @@ A GPU-first cross-platform UI framework in Rust, built on `wgpu` and `winit`.
 │                    spark (facade)                           │
 │              App runner, context, hooks                      │
 ├─────────────────────────────────────────────────────────────┤
-│  spark-widgets  │  spark-input   │  spark-layout          │
-│  (Button, Input) │  (Events, Focus)│  (Flexbox/taffy)        │
+│ spark-signals │ spark-widgets │ spark-input │ spark-layout  │
+│ (Signal/Memo) │ (Button, Input)│ (Events, Focus)│ (Flexbox) │
 ├─────────────────────────────────────────────────────────────┤
 │                    spark-render                             │
 │     DrawList, ShapePass, TextPass, batching, sorting         │
@@ -50,6 +51,7 @@ A GPU-first cross-platform UI framework in Rust, built on `wgpu` and `winit`.
 | `spark-layout` | Flexbox layout via taffy |
 | `spark-text` | Font loading, text shaping, glyph atlas |
 | `spark-input` | Event types, focus management, hit testing |
+| `spark-signals` | Reactive signal runtime (`Signal`, `Memo`, `Effect`) |
 | `spark-widgets` | Widget trait and basic widgets |
 
 ## Quick Start

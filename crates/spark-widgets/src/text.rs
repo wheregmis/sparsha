@@ -1,6 +1,6 @@
 //! Text widget for displaying static text.
 
-use crate::{EventContext, EventResponse, PaintContext, Widget};
+use crate::{EventContext, PaintContext, Widget};
 use spark_core::Color;
 use spark_input::InputEvent;
 use spark_layout::WidgetId;
@@ -153,10 +153,7 @@ impl Widget for Text {
         ctx.draw_text(&self.content, &style, x, y);
     }
 
-    fn event(&mut self, _ctx: &mut EventContext, _event: &InputEvent) -> EventResponse {
-        // Text widgets don't handle events
-        EventResponse::default()
-    }
+    fn event(&mut self, _ctx: &mut EventContext, _event: &InputEvent) {}
 
     fn focusable(&self) -> bool {
         false

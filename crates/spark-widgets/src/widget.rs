@@ -3,87 +3,6 @@
 use spark_input::InputEvent;
 use spark_layout::WidgetId;
 
-/// Response from handling an event.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct EventResponse {
-    /// Whether the event was handled and should not propagate.
-    pub handled: bool,
-    /// Request to capture all pointer events (e.g., during drag).
-    pub capture_pointer: bool,
-    /// Request to release pointer capture.
-    pub release_pointer: bool,
-    /// Request keyboard focus.
-    pub request_focus: bool,
-    /// Release keyboard focus.
-    pub release_focus: bool,
-    /// Request a repaint.
-    pub repaint: bool,
-    /// Request a layout recalculation.
-    pub relayout: bool,
-}
-
-impl EventResponse {
-    /// Create a new empty response.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// The event was handled, stop propagation.
-    pub fn handled() -> Self {
-        Self {
-            handled: true,
-            repaint: true,
-            ..Self::default()
-        }
-    }
-
-    /// Request focus and handle the event.
-    pub fn focus() -> Self {
-        Self {
-            handled: true,
-            request_focus: true,
-            repaint: true,
-            ..Self::default()
-        }
-    }
-
-    /// Capture pointer for dragging.
-    pub fn capture() -> Self {
-        Self {
-            handled: true,
-            capture_pointer: true,
-            repaint: true,
-            ..Self::default()
-        }
-    }
-
-    /// Release pointer capture.
-    pub fn release() -> Self {
-        Self {
-            handled: true,
-            release_pointer: true,
-            repaint: true,
-            ..Self::default()
-        }
-    }
-
-    /// Merge another response into this one.
-    pub fn merge(&mut self, other: EventResponse) {
-        self.handled |= other.handled;
-        self.capture_pointer |= other.capture_pointer;
-        self.release_pointer |= other.release_pointer;
-        self.request_focus |= other.request_focus;
-        self.release_focus |= other.release_focus;
-        self.repaint |= other.repaint;
-        self.relayout |= other.relayout;
-    }
-
-    /// Check if any action was requested.
-    pub fn needs_action(&self) -> bool {
-        self.repaint || self.relayout || self.request_focus || self.capture_pointer
-    }
-}
-
 /// The core widget trait that all UI components implement.
 pub trait Widget {
     /// Get the widget's unique ID.
@@ -106,10 +25,14 @@ pub trait Widget {
         // Default: no-op
     }
 
+    /// Rebuild dynamic children before layout.
+    fn rebuild(&mut self, _ctx: &mut super::BuildContext) {
+        // Default: no-op
+    }
+
     /// Handle an input event.
-    fn event(&mut self, ctx: &mut super::EventContext, event: &InputEvent) -> EventResponse {
+    fn event(&mut self, ctx: &mut super::EventContext, event: &InputEvent) {
         let _ = (ctx, event);
-        EventResponse::default()
     }
 
     /// Get child widgets (for containers).

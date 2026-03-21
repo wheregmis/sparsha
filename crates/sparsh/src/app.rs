@@ -4,6 +4,7 @@ use crate::router::Router;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::router::RouterHost;
 use sparsh_core::Color;
+use sparsh_core::WgpuInitError;
 use sparsh_signals::{ReadSignal, Signal};
 use sparsh_widgets::Theme;
 #[cfg(not(target_arch = "wasm32"))]
@@ -36,6 +37,8 @@ use winit::event::WindowEvent;
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::{Arc, Mutex};
 
 /// Application configuration.
 pub struct AppConfig {
@@ -195,6 +198,47 @@ impl AppTheme {
     }
 }
 
+#[derive(Debug)]
+pub enum AppRunError {
+    EventLoopCreation(String),
+    EventLoopRun(String),
+    WindowCreation(String),
+    GraphicsInit(WgpuInitError),
+    TaskRuntimeInit(String),
+    WebEnvironment(&'static str),
+    DomMount(String),
+    HybridSurfaceInit(String),
+}
+
+impl core::fmt::Display for AppRunError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::EventLoopCreation(message) => {
+                write!(f, "failed to create native event loop: {message}")
+            }
+            Self::EventLoopRun(message) => write!(f, "native event loop failed: {message}"),
+            Self::WindowCreation(message) => write!(f, "failed to create window: {message}"),
+            Self::GraphicsInit(err) => write!(f, "failed to initialize graphics: {err}"),
+            Self::TaskRuntimeInit(message) => {
+                write!(f, "failed to initialize background task runtime: {message}")
+            }
+            Self::WebEnvironment(message) => write!(f, "missing required web environment: {message}"),
+            Self::DomMount(message) => write!(f, "failed to mount DOM renderer: {message}"),
+            Self::HybridSurfaceInit(message) => {
+                write!(f, "failed to initialize hybrid web surfaces: {message}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for AppRunError {}
+
+impl From<WgpuInitError> for AppRunError {
+    fn from(value: WgpuInitError) -> Self {
+        Self::GraphicsInit(value)
+    }
+}
+
 /// The main application struct.
 pub struct App {
     config: AppConfig,
@@ -258,21 +302,41 @@ impl App {
     }
 
     /// Run the application.
+    ///
+    /// Returns an error if the native event loop, window bootstrap, graphics setup,
+    /// or background task runtime cannot be initialized.
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn run(self) -> ! {
-        let event_loop = winit::event_loop::EventLoop::new().unwrap();
-        let runner = AppRunner::new(self.config, self.theme, self.router);
+    pub fn run(self) -> Result<(), AppRunError> {
+        let event_loop = winit::event_loop::EventLoop::new()
+            .map_err(|err| AppRunError::EventLoopCreation(err.to_string()))?;
+        let startup_error = Arc::new(Mutex::new(None));
+        let runner = AppRunner::new(
+            self.config,
+            self.theme,
+            self.router,
+            Arc::clone(&startup_error),
+        );
         let runner_leaked: &'static mut AppRunner = Box::leak(Box::new(runner));
-        event_loop.run_app(runner_leaked).unwrap();
-        std::process::exit(0);
+        let run_result = event_loop.run_app(runner_leaked);
+        let startup_error = match startup_error.lock() {
+            Ok(mut guard) => guard.take(),
+            Err(poisoned) => {
+                log::warn!("recovering from poisoned startup error state");
+                poisoned.into_inner().take()
+            }
+        };
+        if let Some(error) = startup_error {
+            return Err(error);
+        }
+        run_result.map_err(|err| AppRunError::EventLoopRun(err.to_string()))
     }
 
     /// Run the application.
     ///
     /// On web targets this returns after registering the app with the browser event loop.
     #[cfg(target_arch = "wasm32")]
-    pub fn run(self) {
-        crate::web_app::run_dom_app(self.config, self.theme, self.router);
+    pub fn run(self) -> Result<(), AppRunError> {
+        crate::web_app::run_dom_app(self.config, self.theme, self.router)
     }
 }
 
@@ -289,6 +353,7 @@ struct AppRunner {
     theme: AppTheme,
     router: Router,
     state: Option<AppState>,
+    startup_error: Arc<Mutex<Option<AppRunError>>>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -315,17 +380,42 @@ struct AppState {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl AppRunner {
-    fn new(config: AppConfig, theme: AppTheme, router: Router) -> Self {
+    fn new(
+        config: AppConfig,
+        theme: AppTheme,
+        router: Router,
+        startup_error: Arc<Mutex<Option<AppRunError>>>,
+    ) -> Self {
         Self {
             config,
             theme,
             router,
             state: None,
+            startup_error,
         }
     }
 
+    fn fail_startup(
+        &mut self,
+        event_loop: &dyn winit::event_loop::ActiveEventLoop,
+        error: AppRunError,
+    ) {
+        match self.startup_error.lock() {
+            Ok(mut guard) => {
+                *guard = Some(error);
+            }
+            Err(poisoned) => {
+                log::warn!("recovering from poisoned startup error state");
+                *poisoned.into_inner() = Some(error);
+            }
+        }
+        event_loop.exit();
+    }
+
     fn build_layout(&mut self) {
-        let state = self.state.as_mut().unwrap();
+        let Some(state) = self.state.as_mut() else {
+            return;
+        };
         let runtime = state.signal_runtime.clone();
 
         // Clear layout tree
@@ -424,7 +514,9 @@ impl AppRunner {
     }
 
     fn paint(&mut self) {
-        let state = self.state.as_mut().unwrap();
+        let Some(state) = self.state.as_mut() else {
+            return;
+        };
         let runtime = state.signal_runtime.clone();
         state.draw_list.clear();
 
@@ -633,8 +725,14 @@ impl winit::application::ApplicationHandler for AppRunner {
             ));
 
         let window = event_loop
-            .create_window(window_attributes)
-            .expect("create window");
+            .create_window(window_attributes);
+        let window = match window {
+            Ok(window) => window,
+            Err(err) => {
+                self.fail_startup(event_loop, AppRunError::WindowCreation(err.to_string()));
+                return;
+            }
+        };
 
         let window_leaked: &'static mut Box<dyn winit::window::Window> =
             Box::leak(Box::new(window));
@@ -642,8 +740,13 @@ impl winit::application::ApplicationHandler for AppRunner {
 
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let (device, queue, surface_state) =
-                pollster::block_on(init_wgpu(window)).expect("initialize wgpu");
+            let (device, queue, surface_state) = match pollster::block_on(init_wgpu(window)) {
+                Ok(value) => value,
+                Err(err) => {
+                    self.fail_startup(event_loop, AppRunError::from(err));
+                    return;
+                }
+            };
 
             let renderer = Renderer::new(&device, surface_state.config.format);
             let text_system = TextSystem::new(&device);
@@ -651,7 +754,13 @@ impl winit::application::ApplicationHandler for AppRunner {
             let layout_tree = LayoutTree::new();
             let focus_manager = FocusManager::new();
             let signal_runtime = RuntimeHandle::current_or_default();
-            let task_runtime = TaskRuntime::new();
+            let task_runtime = match TaskRuntime::try_new() {
+                Ok(runtime) => runtime,
+                Err(err) => {
+                    self.fail_startup(event_loop, AppRunError::TaskRuntimeInit(err.to_string()));
+                    return;
+                }
+            };
             task_runtime.set_current();
             let window_for_scheduler = window;
             signal_runtime.set_scheduler(move || {
@@ -832,18 +941,27 @@ impl winit::application::ApplicationHandler for AppRunner {
                     return;
                 }
 
-                let state = self.state.as_mut().expect("state checked above");
-
-                if state.needs_layout {
+                if self
+                    .state
+                    .as_ref()
+                    .map(|state| state.needs_layout)
+                    .unwrap_or(false)
+                {
                     self.build_layout();
                 }
 
-                let state = self.state.as_mut().unwrap();
-                if state.needs_repaint {
+                if self
+                    .state
+                    .as_ref()
+                    .map(|state| state.needs_repaint)
+                    .unwrap_or(false)
+                {
                     self.paint();
                 }
 
-                let state = self.state.as_mut().unwrap();
+                let Some(state) = self.state.as_mut() else {
+                    return;
+                };
 
                 // Update renderer
                 let size = state.surface_state.size;
@@ -1054,5 +1172,20 @@ mod tests {
             assert!(dirty.layout);
             assert!(dirty.paint);
         });
+    }
+
+    #[test]
+    fn app_run_error_wraps_graphics_init_errors() {
+        let error = AppRunError::from(WgpuInitError::NoSurfaceFormat);
+        assert!(matches!(error, AppRunError::GraphicsInit(WgpuInitError::NoSurfaceFormat)));
+    }
+
+    #[test]
+    fn app_run_error_formats_task_runtime_failures() {
+        let error = AppRunError::TaskRuntimeInit("startup failed".to_owned());
+        assert_eq!(
+            error.to_string(),
+            "failed to initialize background task runtime: startup failed"
+        );
     }
 }

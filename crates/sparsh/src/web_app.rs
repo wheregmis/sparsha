@@ -4,7 +4,7 @@
 
 use crate::tasks::{TaskRuntime, TaskStatus};
 use crate::{
-    app::{AppConfig, AppTheme},
+    app::{AppConfig, AppRunError, AppTheme},
     dom_renderer::DomRenderer,
     router::{hash_to_path, path_to_hash, Navigator, Router, RouterHost},
     web_surface_manager::{HybridSurfaceManager, SurfaceFrame},
@@ -26,14 +26,28 @@ use std::{
 use wasm_bindgen::{closure::Closure, JsCast};
 use web_sys::{CustomEvent, KeyboardEvent as WebKeyboardEvent, MouseEvent, WheelEvent, Window};
 
-pub(crate) fn run_dom_app(config: AppConfig, theme: AppTheme, router: Router) {
-    let window = web_sys::window().expect("window should be available");
-    let document = window.document().expect("document should be available");
-    let dom_renderer = DomRenderer::mount_to_body(&document).expect("failed to mount DOM renderer");
+fn format_js_error(error: &wasm_bindgen::JsValue) -> String {
+    error
+        .as_string()
+        .unwrap_or_else(|| format!("{error:?}"))
+}
+
+pub(crate) fn run_dom_app(
+    config: AppConfig,
+    theme: AppTheme,
+    router: Router,
+) -> Result<(), AppRunError> {
+    let window = web_sys::window().ok_or(AppRunError::WebEnvironment("window"))?;
+    let document = window
+        .document()
+        .ok_or(AppRunError::WebEnvironment("document"))?;
+    let dom_renderer = DomRenderer::mount_to_body(&document)
+        .map_err(|err| AppRunError::DomMount(format_js_error(&err)))?;
     let surface_manager = HybridSurfaceManager::new(dom_renderer.root())
-        .expect("failed to initialize hybrid surface manager");
+        .map_err(|err| AppRunError::HybridSurfaceInit(format_js_error(&err)))?;
     let signal_runtime = RuntimeHandle::current_or_default();
-    let task_runtime = TaskRuntime::new();
+    let task_runtime =
+        TaskRuntime::try_new().map_err(|err| AppRunError::TaskRuntimeInit(err.to_string()))?;
     task_runtime.set_worker_script_url("sparsh-worker.js?v=2");
     task_runtime.set_current();
     let navigator = router.navigator();
@@ -88,6 +102,7 @@ pub(crate) fn run_dom_app(config: AppConfig, theme: AppTheme, router: Router) {
     }
     install_event_listeners(&window, &state, &pending_animation_frame, &frame_cb);
     start_animation_loop(&window, &state, &pending_animation_frame, &frame_cb);
+    Ok(())
 }
 
 struct WebAppState {
@@ -541,10 +556,15 @@ fn schedule_animation_frame(
     pending_animation_frame.set(true);
 
     let cb_ref = frame_cb.borrow();
-    let cb = cb_ref
-        .as_ref()
-        .expect("animation callback should be initialized");
-    let _ = window.request_animation_frame(cb.as_ref().unchecked_ref());
+    let Some(cb) = cb_ref.as_ref() else {
+        pending_animation_frame.set(false);
+        log::warn!("animation callback requested before initialization");
+        return;
+    };
+    if let Err(err) = window.request_animation_frame(cb.as_ref().unchecked_ref()) {
+        pending_animation_frame.set(false);
+        log::warn!("requestAnimationFrame failed: {:?}", err);
+    }
 }
 
 fn install_event_listeners(

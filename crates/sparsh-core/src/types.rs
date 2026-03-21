@@ -1,7 +1,7 @@
 //! Common types used throughout the framework.
 
 use bytemuck::{Pod, Zeroable};
-pub use glam::{Mat4, Vec2, Vec3, Vec4};
+use glam::Vec2;
 
 /// RGBA color with f32 components (0.0 - 1.0).
 #[repr(C)]

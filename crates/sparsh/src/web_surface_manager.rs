@@ -182,7 +182,11 @@ impl HybridSurfaceManager {
             "top" => &mut state.top,
             "width" => &mut state.width,
             "height" => &mut state.height,
-            _ => unreachable!("unexpected canvas style"),
+            _ => {
+                return Err(wasm_bindgen::JsValue::from_str(
+                    "unexpected canvas style key",
+                ))
+            }
         };
         if *slot == value {
             return Ok(());

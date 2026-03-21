@@ -1,4 +1,7 @@
 //! Reactive signals runtime for Sparsh.
+//!
+//! Stability: the supported 1.0 contract is the public signal/runtime API defined at this crate
+//! root.
 
 use generational_box::{AnyStorage, GenerationalBox, Owner, UnsyncStorage};
 use std::cell::{Cell, RefCell};

@@ -1,14 +1,20 @@
 //! Sparsh - A GPU-first cross-platform UI framework.
 //!
+//! # Stability
+//!
+//! The supported 1.0 API surface is the set of crate-root re-exports documented in this crate
+//! and in the repository docs. Internal modules and implementation details are intentionally kept
+//! out of the semver contract until after 1.0.
+//!
 //! # Example
 //!
 //! ```rust,no_run
 //! use sparsh::prelude::*;
 //!
-//! fn main() {
+//! fn main() -> Result<(), sparsh::AppRunError> {
 //!     // On web, call init_web() first
 //!     #[cfg(target_arch = "wasm32")]
-//!     sparsh::init_web();
+//!     sparsh::init_web()?;
 //!
 //!     App::new()
 //!         .title("My App")
@@ -20,7 +26,7 @@
 //!                 })
 //!                 .fallback("/"),
 //!         )
-//!         .run();
+//!         .run()
 //! }
 //! ```
 //!
@@ -31,7 +37,7 @@
 //! GPU-rendered surface inside the DOM while continuing to paint normal overlays through the
 //! widget tree.
 
-pub mod accessibility;
+mod accessibility;
 mod app;
 mod router;
 mod tasks;
@@ -47,12 +53,12 @@ mod web_surface_manager;
 #[cfg(target_arch = "wasm32")]
 mod web_text_metrics;
 
-pub use app::{App, ThemeInput, ThemeMode, ThemeModeInput};
+pub use app::{App, AppRunError, ThemeInput, ThemeMode, ThemeModeInput};
 pub use router::{hash_to_path, path_to_hash, Navigator, Route, Router};
 pub use sparsh_widgets::{Theme, ThemeColors, ThemeRadii, ThemeSpacing, ThemeTypography};
 pub use tasks::{
     Generation, TaskHandle, TaskId, TaskKey, TaskPayload, TaskPolicy, TaskResult, TaskRuntime,
-    TaskStatus,
+    TaskRuntimeInitError, TaskStatus,
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -64,7 +70,7 @@ pub mod prelude {
         Generation, TaskHandle, TaskId, TaskKey, TaskPayload, TaskPolicy, TaskResult, TaskRuntime,
         TaskStatus,
     };
-    pub use crate::{App, Navigator, Route, Router, ThemeInput, ThemeMode, ThemeModeInput};
+    pub use crate::{App, AppRunError, Navigator, Route, Router, ThemeInput, ThemeMode, ThemeModeInput};
     pub use sparsh_core::{Color, Rect};
     pub use sparsh_input::{InputEvent, Key, Modifiers, PointerButton};
     pub use sparsh_layout::taffy;

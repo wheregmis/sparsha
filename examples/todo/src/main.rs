@@ -4,9 +4,9 @@ use serde_json::json;
 use sparsh::prelude::*;
 use sparsh::widgets::{current_theme, BuildContext, EventContext, PaintContext, WidgetId};
 
-fn main() {
+fn main() -> Result<(), sparsh::AppRunError> {
     #[cfg(target_arch = "wasm32")]
-    sparsh::init_web();
+    sparsh::init_web()?;
 
     #[cfg(not(target_arch = "wasm32"))]
     env_logger::init();
@@ -24,7 +24,7 @@ fn main() {
                 .route("/", move || Box::new(TodoApp::new(theme_mode)))
                 .fallback("/"),
         )
-        .run();
+        .run()
 }
 
 fn toggle_mode(mode: ThemeMode) -> ThemeMode {

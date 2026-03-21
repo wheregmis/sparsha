@@ -1,21 +1,19 @@
 # Sparsh Examples
 
-> Small apps that show how Sparsh behaves in practice.
+> Runnable reference apps for the frozen Milestone 1 surface.
 
-Each example is a normal Cargo binary. Run them natively, or serve the web builds with Trunk.
+Each example is a normal Cargo binary. The examples are intended to demonstrate the stable crate-root APIs rather than internal modules.
 
-## At A Glance
+## Included Examples
 
 | Example | What it shows |
 |---|---|
-| `kitchen-sink` | Full widget showcase, layout patterns, navigation, form handling |
-| `fractal-clock` | Full-screen GPU-heavy scene with time-based animation and controls |
-| `hybrid-overlay` | `DrawSurface` plus retained overlays in a hybrid web layout |
-| `todo` | Reactive state, list rendering, filters, and reusable widgets |
+| `kitchen-sink` | Core widget set, layout composition, theming, scrolling, and input |
+| `fractal-clock` | Draw-heavy rendering with `DrawSurface` and reactive state |
+| `hybrid-overlay` | DOM-backed UI with a hybrid GPU surface on the web path |
+| `todo` | Signals, routing, list rendering, and background task usage in a small app |
 
-## Run Them
-
-Native:
+## Native
 
 ```bash
 cargo run -p kitchen-sink
@@ -24,7 +22,15 @@ cargo run -p hybrid-overlay
 cargo run -p todo
 ```
 
-Web:
+## Web
+
+Each example directory contains the checked-in files needed for a Trunk flow:
+
+- `index.html`
+- `Trunk.toml`
+- `sparsh-worker.js`
+
+Example:
 
 ```bash
 cd examples/kitchen-sink
@@ -34,44 +40,19 @@ trunk serve
 
 The other examples follow the same pattern from their own directories.
 
-## Kitchen Sink
+## What The Examples Intentionally Do Not Promise Yet
 
-Path: `examples/kitchen-sink`
+- Accessibility wiring is not part of the example contract in this milestone
+- `TextInput` examples are single-line only
+- Router usage stays on static paths
+- CI/lighthouse automation is not required to consider the examples healthy for Milestone 1
 
-The most complete example in the repo. It demonstrates widget composition, tab navigation, layout structure, and production-style UI patterns.
+## Verification
 
-- Use it when you want to see the public widget API in one place.
-- Good starting point for learning `Container`, `Button`, `Text`, `TextInput`, `List`, and `Scroll`.
+From the repo root, run:
 
-## Fractal Clock
+```bash
+./scripts/verify-foundation.sh
+```
 
-Path: `examples/fractal-clock`
-
-A full-screen generative demo that turns UTC time into an animated fractal field with layered glow and interactive controls.
-
-- Use it to see Sparsh handle draw-heavy scenes.
-- Good reference for animation, composition, and responsive overlays.
-
-## Hybrid Overlay
-
-Path: `examples/hybrid-overlay`
-
-A compact hybrid rendering sample that paints a GPU scene inside `DrawSurface` while keeping panels and text in the retained widget tree.
-
-- Use it to see the web hybrid path in isolation.
-- Good reference for embedding custom GPU content into Sparsh UI.
-
-## Todo
-
-Path: `examples/todo`
-
-A cross-platform todo app built around signal-driven state, reusable list items, and simple filtering interactions.
-
-- Use it to see how state, events, and widgets fit together in a realistic app.
-- Good reference for a small but complete app structure.
-
-## Notes
-
-- Desktop targets use the native `winit` and `wgpu` stack.
-- Web targets use the same app model with retained DOM rendering by default.
-- Example code and docs live beside the framework, so the examples stay aligned with the public API.
+That covers the native workspace checks plus wasm compile checks for all four examples.

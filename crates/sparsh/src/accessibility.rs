@@ -2,6 +2,7 @@
 //!
 //! This module provides integration with AccessKit for cross-platform
 //! accessibility support (screen readers, alternative input methods, etc.)
+#![allow(dead_code)]
 
 use accesskit::{Action, Node, NodeId, Role, Tree, TreeId, TreeUpdate};
 use sparsh_layout::WidgetId;

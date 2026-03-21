@@ -72,8 +72,15 @@ impl LayoutTree {
 
     /// Create a new node with the given style.
     pub fn new_leaf(&mut self, style: Style) -> WidgetId {
-        let node_id = self.taffy.new_leaf(style).expect("create leaf node");
-        self.mapping.insert(node_id)
+        let node_id = self
+            .taffy
+            .new_leaf(style)
+            .or_else(|err| {
+                log::warn!("failed to create layout leaf, retrying with default style: {err}");
+                self.taffy.new_leaf(Style::default())
+            })
+            .ok();
+        node_id.map_or_else(WidgetId::default, |node_id| self.mapping.insert(node_id))
     }
 
     /// Create a new node with children.
@@ -85,8 +92,18 @@ impl LayoutTree {
         let node_id = self
             .taffy
             .new_with_children(style, &child_nodes)
-            .expect("create node with children");
-        self.mapping.insert(node_id)
+            .or_else(|err| {
+                log::warn!(
+                    "failed to create layout node with children, retrying with default style: {err}"
+                );
+                self.taffy.new_with_children(Style::default(), &child_nodes)
+            })
+            .or_else(|err| {
+                log::warn!("failed to recover layout node creation, falling back to leaf: {err}");
+                self.taffy.new_leaf(Style::default())
+            })
+            .ok();
+        node_id.map_or_else(WidgetId::default, |node_id| self.mapping.insert(node_id))
     }
 
     /// Set the root widget.

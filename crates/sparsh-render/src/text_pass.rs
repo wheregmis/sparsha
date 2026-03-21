@@ -1,10 +1,8 @@
 //! Text rendering pass using a glyph atlas.
 
 use sparsh_core::{
-    buffer::QuadBuffers,
-    pipeline::{Pipeline, PipelineConfig},
-    vertex::{GlyphInstance, Vertex2D},
-    DynamicBuffer, GlobalUniforms,
+    DynamicBuffer, GlobalUniforms, GlyphInstance, Pipeline, PipelineConfig, QuadBuffers,
+    Vertex2D,
 };
 use sparsh_text::GlyphAtlas;
 use wgpu::{

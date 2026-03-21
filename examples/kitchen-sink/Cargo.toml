@@ -8,6 +8,6 @@ name = "kitchen-sink"
 path = "src/main.rs"
 
 [dependencies]
-sparsh = { path = "../../crates/sparsh" }
+sparsha = { path = "../../crates/sparsha" }
 env_logger = { workspace = true }
 log = { workspace = true }

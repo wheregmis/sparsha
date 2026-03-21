@@ -1,15 +1,16 @@
 # 1.0 Candidate API Surface
 
-This document records the curated crate-root surface that Sparsh treats as the 1.0 contract. Raw implementation modules and unfinished subsystems are not part of the semver promise yet.
+This document records the curated crate-root surface that Sparsha treats as the 1.0 contract. Raw implementation modules and unfinished subsystems are not part of the semver promise yet.
 
-## `sparsh`
+## `sparsha`
 
 Stable for 1.0:
 
 - `App`
 - `AppRunError`
 - `Router`, `Route`, `Navigator`, `hash_to_path`, `path_to_hash`
-- theme and accessibility configuration types re-exported from `sparsh-widgets`
+- component authoring helpers: `component`, `Component`, `ComponentContext`, `TaskHook`
+- theme and accessibility configuration types re-exported from `sparsha-widgets`
 - task runtime types: `TaskRuntime`, `TaskRuntimeInitError`, `TaskHandle`, `TaskResult`, `TaskStatus`, `TaskKey`, `TaskId`, `TaskPayload`, `TaskPolicy`, `Generation`
   - supported built-in task kinds in 1.0: `echo`, `sleep_echo`, `analyze_text`
   - custom task registration is not part of the 1.0 contract
@@ -24,7 +25,7 @@ Internal/provisional:
 - web semantic DOM internals
 - hybrid surface manager internals
 
-## `sparsh-core`
+## `sparsha-core`
 
 Stable for 1.0:
 
@@ -40,7 +41,7 @@ Internal/provisional:
 
 - raw `buffer`, `pipeline`, `types`, `vertex`, and `wgpu_init` module paths
 
-## `sparsh-input`
+## `sparsha-input`
 
 Stable for 1.0:
 
@@ -55,7 +56,7 @@ Internal/provisional:
 
 - `ui_events_winit`
 
-## `sparsh-layout`
+## `sparsha-layout`
 
 Stable for 1.0:
 
@@ -65,7 +66,7 @@ Stable for 1.0:
 - `styles`
 - `taffy`
 
-## `sparsh-render`
+## `sparsha-render`
 
 Stable for 1.0:
 
@@ -76,7 +77,7 @@ Stable for 1.0:
 - `ShapePass`
 - `TextPass`
 
-## `sparsh-text`
+## `sparsha-text`
 
 Stable for 1.0:
 
@@ -86,19 +87,20 @@ Stable for 1.0:
 - `GlyphAtlas`
 - `parley`
 
-## `sparsh-signals`
+## `sparsha-signals`
 
 Stable for 1.0:
 
 - the public signal/runtime API exposed at the crate root, including `Signal`, `ReadSignal`, `WriteSignal`, `Memo`, `Effect`, `RuntimeHandle`, `DirtyFlags`, and `SubscriberKind`
 
-## `sparsh-widgets`
+## `sparsha-widgets`
 
 Stable for 1.0:
 
-- widgets: `Container`, `Button`, `Checkbox`, `Text`, `TextInput`, `List`, `Scroll`, `DrawSurface`
+- widgets/helpers: `Container`, `Button`, `Checkbox`, `Text`, `TextInput`, `List`, `Scroll`, `DrawSurface`, `ForEach`
 - editing/accessibility widgets: `TextArea`, `Semantics`
 - accessibility metadata types: `AccessibilityInfo`, `AccessibilityRole`, `AccessibilityAction`
+- `IntoWidget`
 - widget/theme/context types re-exported from the crate root
 - `styles`, `taffy`, and `WidgetId` convenience re-exports
 

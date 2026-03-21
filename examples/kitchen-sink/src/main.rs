@@ -1,16 +1,16 @@
 //! Kitchen Sink - Interactive widget testing
 
-use sparsh::prelude::*;
+use sparsha::prelude::*;
 
-fn main() -> Result<(), sparsh::AppRunError> {
+fn main() -> Result<(), sparsha::AppRunError> {
     #[cfg(target_arch = "wasm32")]
-    sparsh::init_web()?;
+    sparsha::init_web()?;
 
     #[cfg(not(target_arch = "wasm32"))]
     env_logger::init();
 
     App::new()
-        .title("Kitchen Sink - Sparsh")
+        .title("Kitchen Sink - Sparsha")
         .size(1200, 900)
         .theme(Theme::dark())
         .router(Router::new().route("/", build_ui).fallback("/"))

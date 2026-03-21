@@ -13,8 +13,8 @@ test("kitchen sink web flow matches the native interaction model", async ({
   });
 
   await page.goto(baseURL);
-  await expect(page).toHaveTitle(/Kitchen Sink - Sparsh/);
-  await expect(page.locator(".sparsh-dom-root")).toBeVisible();
+  await expect(page).toHaveTitle(/Kitchen Sink - Sparsha/);
+  await expect(page.locator(".sparsha-dom-root")).toBeVisible();
 
   const checkbox = page.getByRole("checkbox", {
     name: "Focusable checkbox in the same tab order",

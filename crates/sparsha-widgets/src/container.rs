@@ -48,8 +48,13 @@ impl Container {
     }
 
     /// Add multiple child widgets.
-    pub fn children(mut self, widgets: impl IntoIterator<Item = Box<dyn Widget>>) -> Self {
-        self.children.extend(widgets);
+    pub fn children<I, W>(mut self, widgets: I) -> Self
+    where
+        I: IntoIterator<Item = W>,
+        W: IntoWidget,
+    {
+        self.children
+            .extend(widgets.into_iter().map(IntoWidget::into_widget));
         self
     }
 

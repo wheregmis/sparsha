@@ -6,7 +6,8 @@ mod accessibility;
 mod button;
 mod checkbox;
 mod container;
-mod context;
+#[doc(hidden)]
+pub mod context;
 mod control_state;
 mod draw_surface;
 mod for_each;
@@ -27,8 +28,7 @@ pub use button::{Button, ButtonState, ButtonStyle};
 pub use checkbox::{Checkbox, CheckboxStyle};
 pub use container::Container;
 pub use context::{
-    BuildContext, BuildStateStore, EventCommands, EventContext, LayoutContext, PaintCommands,
-    PaintContext,
+    BuildContext, EventCommands, EventContext, LayoutContext, PaintCommands, PaintContext,
 };
 pub use draw_surface::{DrawSurface, DrawSurfaceContext};
 pub use for_each::ForEach;

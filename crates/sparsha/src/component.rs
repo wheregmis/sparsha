@@ -1,7 +1,8 @@
 use crate::{Navigator, TaskKey, TaskPayload, TaskResult, TaskResultSubscription, TaskRuntime};
 use sparsha_layout::WidgetId;
 use sparsha_signals::{Effect, Memo, Signal};
-use sparsha_widgets::{BuildContext, BuildStateStore, IntoWidget, Theme, Widget};
+use sparsha_widgets::context::BuildStateStore;
+use sparsha_widgets::{BuildContext, IntoWidget, Theme, Widget};
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -70,6 +71,23 @@ struct TaskHookInner {
     pending: Signal<bool>,
     result: Signal<Option<TaskResult>>,
     _subscription: TaskResultSubscription,
+}
+
+struct TaskHookSlot {
+    task_key: TaskKey,
+    task_kind: String,
+    hook: TaskHook,
+}
+
+impl TaskHookSlot {
+    fn new(runtime: TaskRuntime, task_key: TaskKey, task_kind: String) -> Self {
+        let hook = TaskHook::new(runtime, task_key.clone(), task_kind.clone());
+        Self {
+            task_key,
+            task_kind,
+            hook,
+        }
+    }
 }
 
 /// A keyed task binding owned by a component hook.
@@ -198,8 +216,12 @@ impl<'a> ComponentContext<'a> {
         let runtime = self.task_runtime();
         let task_key = task_key.into();
         let task_kind = task_kind.into();
-        self.next_hook(|| TaskHook::new(runtime, task_key, task_kind))
-            .clone()
+        let slot = self
+            .next_hook(|| TaskHookSlot::new(runtime.clone(), task_key.clone(), task_kind.clone()));
+        if slot.task_key != task_key || slot.task_kind != task_kind {
+            *slot = TaskHookSlot::new(runtime, task_key, task_kind);
+        }
+        slot.hook.clone()
     }
 }
 
@@ -342,6 +364,48 @@ mod tests {
             assert!(matches!(result.status, TaskStatus::Success(_)));
             assert!(!hook.pending());
             assert!(!received.is_empty());
+        });
+    }
+
+    #[test]
+    fn task_hook_rebinds_when_key_changes() {
+        let runtime = RuntimeHandle::new();
+        runtime.run_with_current(|| {
+            let task_runtime = TaskRuntime::new();
+            let task_key = Signal::new(TaskKey::new("todos.a"));
+            let hook_slot = Signal::new(None::<TaskHook>);
+            let mut store = ComponentStateStore::default();
+
+            let mut build = BuildContext::default();
+            build.set_path(&[0]);
+            build.insert_resource(task_runtime.clone());
+            // SAFETY: the test owns `store` for the full rebuild and does not
+            // alias it while `build` is using it.
+            unsafe { build.set_state_store(&mut store) };
+
+            let mut host = component(move |cx| {
+                hook_slot.set(Some(cx.use_task(task_key.get(), "echo")));
+                Text::new("task")
+            });
+            host.rebuild(&mut build);
+
+            task_key.set(TaskKey::new("todos.b"));
+            host.rebuild(&mut build);
+
+            let hook = hook_slot.get().expect("task hook");
+            hook.spawn(json!({"text": "hello"}));
+
+            let deadline = std::time::Instant::now() + std::time::Duration::from_millis(1600);
+            while std::time::Instant::now() < deadline {
+                task_runtime.drain_completed(|_| {});
+                if hook.result().is_some() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+
+            let result = hook.result().expect("completed task result");
+            assert_eq!(result.task_key, Some(TaskKey::new("todos.b")));
         });
     }
 }

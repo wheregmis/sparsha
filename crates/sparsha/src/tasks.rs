@@ -9,6 +9,8 @@ use serde_json::Value;
 use std::{
     cell::RefCell,
     collections::HashMap,
+    marker::PhantomData,
+    rc::Rc,
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
         mpsc, Arc, Mutex, MutexGuard,
@@ -35,7 +37,7 @@ thread_local! {
     static RESULT_HANDLERS: RefCell<HashMap<u64, Vec<(u64, ResultHandler)>>> = RefCell::new(HashMap::new());
 }
 
-type ResultHandler = Box<dyn FnMut(TaskResult)>;
+type ResultHandler = Rc<RefCell<Box<dyn FnMut(TaskResult)>>>;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TaskRuntimeInitError {
@@ -141,6 +143,7 @@ pub struct TaskResultSubscription {
     runtime_id: u64,
     handler_id: u64,
     active: bool,
+    _thread_affinity: PhantomData<Rc<()>>,
 }
 
 impl TaskResultSubscription {
@@ -280,6 +283,7 @@ impl TaskRuntime {
         self.inner.in_flight.load(Ordering::Relaxed) > 0
     }
 
+    #[must_use]
     pub fn on_result(&self, handler: impl FnMut(TaskResult) + 'static) -> TaskResultSubscription {
         let handler_id = NEXT_RESULT_HANDLER_ID.fetch_add(1, Ordering::Relaxed);
         RESULT_HANDLERS.with(|handlers| {
@@ -287,12 +291,13 @@ impl TaskRuntime {
                 .borrow_mut()
                 .entry(self.id)
                 .or_default()
-                .push((handler_id, Box::new(handler)));
+                .push((handler_id, Rc::new(RefCell::new(Box::new(handler)))));
         });
         TaskResultSubscription {
             runtime_id: self.id,
             handler_id,
             active: true,
+            _thread_affinity: PhantomData,
         }
     }
 
@@ -437,10 +442,17 @@ impl TaskRuntime {
 
     fn notify_handlers(&self, result: TaskResult) {
         RESULT_HANDLERS.with(|handlers| {
-            if let Some(list) = handlers.borrow_mut().get_mut(&self.id) {
-                for (_, handler) in list.iter_mut() {
-                    handler(result.clone());
-                }
+            let handlers = handlers
+                .borrow()
+                .get(&self.id)
+                .map(|list| {
+                    list.iter()
+                        .map(|(_, handler)| Rc::clone(handler))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            for handler in handlers {
+                (*handler.borrow_mut())(result.clone());
             }
         });
     }
@@ -1066,7 +1078,7 @@ fn create_worker_slot(
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
-    use std::{sync::Mutex, thread, time::Duration as StdDuration};
+    use std::{cell::RefCell, sync::Mutex, thread, time::Duration as StdDuration};
 
     static TASK_TEST_LOCK: Mutex<()> = Mutex::new(());
 
@@ -1160,5 +1172,27 @@ mod tests {
             *slot.borrow_mut() = None;
         });
         FORCE_NATIVE_RUNTIME_INIT_FAILURE.store(false, Ordering::Relaxed);
+    }
+
+    #[test]
+    fn reentrant_result_handlers_do_not_borrow_mut_registry_twice() {
+        let _guard = TASK_TEST_LOCK.lock().unwrap();
+        let runtime = TaskRuntime::new();
+        runtime.set_current();
+
+        let nested_subscription = Rc::new(RefCell::new(None::<TaskResultSubscription>));
+        let nested_subscription_ref = Rc::clone(&nested_subscription);
+        let runtime_for_handler = runtime.clone();
+        let _outer_subscription = runtime.on_result(move |_| {
+            if nested_subscription_ref.borrow().is_none() {
+                let subscription = runtime_for_handler.on_result(|_| {});
+                *nested_subscription_ref.borrow_mut() = Some(subscription);
+            }
+        });
+
+        runtime.spawn("echo", json!({ "value": 1 }));
+        let results = drain_for(&runtime, 300);
+        assert_eq!(results.len(), 1);
+        assert!(nested_subscription.borrow().is_some());
     }
 }

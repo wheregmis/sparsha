@@ -1557,6 +1557,17 @@ fn install_event_listeners(
                     .borrow_mut()
                     .handle_event(InputEvent::KeyDown { event: synthetic });
                 clipboard_text = state.borrow_mut().pending_clipboard_write.take();
+                if clipboard_text.is_none() {
+                    let mut ctrl_synthetic = sparsha_input::KeyboardEvent::key_down(
+                        sparsha_input::Key::Character("x".to_owned()),
+                        sparsha_input::ui_events::keyboard::Code::Unidentified,
+                    );
+                    ctrl_synthetic.modifiers = ctrl_shortcut_modifiers();
+                    state.borrow_mut().handle_event(InputEvent::KeyDown {
+                        event: ctrl_synthetic,
+                    });
+                    clipboard_text = state.borrow_mut().pending_clipboard_write.take();
+                }
             }
 
             let Some(text) = clipboard_text.or(fallback_text) else {
@@ -1894,6 +1905,10 @@ fn browser_modifiers_from_flags(shift: bool, ctrl: bool, alt: bool, meta: bool) 
 
 fn primary_shortcut_modifiers() -> Modifiers {
     Modifiers::META
+}
+
+fn ctrl_shortcut_modifiers() -> Modifiers {
+    Modifiers::CONTROL
 }
 
 fn is_plain_printable_key(key: &str, ctrl: bool, alt: bool, meta: bool) -> bool {

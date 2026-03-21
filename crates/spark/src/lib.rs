@@ -9,7 +9,7 @@
 //!     // On web, call init_web() first
 //!     #[cfg(target_arch = "wasm32")]
 //!     spark::init_web();
-//!     
+//!
 //!     App::new()
 //!         .with_title("My App")
 //!         .run(|| {
@@ -18,6 +18,13 @@
 //!         });
 //! }
 //! ```
+//!
+//! # Hybrid Rendering On Web
+//!
+//! Spark keeps retained DOM rendering as the default on web.
+//! For scenes that are fundamentally draw-heavy, use [`widgets::DrawSurface`] to embed a
+//! GPU-rendered surface inside the DOM while continuing to paint normal overlays through the
+//! widget tree.
 
 pub mod accessibility;
 mod app;

@@ -1,4 +1,11 @@
 //! Draw-surface widget for draw-heavy scenes.
+//!
+//! `DrawSurface` is the opt-in bridge between Spark's normal retained widget tree and a
+//! scene-style draw callback.
+//!
+//! On native targets the scene is rendered through the shared GPU renderer.
+//! On web targets Spark can embed the scene inside a dedicated `<canvas>` while still allowing
+//! the widget to paint normal DOM-backed overlays through the regular `paint()` path.
 
 use crate::{PaintCommands, PaintContext, Widget};
 use spark_core::{Color, Point, Rect};
@@ -14,6 +21,11 @@ pub struct DrawSurface {
     scene: SceneCallback,
 }
 
+/// Paint context for a `DrawSurface` scene callback.
+///
+/// The scene callback should use this for draw-heavy, animation-heavy content. Regular widget
+/// overlays such as labels, controls, or HUD panels should usually stay in the widget's normal
+/// `paint()` path so they continue to participate in the default retained renderer.
 pub struct DrawSurfaceContext<'a> {
     pub draw_list: &'a mut DrawList,
     pub bounds: Rect,

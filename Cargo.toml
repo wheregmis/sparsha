@@ -9,6 +9,7 @@ members = [
     "crates/spark-widgets",
     "crates/spark",
     "examples/fractal-clock",
+    "examples/hybrid-overlay",
     "examples/kitchen-sink",
     "examples/todo",
 ]

@@ -101,6 +101,90 @@ struct WebAppState {
     surface_manager: HybridSurfaceManager,
 }
 
+fn paint_widget_subtree(
+    widget: &dyn Widget,
+    layout_tree: &LayoutTree,
+    focus: &FocusManager,
+    draw_list: &mut DrawList,
+    surface_frames: &mut Vec<SurfaceFrame>,
+    scale_factor: f32,
+    text_system_ptr: *mut TextSystem,
+    elapsed_time: f32,
+    paint_commands: &mut PaintCommands,
+) {
+    let id = widget.id();
+    if let Some(layout) = layout_tree.get_absolute_layout(id) {
+        if let Some(surface) = widget.draw_surface() {
+            let mut local_commands = PaintCommands::default();
+            let mut surface_draw_list = DrawList::new();
+            let mut surface_ctx = spark_widgets::DrawSurfaceContext {
+                draw_list: &mut surface_draw_list,
+                bounds: spark_core::Rect::new(
+                    0.0,
+                    0.0,
+                    layout.bounds.width * scale_factor,
+                    layout.bounds.height * scale_factor,
+                ),
+                scale_factor,
+                elapsed_time,
+                commands: &mut local_commands,
+            };
+            surface.scene(&mut surface_ctx);
+            surface_frames.push(SurfaceFrame {
+                css_bounds: layout.bounds,
+                scale_factor,
+                elapsed_time,
+                draw_list: surface_draw_list,
+            });
+            paint_commands.merge(local_commands);
+        }
+
+        let text_system = unsafe { &mut *text_system_ptr };
+        let mut local_commands = PaintCommands::default();
+        {
+            let mut ctx = PaintContext {
+                draw_list,
+                layout,
+                layout_tree,
+                focus,
+                widget_id: id,
+                scale_factor: 1.0,
+                text_system,
+                elapsed_time,
+                commands: &mut local_commands,
+            };
+            widget.paint(&mut ctx);
+        }
+        for child in widget.children() {
+            paint_widget_subtree(
+                child.as_ref(),
+                layout_tree,
+                focus,
+                draw_list,
+                surface_frames,
+                scale_factor,
+                text_system_ptr,
+                elapsed_time,
+                &mut local_commands,
+            );
+        }
+        let text_system = unsafe { &mut *text_system_ptr };
+        let mut ctx = PaintContext {
+            draw_list,
+            layout,
+            layout_tree,
+            focus,
+            widget_id: id,
+            scale_factor: 1.0,
+            text_system,
+            elapsed_time,
+            commands: &mut local_commands,
+        };
+        widget.paint_after_children(&mut ctx);
+        paint_commands.merge(local_commands);
+    }
+}
+
 impl WebAppState {
     fn update_viewport(&mut self) {
         if let Some(window) = web_sys::window() {
@@ -223,92 +307,8 @@ impl WebAppState {
         let text_system_ptr = &mut self.text_system as *mut TextSystem;
         let mut paint_commands = PaintCommands::default();
 
-        fn paint_widget(
-            widget: &dyn Widget,
-            layout_tree: &LayoutTree,
-            focus: &FocusManager,
-            draw_list: &mut DrawList,
-            surface_frames: &mut Vec<SurfaceFrame>,
-            scale_factor: f32,
-            text_system_ptr: *mut TextSystem,
-            elapsed_time: f32,
-            paint_commands: &mut PaintCommands,
-        ) {
-            let id = widget.id();
-            if let Some(layout) = layout_tree.get_absolute_layout(id) {
-                if let Some(surface) = widget.draw_surface() {
-                    let mut local_commands = PaintCommands::default();
-                    let mut surface_draw_list = DrawList::new();
-                    let mut surface_ctx = spark_widgets::DrawSurfaceContext {
-                        draw_list: &mut surface_draw_list,
-                        bounds: spark_core::Rect::new(
-                            0.0,
-                            0.0,
-                            layout.bounds.width * scale_factor,
-                            layout.bounds.height * scale_factor,
-                        ),
-                        scale_factor,
-                        elapsed_time,
-                        commands: &mut local_commands,
-                    };
-                    surface.scene(&mut surface_ctx);
-                    surface_frames.push(SurfaceFrame {
-                        css_bounds: layout.bounds,
-                        scale_factor,
-                        elapsed_time,
-                        draw_list: surface_draw_list,
-                    });
-                    paint_commands.merge(local_commands);
-                }
-
-                let text_system = unsafe { &mut *text_system_ptr };
-                let mut local_commands = PaintCommands::default();
-                {
-                    let mut ctx = PaintContext {
-                        draw_list,
-                        layout,
-                        layout_tree,
-                        focus,
-                        widget_id: id,
-                        scale_factor: 1.0,
-                        text_system,
-                        elapsed_time,
-                        commands: &mut local_commands,
-                    };
-                    widget.paint(&mut ctx);
-                }
-                for child in widget.children() {
-                    paint_widget(
-                        child.as_ref(),
-                        layout_tree,
-                        focus,
-                        draw_list,
-                        surface_frames,
-                        scale_factor,
-                        text_system_ptr,
-                        elapsed_time,
-                        &mut local_commands,
-                    );
-                }
-                let text_system = unsafe { &mut *text_system_ptr };
-                let mut ctx = PaintContext {
-                    draw_list,
-                    layout,
-                    layout_tree,
-                    focus,
-                    widget_id: id,
-                    scale_factor: 1.0,
-                    text_system,
-                    elapsed_time,
-                    commands: &mut local_commands,
-                };
-                widget.paint_after_children(&mut ctx);
-                paint_commands.merge(local_commands);
-            }
-        }
-
         runtime.with_tracking(SubscriberKind::Paint, || {
-            paint_widget(
+            paint_widget_subtree(
                 self.root_widget.as_ref(),
                 &self.layout_tree,
                 &self.focus_manager,
@@ -775,4 +775,88 @@ fn map_browser_key(key: String) -> Option<spark_input::Key> {
         value if value.chars().count() == 1 => Key::Character(value.to_string()),
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use spark_core::{Color, Rect};
+    use spark_layout::taffy;
+    use spark_widgets::DrawSurface;
+
+    struct HybridOverlayWidget {
+        id: spark_layout::WidgetId,
+        surface: DrawSurface,
+    }
+
+    impl HybridOverlayWidget {
+        fn new() -> Self {
+            Self {
+                id: spark_layout::WidgetId::default(),
+                surface: DrawSurface::new(|ctx| {
+                    ctx.fill_rect(ctx.bounds, Color::from_hex(0x112233));
+                })
+                .fill(),
+            }
+        }
+    }
+
+    impl Widget for HybridOverlayWidget {
+        fn id(&self) -> spark_layout::WidgetId {
+            self.id
+        }
+
+        fn set_id(&mut self, id: spark_layout::WidgetId) {
+            self.id = id;
+        }
+
+        fn style(&self) -> taffy::Style {
+            taffy::Style {
+                size: taffy::prelude::Size {
+                    width: taffy::prelude::length(240.0),
+                    height: taffy::prelude::length(140.0),
+                },
+                ..Default::default()
+            }
+        }
+
+        fn paint(&self, ctx: &mut PaintContext) {
+            ctx.fill_rect(Rect::new(12.0, 12.0, 80.0, 24.0), Color::WHITE);
+        }
+
+        fn draw_surface(&self) -> Option<&DrawSurface> {
+            Some(&self.surface)
+        }
+    }
+
+    #[test]
+    fn hybrid_widget_keeps_surface_and_normal_paint() {
+        let mut widget = HybridOverlayWidget::new();
+        let mut layout_tree = LayoutTree::new();
+        let root_id = layout_tree.new_leaf(widget.style());
+        widget.set_id(root_id);
+        layout_tree.set_root(root_id);
+        layout_tree.compute_layout(240.0, 140.0);
+
+        let focus = FocusManager::new();
+        let mut draw_list = DrawList::new();
+        let mut surface_frames = Vec::new();
+        let mut text_system = TextSystem::new_headless();
+        let mut commands = PaintCommands::default();
+
+        paint_widget_subtree(
+            &widget,
+            &layout_tree,
+            &focus,
+            &mut draw_list,
+            &mut surface_frames,
+            2.0,
+            &mut text_system as *mut TextSystem,
+            0.0,
+            &mut commands,
+        );
+
+        assert_eq!(surface_frames.len(), 1);
+        assert_eq!(draw_list.len(), 1);
+    }
 }

@@ -80,6 +80,27 @@ trunk serve
 
 Then open `http://127.0.0.1:8082`.
 
+## Hybrid Overlay
+
+**Path:** `examples/hybrid-overlay`
+
+A smaller hybrid-rendering example that uses `DrawSurface` for the animated GPU background while
+keeping the info panels and status text on the normal retained widget path.
+
+**Run:**
+```bash
+cargo run -p hybrid-overlay
+```
+
+For web (WASM + Trunk):
+```bash
+cd examples/hybrid-overlay
+rustup target add wasm32-unknown-unknown
+trunk serve
+```
+
+Then open `http://127.0.0.1:8083`.
+
 ## Todo
 
 **Path:** `examples/todo`

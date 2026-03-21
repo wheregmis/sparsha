@@ -3,7 +3,7 @@
 //! Native uses Tokio worker threads. Web uses dedicated Web Workers.
 
 use serde::{Deserialize, Serialize};
-#[cfg(any(not(target_arch = "wasm32"), test))]
+#[cfg(any(not(target_arch = "wasm32"), all(test, not(target_arch = "wasm32"))))]
 use serde_json::json;
 use serde_json::Value;
 use std::{
@@ -844,13 +844,10 @@ fn create_worker_slot(
     })
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
     use std::{thread, time::Duration as StdDuration};
-
-    #[cfg(target_arch = "wasm32")]
-    compile_error!("task runtime tests are native-only");
 
     fn drain_for(runtime: &TaskRuntime, timeout_ms: u64) -> Vec<TaskResult> {
         let mut results = Vec::new();

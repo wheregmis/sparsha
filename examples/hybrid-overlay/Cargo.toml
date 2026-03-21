@@ -1,0 +1,13 @@
+[package]
+name = "hybrid-overlay"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "hybrid-overlay"
+path = "src/main.rs"
+
+[dependencies]
+spark = { path = "../../crates/spark" }
+env_logger = { workspace = true }
+log = { workspace = true }

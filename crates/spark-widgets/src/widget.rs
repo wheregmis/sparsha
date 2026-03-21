@@ -26,6 +26,10 @@ pub trait Widget {
     }
 
     /// Optional draw-heavy surface hook for runtimes that support hybrid rendering.
+    ///
+    /// Returning `Some(&DrawSurface)` does not replace the widget's normal paint path.
+    /// Runtimes should render the surface scene and still allow the widget to paint retained
+    /// overlays and descendants through `paint()` / `paint_after_children()`.
     fn draw_surface(&self) -> Option<&crate::DrawSurface> {
         None
     }

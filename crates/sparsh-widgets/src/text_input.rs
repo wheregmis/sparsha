@@ -949,8 +949,7 @@ mod tests {
             },
         );
 
-        let mut text_ctx =
-            mock_event_context(layout, &layout_tree, &mut focus, input.id(), false);
+        let mut text_ctx = mock_event_context(layout, &layout_tree, &mut focus, input.id(), false);
         input.event(
             &mut text_ctx,
             &InputEvent::TextInput {

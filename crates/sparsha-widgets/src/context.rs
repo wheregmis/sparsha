@@ -17,12 +17,16 @@ pub trait BuildStateStore {
     fn store_boxed_state(&mut self, path: Vec<usize>, state: Box<dyn Any>);
 }
 
+type BuildStateMarkPathUsedFn = unsafe fn(*mut (), &[usize]);
+type BuildStateTakeBoxedStateFn = unsafe fn(*mut (), &[usize]) -> Option<Box<dyn Any>>;
+type BuildStateStoreBoxedStateFn = unsafe fn(*mut (), Vec<usize>, Box<dyn Any>);
+
 #[derive(Clone, Copy)]
 struct BuildStateStoreOps {
     ptr: *mut (),
-    mark_path_used: unsafe fn(*mut (), &[usize]),
-    take_boxed_state: unsafe fn(*mut (), &[usize]) -> Option<Box<dyn Any>>,
-    store_boxed_state: unsafe fn(*mut (), Vec<usize>, Box<dyn Any>),
+    mark_path_used: BuildStateMarkPathUsedFn,
+    take_boxed_state: BuildStateTakeBoxedStateFn,
+    store_boxed_state: BuildStateStoreBoxedStateFn,
 }
 
 /// Context for rebuilding dynamic widget children.

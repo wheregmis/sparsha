@@ -28,6 +28,7 @@ mod dom_renderer;
 mod web;
 #[cfg(target_arch = "wasm32")]
 mod web_app;
+#[cfg(target_arch = "wasm32")]
 mod web_text_metrics;
 
 pub use app::{App, AppConfig};

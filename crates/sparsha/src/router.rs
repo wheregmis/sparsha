@@ -9,6 +9,7 @@ use sparsha_widgets::{
 };
 use std::{
     cell::{Cell, RefCell},
+    rc::Rc,
     sync::Arc,
 };
 
@@ -341,13 +342,13 @@ struct RouteLayerState {
 struct RouteLayer {
     id: WidgetId,
     interactive: bool,
-    state: Arc<RouteLayerState>,
+    state: Rc<RouteLayerState>,
     child: Box<dyn Widget>,
     translated: Cell<bool>,
 }
 
 impl RouteLayer {
-    fn new(child: Box<dyn Widget>, state: Arc<RouteLayerState>, interactive: bool) -> Self {
+    fn new(child: Box<dyn Widget>, state: Rc<RouteLayerState>, interactive: bool) -> Self {
         Self {
             id: WidgetId::default(),
             interactive,
@@ -428,16 +429,16 @@ struct HostTransition {
     cleanup_requested: bool,
     config: RouterTransition,
     direction: NavigationDirection,
-    outgoing_state: Arc<RouteLayerState>,
-    incoming_state: Arc<RouteLayerState>,
+    outgoing_state: Rc<RouteLayerState>,
+    incoming_state: Rc<RouteLayerState>,
 }
 
 impl HostTransition {
     fn new(
         config: RouterTransition,
         direction: NavigationDirection,
-        outgoing_state: Arc<RouteLayerState>,
-        incoming_state: Arc<RouteLayerState>,
+        outgoing_state: Rc<RouteLayerState>,
+        incoming_state: Rc<RouteLayerState>,
     ) -> Self {
         Self {
             animation: ImplicitAnimation::new(0.0),
@@ -497,7 +498,7 @@ impl RouterHost {
 fn build_route_layer(child: Box<dyn Widget>, interactive: bool) -> Box<dyn Widget> {
     Box::new(RouteLayer::new(
         child,
-        Arc::new(RouteLayerState::default()),
+        Rc::new(RouteLayerState::default()),
         interactive,
     ))
 }
@@ -509,16 +510,16 @@ fn build_transition_layers(
     config: RouterTransition,
     direction: NavigationDirection,
 ) -> (Vec<Box<dyn Widget>>, HostTransition) {
-    let outgoing_state = Arc::new(RouteLayerState::default());
-    let incoming_state = Arc::new(RouteLayerState::default());
+    let outgoing_state = Rc::new(RouteLayerState::default());
+    let incoming_state = Rc::new(RouteLayerState::default());
     let outgoing = Box::new(RouteLayer::new(
         router.build_for_path(from_path),
-        Arc::clone(&outgoing_state),
+        Rc::clone(&outgoing_state),
         false,
     ));
     let incoming = Box::new(RouteLayer::new(
         router.build_for_path(to_path),
-        Arc::clone(&incoming_state),
+        Rc::clone(&incoming_state),
         true,
     ));
     let transition = HostTransition::new(config, direction, outgoing_state, incoming_state);

@@ -184,139 +184,136 @@ pub(crate) fn collect_accessibility_tree(
         focused_node: Option<u64>,
     }
 
-    fn build_snapshot(
-        widget: &dyn Widget,
-        layout_tree: &LayoutTree,
-        path: &[usize],
-        info: AccessibilityInfo,
-        children: Vec<u64>,
-    ) -> AccessibilityNodeSnapshot {
-        let bounds = layout_tree
-            .get_absolute_layout(widget.id())
-            .map(|layout| layout.bounds)
-            .unwrap_or(sparsha_core::Rect::ZERO);
-        AccessibilityNodeSnapshot {
-            id: accessibility_node_id(path),
-            path: path.to_vec(),
-            role: info.role.unwrap_or(AccessibilityRole::GenericContainer),
-            label: info.label,
-            description: info.description,
-            value: info.value,
-            hidden: info.hidden,
-            disabled: info.disabled,
-            checked: info.checked,
-            actions: info.actions,
-            bounds,
-            children,
-        }
+    struct AccessibilityCollector<'a> {
+        layout_tree: &'a LayoutTree,
+        focused_path: Option<&'a WidgetPath>,
+        nodes: Vec<AccessibilityNodeSnapshot>,
+        node_paths: HashMap<u64, WidgetPath>,
+        node_indices: HashMap<u64, usize>,
     }
 
-    fn visit(
-        widget: &dyn Widget,
-        layout_tree: &LayoutTree,
-        focused_path: Option<&WidgetPath>,
-        runtime_active: bool,
-        path: &mut WidgetPath,
-        nodes: &mut Vec<AccessibilityNodeSnapshot>,
-        node_paths: &mut HashMap<u64, WidgetPath>,
-        node_indices: &mut HashMap<u64, usize>,
-    ) -> SubtreeResult {
-        if !runtime_active {
-            return SubtreeResult::default();
-        }
-
-        let mut root_nodes = Vec::new();
-        let mut first_descendant = None;
-        let mut focused_node = None;
-
-        for (index, child) in widget.children().iter().enumerate() {
-            path.push(widget.child_path_key(index));
-            let child_result = visit(
-                child.as_ref(),
-                layout_tree,
-                focused_path,
-                widget.child_mode(index) == WidgetChildMode::Active,
-                path,
-                nodes,
-                node_paths,
-                node_indices,
-            );
-            path.pop();
-            root_nodes.extend(child_result.root_nodes);
-            if first_descendant.is_none() {
-                first_descendant = child_result.first_descendant;
-            }
-            if focused_node.is_none() {
-                focused_node = child_result.focused_node;
+    impl<'a> AccessibilityCollector<'a> {
+        fn build_snapshot(
+            &self,
+            widget: &dyn Widget,
+            path: &[usize],
+            info: AccessibilityInfo,
+            children: Vec<u64>,
+        ) -> AccessibilityNodeSnapshot {
+            let bounds = self
+                .layout_tree
+                .get_absolute_layout(widget.id())
+                .map(|layout| layout.bounds)
+                .unwrap_or(sparsha_core::Rect::ZERO);
+            AccessibilityNodeSnapshot {
+                id: accessibility_node_id(path),
+                path: path.to_vec(),
+                role: info.role.unwrap_or(AccessibilityRole::GenericContainer),
+                label: info.label,
+                description: info.description,
+                value: info.value,
+                hidden: info.hidden,
+                disabled: info.disabled,
+                checked: info.checked,
+                actions: info.actions,
+                bounds,
+                children,
             }
         }
 
-        let Some(info) = widget.accessibility_info() else {
-            return SubtreeResult {
-                root_nodes,
-                first_descendant,
-                focused_node,
-            };
-        };
+        fn visit(
+            &mut self,
+            widget: &dyn Widget,
+            runtime_active: bool,
+            path: &mut WidgetPath,
+        ) -> SubtreeResult {
+            if !runtime_active {
+                return SubtreeResult::default();
+            }
 
-        if widget.accessibility_merge_descendant() {
-            if let Some(target_id) = first_descendant {
-                if let Some(index) = node_indices.get(&target_id).copied() {
-                    nodes[index].apply_overrides(info);
+            let mut root_nodes = Vec::new();
+            let mut first_descendant = None;
+            let mut focused_node = None;
+
+            for (index, child) in widget.children().iter().enumerate() {
+                path.push(widget.child_path_key(index));
+                let child_result = self.visit(
+                    child.as_ref(),
+                    widget.child_mode(index) == WidgetChildMode::Active,
+                    path,
+                );
+                path.pop();
+                root_nodes.extend(child_result.root_nodes);
+                if first_descendant.is_none() {
+                    first_descendant = child_result.first_descendant;
                 }
-                return SubtreeResult {
-                    root_nodes,
-                    first_descendant: Some(target_id),
-                    focused_node,
-                };
+                if focused_node.is_none() {
+                    focused_node = child_result.focused_node;
+                }
             }
 
-            if !info.has_metadata() {
+            let Some(info) = widget.accessibility_info() else {
                 return SubtreeResult {
                     root_nodes,
                     first_descendant,
                     focused_node,
                 };
+            };
+
+            if widget.accessibility_merge_descendant() {
+                if let Some(target_id) = first_descendant {
+                    if let Some(index) = self.node_indices.get(&target_id).copied() {
+                        self.nodes[index].apply_overrides(info);
+                    }
+                    return SubtreeResult {
+                        root_nodes,
+                        first_descendant: Some(target_id),
+                        focused_node,
+                    };
+                }
+
+                if !info.has_metadata() {
+                    return SubtreeResult {
+                        root_nodes,
+                        first_descendant,
+                        focused_node,
+                    };
+                }
             }
-        }
 
-        let snapshot = build_snapshot(widget, layout_tree, path, info, root_nodes.clone());
-        let node_id = snapshot.id;
-        node_paths.insert(node_id, path.clone());
-        node_indices.insert(node_id, nodes.len());
-        nodes.push(snapshot);
+            let snapshot = self.build_snapshot(widget, path, info, root_nodes.clone());
+            let node_id = snapshot.id;
+            self.node_paths.insert(node_id, path.clone());
+            self.node_indices.insert(node_id, self.nodes.len());
+            self.nodes.push(snapshot);
 
-        let focused_node = if focused_path == Some(path) {
-            Some(node_id)
-        } else {
-            focused_node
-        };
+            let focused_node = if self.focused_path == Some(path) {
+                Some(node_id)
+            } else {
+                focused_node
+            };
 
-        SubtreeResult {
-            root_nodes: vec![node_id],
-            first_descendant: Some(node_id),
-            focused_node,
+            SubtreeResult {
+                root_nodes: vec![node_id],
+                first_descendant: Some(node_id),
+                focused_node,
+            }
         }
     }
 
-    let mut nodes = Vec::new();
-    let mut node_paths = HashMap::new();
-    let mut node_indices = HashMap::new();
-    let result = visit(
-        root_widget,
+    let mut collector = AccessibilityCollector {
         layout_tree,
         focused_path,
-        true,
-        &mut Vec::new(),
-        &mut nodes,
-        &mut node_paths,
-        &mut node_indices,
-    );
+        nodes: Vec::new(),
+        node_paths: HashMap::new(),
+        node_indices: HashMap::new(),
+    };
+    let result = collector.visit(root_widget, true, &mut Vec::new());
     AccessibilityTreeSnapshot {
-        nodes,
+        nodes: collector.nodes,
         root_children: result.root_nodes,
         focus: result.focused_node.unwrap_or(ACCESSIBILITY_ROOT_ID),
-        node_paths,
+        node_paths: collector.node_paths,
     }
 }
 

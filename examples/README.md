@@ -24,21 +24,35 @@ cargo run -p todo
 
 ## Web
 
-Each example directory contains the checked-in files needed for a Trunk flow:
+Each example directory still contains the checked-in files needed for a Trunk flow:
 
 - `index.html`
 - `Trunk.toml`
 - `sparsh-worker.js`
 
-Example:
+Canonical repo-root workflow:
 
 ```bash
-cd examples/kitchen-sink
 rustup target add wasm32-unknown-unknown
-trunk serve
+./scripts/web-build-example.sh kitchen-sink
+./scripts/web-serve-dist.sh kitchen-sink 4173
 ```
 
-The other examples follow the same pattern from their own directories.
+Build all checked-in web examples:
+
+```bash
+./scripts/web-build-all.sh
+```
+
+Run the headless browser smoke suite:
+
+```bash
+npm install
+npm run web:install
+./scripts/web-smoke.sh
+```
+
+Direct `trunk serve` from an example directory remains useful for manual iteration.
 
 ## What The Examples Intentionally Do Not Promise Yet
 
@@ -55,4 +69,4 @@ From the repo root, run:
 ./scripts/verify-foundation.sh
 ```
 
-That covers the native workspace checks plus wasm compile checks for all four examples.
+That covers the native workspace checks plus wasm compile checks for all four examples. Browser-side smoke coverage is handled separately by `./scripts/web-smoke.sh`.

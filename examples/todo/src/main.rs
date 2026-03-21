@@ -22,6 +22,7 @@ fn main() -> Result<(), sparsh::AppRunError> {
         .router(
             Router::new()
                 .route("/", move || Box::new(TodoApp::new(theme_mode)))
+                .route("/about", || Box::new(TodoAbout::new()))
                 .fallback("/"),
         )
         .run()
@@ -455,6 +456,92 @@ impl TodoApp {
                         apply_action(model_for_delete, TodoAction::Delete(id));
                     }),
             )
+    }
+}
+
+struct TodoAbout {
+    id: WidgetId,
+    children: Vec<Box<dyn Widget>>,
+}
+
+impl TodoAbout {
+    fn new() -> Self {
+        let mut page = Self {
+            id: WidgetId::default(),
+            children: Vec::new(),
+        };
+        page.rebuild_children();
+        page
+    }
+
+    fn rebuild_children(&mut self) {
+        let theme = current_theme();
+        self.children = vec![Box::new(
+            Container::new()
+                .fill()
+                .padding(32.0)
+                .background(theme.colors.background)
+                .child(
+                    Container::new()
+                        .column()
+                        .gap(16.0)
+                        .padding(24.0)
+                        .background(theme.colors.surface)
+                        .corner_radius(16.0)
+                        .child(
+                            Text::new("Todo Route Demo")
+                                .size(28.0)
+                                .bold()
+                                .color(theme.colors.text_primary),
+                        )
+                        .child(
+                            Text::new(
+                                "This static route exists so the web runtime can exercise hash navigation and route rebuilding on the same widget tree as the main todo app.",
+                            )
+                            .size(16.0)
+                            .color(theme.colors.text_muted),
+                        )
+                        .child(
+                            Text::new("Switch between `#/` and `#/about` in the browser to verify web routing parity.")
+                                .size(14.0)
+                                .color(theme.colors.primary),
+                        ),
+                ),
+        )];
+    }
+}
+
+impl Widget for TodoAbout {
+    fn id(&self) -> WidgetId {
+        self.id
+    }
+
+    fn set_id(&mut self, id: WidgetId) {
+        self.id = id;
+    }
+
+    fn style(&self) -> taffy::Style {
+        taffy::Style {
+            size: taffy::prelude::Size {
+                width: taffy::prelude::percent(1.0),
+                height: taffy::prelude::percent(1.0),
+            },
+            ..Default::default()
+        }
+    }
+
+    fn rebuild(&mut self, _ctx: &mut BuildContext) {
+        self.rebuild_children();
+    }
+
+    fn paint(&self, _ctx: &mut PaintContext) {}
+
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.children
+    }
+
+    fn children_mut(&mut self) -> &mut [Box<dyn Widget>] {
+        &mut self.children
     }
 }
 

@@ -16,13 +16,25 @@ pub struct SurfaceFrame {
     pub draw_list: DrawList,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HybridRenderOutcome {
+    pub needs_retry: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HybridSurfaceStatus {
+    Uninitialized,
+    Initializing,
+    Ready,
+    Failed,
+}
+
 pub struct HybridSurfaceManager {
     root: HtmlElement,
     bootstrap_canvas: HtmlCanvasElement,
     canvases: Vec<HtmlCanvasElement>,
     canvas_states: Vec<CanvasState>,
-    gpu_state: Rc<RefCell<Option<HybridGpuState>>>,
-    init_started: bool,
+    gpu_state: Rc<RefCell<HybridSurfaceState>>,
 }
 
 #[derive(Default)]
@@ -34,6 +46,15 @@ struct CanvasState {
     height: String,
     pixel_width: u32,
     pixel_height: u32,
+    scale_factor: f32,
+    needs_recreate: bool,
+}
+
+enum HybridSurfaceState {
+    Uninitialized,
+    Initializing,
+    Ready(HybridGpuState),
+    Failed(String),
 }
 
 struct HybridGpuState {
@@ -49,6 +70,12 @@ struct SurfaceSlot {
     config: wgpu::SurfaceConfiguration,
     renderer: Renderer,
     text_system: TextSystem,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct SlotRenderOutcome {
+    needs_retry: bool,
+    needs_recreate: bool,
 }
 
 impl HybridSurfaceManager {
@@ -67,36 +94,65 @@ impl HybridSurfaceManager {
             bootstrap_canvas,
             canvases: Vec::new(),
             canvas_states: Vec::new(),
-            gpu_state: Rc::new(RefCell::new(None)),
-            init_started: false,
+            gpu_state: Rc::new(RefCell::new(HybridSurfaceState::Uninitialized)),
         })
     }
 
     pub fn start_init(&mut self) {
-        if self.init_started || self.gpu_state.borrow().is_some() {
-            return;
+        {
+            let mut state = self.gpu_state.borrow_mut();
+            match &*state {
+                HybridSurfaceState::Uninitialized => {
+                    *state = HybridSurfaceState::Initializing;
+                }
+                HybridSurfaceState::Initializing | HybridSurfaceState::Ready(_) => return,
+                HybridSurfaceState::Failed(_) => return,
+            }
         }
-        self.init_started = true;
 
         let gpu_state = Rc::clone(&self.gpu_state);
         let bootstrap_canvas = self.bootstrap_canvas.clone();
         wasm_bindgen_futures::spawn_local(async move {
             match HybridGpuState::new(bootstrap_canvas).await {
                 Ok(state) => {
-                    *gpu_state.borrow_mut() = Some(state);
+                    *gpu_state.borrow_mut() = HybridSurfaceState::Ready(state);
                 }
                 Err(err) => {
                     log::error!("failed to initialize hybrid surface manager: {err}");
+                    *gpu_state.borrow_mut() = HybridSurfaceState::Failed(err);
                 }
             }
         });
+    }
+
+    pub fn status(&self) -> HybridSurfaceStatus {
+        match &*self.gpu_state.borrow() {
+            HybridSurfaceState::Uninitialized => HybridSurfaceStatus::Uninitialized,
+            HybridSurfaceState::Initializing => HybridSurfaceStatus::Initializing,
+            HybridSurfaceState::Ready(_) => HybridSurfaceStatus::Ready,
+            HybridSurfaceState::Failed(reason) => {
+                let _ = reason;
+                HybridSurfaceStatus::Failed
+            }
+        }
     }
 
     pub fn render(
         &mut self,
         frames: &[SurfaceFrame],
         clear_color: Color,
-    ) -> Result<(), wasm_bindgen::JsValue> {
+    ) -> Result<HybridRenderOutcome, wasm_bindgen::JsValue> {
+        let mut outcome = HybridRenderOutcome::default();
+
+        if !frames.is_empty() && matches!(self.status(), HybridSurfaceStatus::Uninitialized) {
+            self.start_init();
+        }
+
+        if !matches!(self.status(), HybridSurfaceStatus::Ready) {
+            self.hide_all_canvases()?;
+            return Ok(outcome);
+        }
+
         for (index, frame) in frames.iter().enumerate() {
             let canvas = self.ensure_canvas(index)?;
             self.update_canvas_node(index, frame)?;
@@ -109,17 +165,40 @@ impl HybridSurfaceManager {
             if state.pixel_width != physical_width {
                 canvas.set_width(physical_width);
                 state.pixel_width = physical_width;
+                state.needs_recreate = true;
             }
             if state.pixel_height != physical_height {
                 canvas.set_height(physical_height);
                 state.pixel_height = physical_height;
+                state.needs_recreate = true;
+            }
+            if (state.scale_factor - frame.scale_factor).abs() > f32::EPSILON {
+                state.scale_factor = frame.scale_factor;
+                state.needs_recreate = true;
             }
 
-            if let Some(gpu) = self.gpu_state.borrow_mut().as_mut() {
-                gpu.ensure_slot(index, canvas.clone())
-                    .map_err(|err| wasm_bindgen::JsValue::from_str(&err))?;
-                gpu.render_slot(index, frame, clear_color)
-                    .map_err(|err| wasm_bindgen::JsValue::from_str(&err))?;
+            let recreate_slot = state.needs_recreate;
+            let slot_outcome = {
+                let mut gpu_state = self.gpu_state.borrow_mut();
+                let HybridSurfaceState::Ready(gpu) = &mut *gpu_state else {
+                    continue;
+                };
+                gpu.ensure_slot(index, canvas.clone(), recreate_slot)
+                    .and_then(|_| gpu.render_slot(index, frame, clear_color))
+            };
+
+            match slot_outcome {
+                Ok(slot_outcome) => {
+                    let state = &mut self.canvas_states[index];
+                    state.needs_recreate = slot_outcome.needs_recreate;
+                    outcome.needs_retry |= slot_outcome.needs_retry;
+                }
+                Err(err) => {
+                    log::error!("hybrid surface render failed: {err}");
+                    *self.gpu_state.borrow_mut() = HybridSurfaceState::Failed(err);
+                    self.hide_all_canvases()?;
+                    return Ok(outcome);
+                }
             }
         }
 
@@ -127,7 +206,7 @@ impl HybridSurfaceManager {
             self.set_canvas_style(index, "display", "none")?;
         }
 
-        Ok(())
+        Ok(outcome)
     }
 
     fn ensure_canvas(&mut self, index: usize) -> Result<HtmlCanvasElement, wasm_bindgen::JsValue> {
@@ -195,6 +274,13 @@ impl HybridSurfaceManager {
         *slot = value;
         Ok(())
     }
+
+    fn hide_all_canvases(&mut self) -> Result<(), wasm_bindgen::JsValue> {
+        for index in 0..self.canvases.len() {
+            self.set_canvas_style(index, "display", "none")?;
+        }
+        Ok(())
+    }
 }
 
 impl HybridGpuState {
@@ -236,9 +322,17 @@ impl HybridGpuState {
         })
     }
 
-    fn ensure_slot(&mut self, index: usize, canvas: HtmlCanvasElement) -> Result<(), String> {
+    fn ensure_slot(
+        &mut self,
+        index: usize,
+        canvas: HtmlCanvasElement,
+        recreate: bool,
+    ) -> Result<(), String> {
         if self.slots.len() <= index {
             self.slots.resize_with(index + 1, || None);
+        }
+        if recreate {
+            self.slots[index] = None;
         }
         if self.slots[index].is_some() {
             return Ok(());
@@ -294,7 +388,7 @@ impl HybridGpuState {
         index: usize,
         frame: &SurfaceFrame,
         clear_color: Color,
-    ) -> Result<(), String> {
+    ) -> Result<SlotRenderOutcome, String> {
         let slot = self.slots[index]
             .as_mut()
             .ok_or_else(|| "surface slot missing".to_owned())?;
@@ -323,13 +417,19 @@ impl HybridGpuState {
                 frame
             }
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
-                slot.surface.configure(&self.device, &slot.config);
-                return Ok(());
+                return Ok(SlotRenderOutcome {
+                    needs_retry: true,
+                    needs_recreate: true,
+                });
             }
-            wgpu::CurrentSurfaceTexture::Timeout
-            | wgpu::CurrentSurfaceTexture::Occluded
-            | wgpu::CurrentSurfaceTexture::Validation => {
-                return Ok(());
+            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
+                return Ok(SlotRenderOutcome {
+                    needs_retry: true,
+                    needs_recreate: false,
+                });
+            }
+            wgpu::CurrentSurfaceTexture::Validation => {
+                return Err("hybrid surface validation error".to_owned());
             }
         };
 
@@ -353,7 +453,7 @@ impl HybridGpuState {
         );
         self.queue.submit(Some(encoder.finish()));
         surface_texture.present();
-        Ok(())
+        Ok(SlotRenderOutcome::default())
     }
 }
 

@@ -1,0 +1,12 @@
+{
+  "name": "sparsh-web-smoke",
+  "private": true,
+  "devDependencies": {
+    "@playwright/test": "1.54.2"
+  },
+  "scripts": {
+    "web:install": "PLAYWRIGHT_BROWSERS_PATH=.playwright-browsers playwright install chromium",
+    "web:test": "playwright test --config playwright.config.mjs",
+    "web:smoke": "./scripts/web-smoke.sh"
+  }
+}

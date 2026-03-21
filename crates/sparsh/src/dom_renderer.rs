@@ -9,6 +9,13 @@ use std::collections::HashMap;
 use wasm_bindgen::JsCast;
 use web_sys::{Document, HtmlElement};
 
+pub struct DomFrameSnapshot<'a> {
+    pub draw_list: &'a DrawList,
+    pub background: Color,
+    pub viewport_width: f32,
+    pub viewport_height: f32,
+}
+
 /// Renders draw commands into a retained DOM layer.
 pub struct DomRenderer {
     root: HtmlElement,
@@ -16,6 +23,7 @@ pub struct DomRenderer {
     states: Vec<NodeState>,
     active_nodes: usize,
     mutated_nodes: usize,
+    root_state: RootState,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -32,6 +40,13 @@ struct NodeState {
     kind: NodeKind,
     styles: HashMap<&'static str, String>,
     text: Option<String>,
+}
+
+#[derive(Default)]
+struct RootState {
+    width: String,
+    height: String,
+    background: String,
 }
 
 impl DomRenderer {
@@ -56,6 +71,7 @@ impl DomRenderer {
             states: Vec::new(),
             active_nodes: 0,
             mutated_nodes: 0,
+            root_state: RootState::default(),
         })
     }
 
@@ -64,19 +80,17 @@ impl DomRenderer {
     }
 
     /// Render a draw list into the retained DOM tree.
-    pub fn render(
-        &mut self,
-        draw_list: &DrawList,
-        background: Color,
-    ) -> Result<(), wasm_bindgen::JsValue> {
-        set_style(&self.root, "background-color", &color_to_css(background))?;
+    pub fn render(&mut self, snapshot: &DomFrameSnapshot<'_>) -> Result<(), wasm_bindgen::JsValue> {
+        self.set_root_style_cached("width", px(snapshot.viewport_width.max(1.0)))?;
+        self.set_root_style_cached("height", px(snapshot.viewport_height.max(1.0)))?;
+        self.set_root_style_cached("background-color", color_to_css(snapshot.background))?;
 
         let mut clip_stack: Vec<Rect> = Vec::new();
         let mut translation_stack: Vec<(f32, f32)> = vec![(0.0, 0.0)];
         let mut active = 0usize;
         self.mutated_nodes = 0;
 
-        for command in draw_list.commands() {
+        for command in snapshot.draw_list.commands() {
             match command {
                 DrawCommand::Rect {
                     bounds,
@@ -282,14 +296,40 @@ impl DomRenderer {
         let state = &mut self.states[index];
         if state.kind != kind {
             state.kind = kind;
+            node.style().set_css_text("");
             state.styles.clear();
             if state.text.is_some() {
                 node.set_text_content(None);
                 state.text = None;
                 self.mutated_nodes += 1;
             }
+            self.mutated_nodes += 1;
         }
         Ok(node)
+    }
+
+    fn set_root_style_cached(
+        &mut self,
+        key: &'static str,
+        value: impl Into<String>,
+    ) -> Result<(), wasm_bindgen::JsValue> {
+        let value = value.into();
+        let slot = match key {
+            "width" => &mut self.root_state.width,
+            "height" => &mut self.root_state.height,
+            "background-color" => &mut self.root_state.background,
+            _ => {
+                return Err(wasm_bindgen::JsValue::from_str(
+                    "unexpected root style key",
+                ))
+            }
+        };
+        if *slot == value {
+            return Ok(());
+        }
+        set_style(&self.root, key, &value)?;
+        *slot = value;
+        Ok(())
     }
 
     fn set_style_cached(

@@ -180,6 +180,7 @@ impl TaskRuntime {
                     worker_script_url: "sparsh-worker.js".to_owned(),
                     workers: Vec::new(),
                     next_worker: 0,
+                    next_worker_token: 1,
                     task_workers: HashMap::new(),
                 })),
             }),
@@ -498,6 +499,7 @@ impl TaskRuntime {
         }
         web.worker_script_url = worker_script_url;
         web.next_worker = 0;
+        web.next_worker_token = 1;
         web.task_workers.clear();
     }
 
@@ -564,7 +566,8 @@ impl TaskRuntime {
             }
             let worker_index = web.next_worker % web.workers.len();
             web.next_worker = (web.next_worker + 1) % web.workers.len();
-            web.task_workers.insert(task_id, worker_index);
+            let worker_token = web.workers[worker_index].token;
+            web.task_workers.insert(task_id, worker_token);
             (worker_index, web.workers[worker_index].worker.clone())
         };
 
@@ -628,11 +631,14 @@ impl TaskRuntime {
         }
 
         let worker_script_url = web.worker_script_url.clone();
-        for _ in 0..worker_count {
-            match create_worker_slot(worker_script_url.as_str(), self.clone()) {
+        while web.workers.len() < worker_count {
+            let worker_token = web.next_worker_token;
+            web.next_worker_token += 1;
+            match create_worker_slot(worker_script_url.as_str(), self.clone(), worker_token) {
                 Ok(slot) => web.workers.push(slot),
                 Err(err) => {
                     log::warn!("failed to initialize worker: {err}");
+                    break;
                 }
             }
         }
@@ -653,11 +659,12 @@ impl TaskRuntime {
                 return;
             };
             let web = lock_recover(web_mutex, "web task runtime");
-            let Some(worker_index) = web.task_workers.get(&task_id).copied() else {
+            let Some(worker_token) = web.task_workers.get(&task_id).copied() else {
                 return;
             };
             web.workers
-                .get(worker_index)
+                .iter()
+                .find(|slot| slot.token == worker_token)
                 .map(|slot| slot.worker.clone())
         };
 
@@ -668,6 +675,55 @@ impl TaskRuntime {
         let cancel_message = WorkerRequest::Cancel { task_id };
         if let Ok(js_value) = serde_wasm_bindgen::to_value(&cancel_message) {
             let _ = worker.post_message(&js_value);
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn handle_web_worker_error(&self, worker_token: u64, message: String) {
+        let affected_tasks = {
+            let Some(web_mutex) = self.inner.web.as_ref() else {
+                return;
+            };
+            let mut web = lock_recover(web_mutex, "web task runtime");
+            let Some(index) = web.workers.iter().position(|slot| slot.token == worker_token) else {
+                return;
+            };
+            let slot = web.workers.remove(index);
+            slot.worker.terminate();
+            if web.workers.is_empty() {
+                web.next_worker = 0;
+            } else if web.next_worker > index {
+                web.next_worker -= 1;
+                if web.next_worker >= web.workers.len() {
+                    web.next_worker = 0;
+                }
+            } else if web.next_worker >= web.workers.len() {
+                web.next_worker = 0;
+            }
+            web.task_workers
+                .iter()
+                .filter_map(|(task_id, token)| (*token == worker_token).then_some(*task_id))
+                .collect::<Vec<_>>()
+        };
+
+        for task_id in affected_tasks {
+            let meta = {
+                let task_meta = lock_recover(&self.inner.task_meta, "task metadata");
+                task_meta.get(&task_id).cloned()
+            };
+            let Some(meta) = meta else {
+                continue;
+            };
+            if !self.try_finish_task(task_id) {
+                continue;
+            }
+            let _ = self.inner.completion_tx.send(TaskResult {
+                task_id,
+                task_kind: meta.task_kind,
+                task_key: meta.task_key,
+                generation: meta.generation,
+                status: TaskStatus::Error(message.clone()),
+            });
         }
     }
 }
@@ -730,11 +786,13 @@ struct WebState {
     worker_script_url: String,
     workers: Vec<WebWorkerSlot>,
     next_worker: usize,
-    task_workers: HashMap<TaskId, usize>,
+    next_worker_token: u64,
+    task_workers: HashMap<TaskId, u64>,
 }
 
 #[cfg(target_arch = "wasm32")]
 struct WebWorkerSlot {
+    token: u64,
     worker: web_sys::Worker,
     _on_message: Closure<dyn FnMut(web_sys::MessageEvent)>,
     _on_error: Closure<dyn FnMut(web_sys::ErrorEvent)>,
@@ -858,6 +916,7 @@ enum WorkerResponse {
 fn create_worker_slot(
     worker_script_url: &str,
     runtime: TaskRuntime,
+    worker_token: u64,
 ) -> Result<WebWorkerSlot, String> {
     let worker = web_sys::Worker::new(worker_script_url)
         .map_err(|err| format!("failed to create worker '{worker_script_url}': {:?}", err))?;
@@ -868,7 +927,10 @@ fn create_worker_slot(
         let response: WorkerResponse = match serde_wasm_bindgen::from_value(event.data()) {
             Ok(response) => response,
             Err(err) => {
-                log::error!("failed to decode worker response: {err}");
+                runtime_for_message.handle_web_worker_error(
+                    worker_token,
+                    format!("failed to decode worker response: {err}"),
+                );
                 return;
             }
         };
@@ -932,20 +994,24 @@ fn create_worker_slot(
         let _ = completion_tx.send(task_result);
     }) as Box<dyn FnMut(_)>);
 
+    let runtime_for_error = runtime.clone();
     let on_error = Closure::wrap(Box::new(move |event: web_sys::ErrorEvent| {
-        log::error!(
+        let message = format!(
             "worker runtime error at {}:{}:{}: {}",
             event.filename(),
             event.lineno(),
             event.colno(),
             event.message()
         );
+        log::error!("{message}");
+        runtime_for_error.handle_web_worker_error(worker_token, message);
     }) as Box<dyn FnMut(_)>);
 
     worker.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
     worker.set_onerror(Some(on_error.as_ref().unchecked_ref()));
 
     Ok(WebWorkerSlot {
+        token: worker_token,
         worker,
         _on_message: on_message,
         _on_error: on_error,

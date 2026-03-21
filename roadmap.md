@@ -3,8 +3,8 @@
 ## Master Checklist
 - [x] Milestone 1: Freeze The Foundation
 - [x] Milestone 2: Finish Input, Focus, And Editing
-- [ ] Milestone 3: Make Accessibility Real
-- [ ] Milestone 4: Finish Web Parity
+- [x] Milestone 3: Make Accessibility Real
+- [x] Milestone 4: Finish Web Parity
 - [ ] Milestone 5: Polish Core Widgets
 - [ ] Milestone 6: Release Engineering And Quality Gates
 
@@ -77,11 +77,11 @@
 
 ## Milestone 4: Finish Web Parity
 ### Tasks
-- [ ] Replace the current browser keyboard/text path with a composition-aware input pipeline.
-- [ ] Keep the retained DOM renderer aligned with actual runtime state, not just visual output.
-- [ ] Harden hybrid surface startup, resize, recovery, and worker failure handling.
-- [ ] Add web integration tests for retained DOM, hybrid overlays, routing, and text input behavior.
-- [ ] Make the web release story reproducible from the checked-in repo, not from ad hoc local scripts.
+- [x] Replace the current browser keyboard/text path with a composition-aware input pipeline.
+- [x] Keep the retained DOM renderer aligned with actual runtime state, not just visual output.
+- [x] Harden hybrid surface startup, resize, recovery, and worker failure handling.
+- [x] Add web integration tests for retained DOM, hybrid overlays, routing, and text input behavior.
+- [x] Make the web release story reproducible from the checked-in repo, not from ad hoc local scripts.
 
 ### Exit Criteria
 - [ ] Web examples behave like native examples in the core interaction flows that matter for 1.0.

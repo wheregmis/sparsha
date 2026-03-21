@@ -64,6 +64,7 @@ sparsh-widgets = { path = "crates/sparsh-widgets" }
 # Web dependencies (add to workspace.dependencies for individual crates)
 wasm-bindgen = "0.2.114"
 wasm-bindgen-futures = "0.4.64"
+wasm-bindgen-test = "0.3.54"
 web-sys = { version = "0.3.91", features = [
     "Window",
     "Location",

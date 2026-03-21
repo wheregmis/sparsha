@@ -35,3 +35,6 @@ console_error_panic_hook = { workspace = true }
 console_log = "1.0"
 web-time = "1.1"
 serde-wasm-bindgen = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = { workspace = true }

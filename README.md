@@ -37,7 +37,7 @@ The built-in widget layer currently supports:
 - Default web path: retained DOM rendering driven by the same widget tree as native
 - Hybrid path: `DrawSurface` embeds GPU-heavy scenes into an otherwise DOM-backed UI
 - Runtime model: DOM rendering stays responsive while background work uses a worker-backed task runtime
-- Example web workflow: Trunk plus checked-in `index.html`, `Trunk.toml`, and `sparsh-worker.js` files in each example directory
+- Repo-owned web workflow: root build/serve/smoke scripts wrap the checked-in example `index.html`, `Trunk.toml`, and `sparsh-worker.js` assets
 
 ## Current Limitations
 
@@ -100,29 +100,41 @@ cargo run -p hybrid-overlay
 cargo run -p todo
 ```
 
-Run a web example with Trunk:
+Build and serve a web example from the repo root:
 
 ```bash
-cd examples/kitchen-sink
 rustup target add wasm32-unknown-unknown
-trunk serve
+./scripts/web-build-example.sh kitchen-sink
+./scripts/web-serve-dist.sh kitchen-sink 4173
 ```
 
-More detail lives in [examples/README.md](examples/README.md).
+Run the browser smoke suite:
+
+```bash
+npm install
+npm run web:install
+./scripts/web-smoke.sh
+```
+
+Direct per-example `trunk serve` still works for local iteration, but the root scripts are the canonical checked-in build and verification path. More detail lives in [examples/README.md](examples/README.md).
 
 ## Verification
 
-Milestone 1 ships a documented local verification entrypoint:
+Local verification entrypoints:
 
 ```bash
 ./scripts/verify-foundation.sh
+./scripts/web-build-all.sh
+./scripts/web-smoke.sh
 ```
 
-That script runs:
+`verify-foundation.sh` runs:
 
 - `cargo check --workspace`
 - `cargo test --workspace`
 - `cargo check -p kitchen-sink -p fractal-clock -p hybrid-overlay -p todo --target wasm32-unknown-unknown`
+
+`web-smoke.sh` builds the checked-in web examples, serves the generated `dist/` output for `kitchen-sink`, `hybrid-overlay`, and `todo`, then runs the Playwright smoke suite against those pages.
 
 ## More
 

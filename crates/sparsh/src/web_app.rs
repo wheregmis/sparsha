@@ -6,14 +6,14 @@ use crate::tasks::{TaskRuntime, TaskStatus};
 use crate::{
     accessibility::{AccessibilityTreeSnapshot, ACCESSIBILITY_ROOT_ID},
     app::{AppConfig, AppRunError, AppTheme},
-    dom_renderer::DomRenderer,
+    dom_renderer::{DomFrameSnapshot, DomRenderer},
     router::{hash_to_path, path_to_hash, Navigator, Router, RouterHost},
     runtime_widget::{
         add_widget_to_layout, apply_focus_change, collect_accessibility_tree, dispatch_widget_event,
         move_focus_path, remap_path, sync_focus_manager, with_widget_mut, WidgetPath,
         WidgetRuntimeRegistry,
     },
-    web_surface_manager::{HybridSurfaceManager, SurfaceFrame},
+    web_surface_manager::{HybridSurfaceManager, HybridSurfaceStatus, SurfaceFrame},
 };
 use sparsh_core::Color;
 use sparsh_input::{
@@ -25,7 +25,7 @@ use sparsh_signals::{RuntimeHandle, SubscriberKind};
 use sparsh_text::TextSystem;
 use sparsh_widgets::{
     set_current_theme, AccessibilityAction, AccessibilityRole, BuildContext, PaintCommands,
-    PaintContext, Widget,
+    PaintContext, TextEditorState, Widget,
 };
 use std::{
     cell::{Cell, RefCell},
@@ -106,9 +106,9 @@ pub(crate) fn run_dom_app(
         pending_clipboard_write: None,
         ime_composing: false,
         accessibility_text_focus_node: None,
+        pending_surface_retry: false,
     };
     state.update_viewport();
-    state.surface_manager.start_init();
 
     let state = Rc::new(RefCell::new(state));
     let frame_cb: Rc<RefCell<Option<Closure<dyn FnMut(f64)>>>> = Rc::new(RefCell::new(None));
@@ -157,6 +157,16 @@ struct WebAppState {
     pending_clipboard_write: Option<String>,
     ime_composing: bool,
     accessibility_text_focus_node: Option<u64>,
+    pending_surface_retry: bool,
+}
+
+struct WebFrameSnapshot<'a> {
+    draw_list: &'a DrawList,
+    surface_frames: &'a [SurfaceFrame],
+    background: Color,
+    viewport_width: f32,
+    viewport_height: f32,
+    accessibility: AccessibilityTreeSnapshot,
 }
 
 struct WebTextInputBridge {
@@ -568,12 +578,21 @@ impl WebAppState {
     }
 
     fn sync_text_input_bridge(&mut self) {
-        if self.accessibility_text_focus_matches_widget_focus() {
+        let suppress_text_bridge = self.accessibility_text_focus_matches_widget_focus();
+        let editor_state = self.focused_text_editor_state().cloned();
+        self.sync_text_input_bridge_with_state(editor_state.as_ref(), suppress_text_bridge);
+    }
+
+    fn sync_text_input_bridge_with_state(
+        &mut self,
+        editor_state: Option<&TextEditorState>,
+        suppress_text_bridge: bool,
+    ) {
+        if suppress_text_bridge {
             self.text_input_bridge.sync(None);
             return;
         }
-        let editor_state = self.focused_text_editor_state().cloned();
-        self.text_input_bridge.sync(editor_state.as_ref());
+        self.text_input_bridge.sync(editor_state);
     }
 
     fn handle_accessibility_action(
@@ -662,12 +681,15 @@ impl WebAppState {
         }
     }
 
-    fn sync_route_hash(&self) {
+    fn desired_route_hash(&self) -> String {
+        path_to_hash(&self.router_navigator.current_path())
+    }
+
+    fn sync_route_hash(&self, desired_hash: &str) {
         let Some(window) = web_sys::window() else {
             return;
         };
 
-        let desired_hash = path_to_hash(&self.router_navigator.current_path());
         let current_hash = window.location().hash().ok().unwrap_or_default();
         if current_hash == desired_hash {
             return;
@@ -844,8 +866,6 @@ impl WebAppState {
     }
 
     fn frame(&mut self) {
-        self.sync_route_hash();
-
         let mut had_task_results = false;
         self.task_runtime.drain_completed(|result| {
             had_task_results = true;
@@ -874,38 +894,108 @@ impl WebAppState {
         if self.needs_layout {
             self.build_layout();
         }
-        if self.needs_repaint {
+        let painted_frame = if self.needs_repaint {
             self.paint();
-            if let Err(err) = self.dom_renderer.render(
-                &self.draw_list,
-                self.theme
-                    .resolve_background(self.config.background_override),
-            ) {
-                log::error!("dom render failed: {:?}", err);
-            } else if let Err(err) = self
-                .semantic_dom
-                .render(self.widget_registry.accessibility_tree())
-            {
-                log::error!("semantic dom render failed: {:?}", err);
-            } else {
-                log::trace!(
-                    "dom frame: active_nodes={} mutated_nodes={}",
-                    self.dom_renderer.active_node_count(),
-                    self.dom_renderer.mutated_node_count()
-                );
-                self.emit_first_paint_event();
-            }
-            if let Err(err) = self
-                .surface_manager
-                .render(&self.surface_frames, Color::TRANSPARENT)
-            {
-                log::error!("hybrid surface render failed: {:?}", err);
-            }
+            true
+        } else {
+            false
+        };
+
+        let should_render_layers = should_render_web_layers(
+            painted_frame,
+            self.pending_surface_retry,
+            !self.surface_frames.is_empty(),
+            self.surface_manager.status(),
+        );
+        if !should_render_layers {
+            let desired_hash = self.desired_route_hash();
+            self.sync_route_hash(&desired_hash);
+            return;
         }
+
+        let focused_editor_state = self.focused_text_editor_state().cloned();
+        let suppress_text_bridge = self.accessibility_text_focus_matches_widget_focus();
+        let desired_hash = self.desired_route_hash();
+        self.sync_route_hash(&desired_hash);
+        self.sync_text_input_bridge_with_state(
+            focused_editor_state.as_ref(),
+            suppress_text_bridge,
+        );
+
+        let (dom_rendered, pending_surface_retry) = {
+            let snapshot = WebFrameSnapshot {
+                draw_list: &self.draw_list,
+                surface_frames: &self.surface_frames,
+                background: self
+                    .theme
+                    .resolve_background(self.config.background_override),
+                viewport_width: self.viewport_width,
+                viewport_height: self.viewport_height,
+                accessibility: self.widget_registry.accessibility_tree().clone(),
+            };
+
+            let mut dom_rendered = false;
+            if let Err(err) = self.dom_renderer.render(&DomFrameSnapshot {
+                draw_list: snapshot.draw_list,
+                background: snapshot.background,
+                viewport_width: snapshot.viewport_width,
+                viewport_height: snapshot.viewport_height,
+            }) {
+                log::error!("dom render failed: {:?}", err);
+            } else {
+                dom_rendered = true;
+            }
+
+            if let Err(err) = self.semantic_dom.render(&snapshot.accessibility) {
+                log::error!("semantic dom render failed: {:?}", err);
+                dom_rendered = false;
+            }
+
+            let pending_surface_retry = match self
+                .surface_manager
+                .render(snapshot.surface_frames, Color::TRANSPARENT)
+            {
+                Ok(surface_outcome) => {
+                    surface_outcome.needs_retry
+                        || (!snapshot.surface_frames.is_empty()
+                            && matches!(
+                                self.surface_manager.status(),
+                                HybridSurfaceStatus::Initializing
+                            ))
+                }
+                Err(err) => {
+                    log::error!("hybrid surface render failed: {:?}", err);
+                    false
+                }
+            };
+
+            (dom_rendered, pending_surface_retry)
+        };
+
+        self.pending_surface_retry = pending_surface_retry;
+        if dom_rendered {
+            log::trace!(
+                "dom frame: active_nodes={} mutated_nodes={}",
+                self.dom_renderer.active_node_count(),
+                self.dom_renderer.mutated_node_count()
+            );
+            self.emit_first_paint_event();
+        }
+
+        if !dom_rendered {
+            self.pending_surface_retry = false;
+        }
+
+        self.needs_repaint |= self.pending_surface_retry;
     }
 
     fn should_schedule_frame(&self) -> bool {
-        self.needs_layout || self.needs_repaint || self.task_runtime.has_in_flight()
+        self.needs_layout
+            || self.needs_repaint
+            || self.pending_surface_retry
+            || (!self.surface_frames.is_empty()
+                && matches!(self.surface_manager.status(), HybridSurfaceStatus::Initializing))
+            || self.task_runtime.has_in_flight()
     }
 }
 
@@ -1625,6 +1715,9 @@ fn install_event_listeners(
         let navigator = state.borrow().router_navigator.clone();
         let on_hash_change = Closure::wrap(Box::new(move || {
             let hash = window_for_hash.location().hash().ok().unwrap_or_default();
+            if !should_sync_external_hash(&navigator.current_path(), &hash) {
+                return;
+            }
             let path = hash_to_path(&hash);
             navigator.sync_external_path(&path);
             let mut state_ref = state.borrow_mut();
@@ -1766,6 +1859,21 @@ fn should_emit_text(event: &WebKeyboardEvent) -> bool {
     key.chars().count() == 1 && !event.ctrl_key() && !event.alt_key() && !event.meta_key()
 }
 
+fn should_sync_external_hash(current_path: &str, hash: &str) -> bool {
+    hash_to_path(hash) != current_path
+}
+
+fn should_render_web_layers(
+    painted_frame: bool,
+    pending_surface_retry: bool,
+    has_surface_frames: bool,
+    surface_status: HybridSurfaceStatus,
+) -> bool {
+    painted_frame
+        || pending_surface_retry
+        || (has_surface_frames && matches!(surface_status, HybridSurfaceStatus::Initializing))
+}
+
 fn map_browser_key(key: String) -> Option<sparsh_input::Key> {
     use sparsh_input::{Key, NamedKey};
     Some(match key.as_str() {
@@ -1868,5 +1976,130 @@ mod tests {
 
         assert_eq!(surface_frames.len(), 1);
         assert_eq!(draw_list.len(), 1);
+    }
+}
+
+#[cfg(all(test, target_arch = "wasm32"))]
+mod wasm_tests {
+    use super::*;
+    use sparsh_core::Rect;
+    use serde_json::json;
+    use wasm_bindgen_test::*;
+
+    wasm_bindgen_test_configure!(run_in_browser);
+
+    fn document() -> Document {
+        web_sys::window()
+            .and_then(|window| window.document())
+            .expect("window document")
+    }
+
+    #[wasm_bindgen_test]
+    fn semantic_text_input_node_preserves_value_and_label() {
+        let element = create_semantic_element(
+            &document(),
+            &crate::accessibility::AccessibilityNodeSnapshot {
+                id: 7,
+                path: vec![0],
+                role: AccessibilityRole::TextInput,
+                label: Some("Email".to_owned()),
+                description: None,
+                value: Some("hello@example.com".to_owned()),
+                hidden: false,
+                disabled: false,
+                checked: None,
+                actions: vec![AccessibilityAction::Focus, AccessibilityAction::SetValue],
+                bounds: Rect::new(10.0, 20.0, 120.0, 40.0),
+                children: Vec::new(),
+            },
+        )
+        .expect("semantic element");
+        let input = element.dyn_into::<HtmlInputElement>().expect("text input");
+        assert_eq!(input.type_(), "text");
+        assert_eq!(input.value(), "hello@example.com");
+        assert_eq!(input.get_attribute("aria-label").as_deref(), Some("Email"));
+    }
+
+    #[wasm_bindgen_test]
+    fn hash_sync_helper_ignores_matching_hash_paths() {
+        assert!(!should_sync_external_hash("/", "#/"));
+        assert!(!should_sync_external_hash("/about", "#/about"));
+        assert!(should_sync_external_hash("/", "#/about"));
+    }
+
+    #[test]
+    fn layer_render_decision_keeps_first_dom_paint() {
+        assert!(should_render_web_layers(
+            true,
+            false,
+            false,
+            HybridSurfaceStatus::Uninitialized
+        ));
+        assert!(!should_render_web_layers(
+            false,
+            false,
+            false,
+            HybridSurfaceStatus::Uninitialized
+        ));
+    }
+
+    #[wasm_bindgen_test]
+    fn text_editor_keydown_prevention_leaves_clipboard_shortcuts_to_browser() {
+        assert!(should_prevent_keydown_for_text_editor_action(
+            StandardAction::Backspace
+        ));
+        assert!(should_prevent_keydown_for_text_editor_action(
+            StandardAction::MoveLeft
+        ));
+        assert!(!should_prevent_keydown_for_text_editor_action(
+            StandardAction::Copy
+        ));
+        assert!(!should_prevent_keydown_for_text_editor_action(
+            StandardAction::Cut
+        ));
+        assert!(!should_prevent_keydown_for_text_editor_action(
+            StandardAction::Paste
+        ));
+    }
+
+    #[wasm_bindgen_test]
+    fn hybrid_surface_manager_starts_initializing_when_first_surface_frame_arrives() {
+        let host = document()
+            .create_element("div")
+            .expect("host element")
+            .dyn_into::<HtmlElement>()
+            .expect("html element");
+        document()
+            .body()
+            .expect("body")
+            .append_child(&host)
+            .expect("mount host");
+
+        let mut manager = HybridSurfaceManager::new(&host).expect("surface manager");
+        assert_eq!(manager.status(), HybridSurfaceStatus::Uninitialized);
+
+        let frames = vec![SurfaceFrame {
+            css_bounds: Rect::new(0.0, 0.0, 32.0, 24.0),
+            scale_factor: 1.0,
+            elapsed_time: 0.0,
+            draw_list: DrawList::new(),
+        }];
+        let outcome = manager.render(&frames, Color::TRANSPARENT).expect("render");
+
+        assert_eq!(manager.status(), HybridSurfaceStatus::Initializing);
+        assert!(!outcome.needs_retry);
+    }
+
+    #[wasm_bindgen_test]
+    fn task_runtime_surfaces_worker_startup_failures_as_results() {
+        let runtime = TaskRuntime::try_new().expect("task runtime");
+        runtime.set_worker_script_url("missing-sparsh-worker.js");
+        runtime.spawn("echo", json!({ "value": 1 }));
+
+        let mut results = Vec::new();
+        runtime.drain_completed(|result| results.push(result));
+
+        assert_eq!(results.len(), 1);
+        assert!(matches!(results[0].status, TaskStatus::Error(_)));
     }
 }

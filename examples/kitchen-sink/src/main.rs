@@ -251,7 +251,10 @@ fn build_scroll_section() -> Container {
         Container::new()
             .fill_width()
             .height(300.0)
-            .child(Scroll::new().vertical().fill().content(scroll_content)),
+            .child(
+                Semantics::new(Scroll::new().vertical().fill().content(scroll_content))
+                    .label("Kitchen sink scroll list"),
+            ),
     )
 }
 

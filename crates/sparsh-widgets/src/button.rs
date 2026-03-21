@@ -1,6 +1,7 @@
 //! Button widget.
 
 use crate::{
+    control_state::{focus_ring_border_width, focus_ring_bounds, focus_ring_color, ControlState},
     current_theme, AccessibilityAction, AccessibilityInfo, AccessibilityRole, EventContext,
     PaintContext, Widget,
 };
@@ -53,11 +54,11 @@ impl Default for ButtonStyle {
             border_color: Color::TRANSPARENT,
             border_width: 0.0,
             corner_radius: 6.0,
-            padding_h: 16.0,
+            padding_h: 12.0,
             padding_v: 8.0,
             font_size: 14.0,
-            min_width: 0.0,  // Will be set based on label
-            min_height: 0.0, // Will be set based on font_size
+            min_width: 0.0, // Will be set based on label
+            min_height: 38.0,
         }
     }
 }
@@ -70,7 +71,8 @@ pub struct Button {
     background_override: Option<Color>,
     text_color_override: Option<Color>,
     corner_radius_override: Option<f32>,
-    state: ButtonState,
+    disabled: bool,
+    interaction: ControlState,
     on_click: Option<Box<dyn FnMut()>>,
 }
 
@@ -84,7 +86,8 @@ impl Button {
             background_override: None,
             text_color_override: None,
             corner_radius_override: None,
-            state: ButtonState::Normal,
+            disabled: false,
+            interaction: ControlState::default(),
             on_click: None,
         }
     }
@@ -121,15 +124,24 @@ impl Button {
 
     /// Disable the button.
     pub fn disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
         if disabled {
-            self.state = ButtonState::Disabled;
+            self.interaction.clear_interaction();
         }
         self
     }
 
     /// Current visual state (for tests and debugging).
     pub fn state(&self) -> ButtonState {
-        self.state
+        if self.disabled {
+            ButtonState::Disabled
+        } else if self.interaction.pressed() {
+            ButtonState::Pressed
+        } else if self.interaction.hovered() {
+            ButtonState::Hovered
+        } else {
+            ButtonState::Normal
+        }
     }
 
     fn themed_default_style() -> ButtonStyle {
@@ -144,11 +156,11 @@ impl Button {
             border_color: Color::TRANSPARENT,
             border_width: 0.0,
             corner_radius: theme.radii.md,
-            padding_h: theme.spacing.lg,
-            padding_v: theme.spacing.sm,
+            padding_h: theme.controls.control_padding_x,
+            padding_v: theme.controls.control_padding_y,
             font_size: theme.typography.button_size,
             min_width: 0.0,
-            min_height: 0.0,
+            min_height: theme.controls.control_height,
         }
     }
 
@@ -174,14 +186,14 @@ impl Button {
             style.min_width = estimated_text_width + style.padding_h * 2.0;
         }
         if style.min_height <= 0.0 {
-            style.min_height = style.font_size * 1.4 + style.padding_v * 2.0;
+            style.min_height = current_theme().controls.control_height;
         }
 
         style
     }
 
     fn current_background(&self, style: &ButtonStyle) -> Color {
-        match self.state {
+        match self.state() {
             ButtonState::Normal => style.background,
             ButtonState::Hovered => style.background_hovered,
             ButtonState::Pressed => style.background_pressed,
@@ -190,7 +202,7 @@ impl Button {
     }
 
     fn current_text_color(&self, style: &ButtonStyle) -> Color {
-        match self.state {
+        match self.state() {
             ButtonState::Disabled => style.text_color_disabled,
             _ => style.text_color,
         }
@@ -246,20 +258,15 @@ impl Widget for Button {
         }
 
         // Focus ring (scale offset for HiDPI)
-        if ctx.has_focus() {
-            let offset = 2.0 * scale;
-            let focus_bounds = sparsh_core::Rect::new(
-                bounds.x - offset,
-                bounds.y - offset,
-                bounds.width + offset * 2.0,
-                bounds.height + offset * 2.0,
-            );
+        if ctx.has_focus() && !self.disabled {
+            let controls = current_theme().controls;
+            let focus_bounds = focus_ring_bounds(bounds, scale, &controls);
             ctx.fill_bordered_rect(
                 focus_bounds,
                 Color::TRANSPARENT,
                 style.corner_radius + 2.0,
-                2.0,
-                current_theme().colors.border_focus,
+                focus_ring_border_width(scale, &controls),
+                focus_ring_color(current_theme().colors.border_focus),
             );
         }
 
@@ -272,42 +279,30 @@ impl Widget for Button {
     }
 
     fn event(&mut self, ctx: &mut EventContext, event: &InputEvent) {
-        if self.state == ButtonState::Disabled {
+        if self.disabled {
             return;
         }
 
         match event {
             InputEvent::PointerMove { pos } => {
-                let old_state = self.state;
-                if ctx.contains(*pos) {
-                    if self.state != ButtonState::Pressed {
-                        self.state = ButtonState::Hovered;
-                    }
-                } else {
-                    self.state = ButtonState::Normal;
-                }
-                if old_state != self.state {
+                if self.interaction.pointer_move(ctx.contains(*pos)) {
                     ctx.request_paint();
                 }
             }
             InputEvent::PointerDown { pos, .. } => {
-                if ctx.contains(*pos) {
-                    self.state = ButtonState::Pressed;
+                if self.interaction.pointer_down(ctx.contains(*pos)) {
                     ctx.capture_pointer();
                 }
             }
             InputEvent::PointerUp { pos, .. } => {
-                if self.state == ButtonState::Pressed {
-                    if ctx.contains(*pos) {
-                        // Fire click handler
+                if self.interaction.pressed() {
+                    let should_click = self.interaction.pointer_up(ctx.contains(*pos));
+                    ctx.release_pointer();
+                    if should_click {
                         if let Some(handler) = &mut self.on_click {
                             handler();
                         }
-                        self.state = ButtonState::Hovered;
-                    } else {
-                        self.state = ButtonState::Normal;
                     }
-                    ctx.release_pointer();
                 }
             }
             InputEvent::KeyDown { .. } => {
@@ -328,7 +323,7 @@ impl Widget for Button {
     }
 
     fn focusable(&self) -> bool {
-        self.state != ButtonState::Disabled
+        !self.disabled
     }
 
     fn measure(&self, ctx: &mut crate::LayoutContext) -> Option<(f32, f32)> {
@@ -344,7 +339,7 @@ impl Widget for Button {
         Some(
             AccessibilityInfo::new(AccessibilityRole::Button)
                 .label(self.label.clone())
-                .disabled(self.state == ButtonState::Disabled)
+                .disabled(self.disabled)
                 .action(AccessibilityAction::Focus)
                 .action(AccessibilityAction::Click),
         )
@@ -355,7 +350,7 @@ impl Widget for Button {
         action: AccessibilityAction,
         _value: Option<String>,
     ) -> bool {
-        if self.state == ButtonState::Disabled {
+        if self.disabled {
             return false;
         }
 

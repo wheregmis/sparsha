@@ -9,9 +9,9 @@ use crate::{
     dom_renderer::{DomFrameSnapshot, DomRenderer},
     router::{hash_to_path, path_to_hash, Navigator, Router, RouterHost},
     runtime_widget::{
-        add_widget_to_layout, apply_focus_change, collect_accessibility_tree, dispatch_widget_event,
-        move_focus_path, remap_path, sync_focus_manager, with_widget_mut, WidgetPath,
-        WidgetRuntimeRegistry,
+        add_widget_to_layout, apply_focus_change, collect_accessibility_tree,
+        dispatch_widget_event, move_focus_path, remap_path, sync_focus_manager, with_widget_mut,
+        WidgetPath, WidgetRuntimeRegistry,
     },
     web_surface_manager::{HybridSurfaceManager, HybridSurfaceStatus, SurfaceFrame},
 };
@@ -33,8 +33,8 @@ use std::{
 };
 use wasm_bindgen::{closure::Closure, JsCast};
 use web_sys::{
-    ClipboardEvent, CompositionEvent as WebCompositionEvent, CustomEvent, Document, HtmlElement,
-    Element, Event, HtmlInputElement, HtmlTextAreaElement, InputEvent as WebInputEvent,
+    ClipboardEvent, CompositionEvent as WebCompositionEvent, CustomEvent, Document, Element, Event,
+    HtmlElement, HtmlInputElement, HtmlTextAreaElement, InputEvent as WebInputEvent,
     KeyboardEvent as WebKeyboardEvent, MouseEvent, WheelEvent, Window,
 };
 
@@ -70,6 +70,7 @@ pub(crate) fn run_dom_app(
         .hash()
         .ok()
         .map(|hash| hash_to_path(&hash));
+    set_current_theme(theme.resolve_theme());
     router.initialize(initial_path.as_deref());
     let router_for_build = router.clone();
     let root_widget = signal_runtime.run_with_current(|| {
@@ -259,10 +260,7 @@ impl WebSemanticDomLayer {
         &self.root
     }
 
-    fn render(
-        &self,
-        snapshot: &AccessibilityTreeSnapshot,
-    ) -> Result<(), wasm_bindgen::JsValue> {
+    fn render(&self, snapshot: &AccessibilityTreeSnapshot) -> Result<(), wasm_bindgen::JsValue> {
         self.root.set_inner_html("");
         let Some(document) = self.root.owner_document() else {
             return Ok(());
@@ -340,7 +338,9 @@ fn create_semantic_element(
     node: &crate::accessibility::AccessibilityNodeSnapshot,
 ) -> Result<HtmlElement, wasm_bindgen::JsValue> {
     let element = match node.role {
-        AccessibilityRole::Button => document.create_element("button")?.dyn_into::<HtmlElement>()?,
+        AccessibilityRole::Button => document
+            .create_element("button")?
+            .dyn_into::<HtmlElement>()?,
         AccessibilityRole::CheckBox => {
             let input = document
                 .create_element("input")?
@@ -390,7 +390,10 @@ fn create_semantic_element(
     }
     if let Some(label) = &node.label {
         element.set_attribute("aria-label", label)?;
-        if matches!(node.role, AccessibilityRole::Label | AccessibilityRole::Button) {
+        if matches!(
+            node.role,
+            AccessibilityRole::Label | AccessibilityRole::Button
+        ) {
             element.set_text_content(Some(label));
         }
     }
@@ -574,7 +577,10 @@ impl WebAppState {
             return false;
         };
         self.focused_path.as_deref() == Some(path)
-            && self.widget_registry.text_editor_state_for_path(path).is_some()
+            && self
+                .widget_registry
+                .text_editor_state_for_path(path)
+                .is_some()
     }
 
     fn sync_text_input_bridge(&mut self) {
@@ -769,7 +775,8 @@ impl WebAppState {
                 &mut paint_commands,
             );
         });
-        self.needs_repaint = paint_commands.request_next_frame;
+        self.needs_layout |= paint_commands.request_layout;
+        self.needs_repaint = paint_commands.request_next_frame || paint_commands.request_layout;
     }
 
     fn handle_event(&mut self, event: InputEvent) {
@@ -917,10 +924,7 @@ impl WebAppState {
         let suppress_text_bridge = self.accessibility_text_focus_matches_widget_focus();
         let desired_hash = self.desired_route_hash();
         self.sync_route_hash(&desired_hash);
-        self.sync_text_input_bridge_with_state(
-            focused_editor_state.as_ref(),
-            suppress_text_bridge,
-        );
+        self.sync_text_input_bridge_with_state(focused_editor_state.as_ref(), suppress_text_bridge);
 
         let (dom_rendered, pending_surface_retry) = {
             let snapshot = WebFrameSnapshot {
@@ -994,7 +998,10 @@ impl WebAppState {
             || self.needs_repaint
             || self.pending_surface_retry
             || (!self.surface_frames.is_empty()
-                && matches!(self.surface_manager.status(), HybridSurfaceStatus::Initializing))
+                && matches!(
+                    self.surface_manager.status(),
+                    HybridSurfaceStatus::Initializing
+                ))
             || self.task_runtime.has_in_flight()
     }
 }
@@ -1210,6 +1217,7 @@ fn install_event_listeners(
             state_ref.handle_event(InputEvent::Scroll {
                 pos,
                 delta: glam::Vec2::new(delta_x, delta_y),
+                modifiers: browser_wheel_modifiers(&event),
             });
             let should_schedule = state_ref.should_schedule_frame();
             drop(state_ref);
@@ -1607,7 +1615,8 @@ fn install_event_listeners(
         let window = window.clone();
         let target = semantic_root.clone();
         let on_click = Closure::wrap(Box::new(move |event: Event| {
-            if event_target_is_checkbox(event.target()) || event_target_is_text_editor(event.target())
+            if event_target_is_checkbox(event.target())
+                || event_target_is_text_editor(event.target())
             {
                 return;
             }
@@ -1622,8 +1631,7 @@ fn install_event_listeners(
                 schedule_animation_frame(&window, &pending_animation_frame, &frame_cb);
             }
         }) as Box<dyn FnMut(_)>);
-        let _ =
-            target.add_event_listener_with_callback("click", on_click.as_ref().unchecked_ref());
+        let _ = target.add_event_listener_with_callback("click", on_click.as_ref().unchecked_ref());
         on_click.forget();
     }
 
@@ -1682,8 +1690,7 @@ fn install_event_listeners(
                 schedule_animation_frame(&window, &pending_animation_frame, &frame_cb);
             }
         }) as Box<dyn FnMut(_)>);
-        let _ =
-            target.add_event_listener_with_callback("input", on_input.as_ref().unchecked_ref());
+        let _ = target.add_event_listener_with_callback("input", on_input.as_ref().unchecked_ref());
         on_input.forget();
     }
 
@@ -1803,17 +1810,35 @@ fn mouse_pos_wheel(root: &web_sys::HtmlElement, event: &WheelEvent) -> glam::Vec
 }
 
 fn browser_modifiers(event: &WebKeyboardEvent) -> Modifiers {
+    browser_modifiers_from_flags(
+        event.shift_key(),
+        event.ctrl_key(),
+        event.alt_key(),
+        event.meta_key(),
+    )
+}
+
+fn browser_wheel_modifiers(event: &WheelEvent) -> Modifiers {
+    browser_modifiers_from_flags(
+        event.shift_key(),
+        event.ctrl_key(),
+        event.alt_key(),
+        event.meta_key(),
+    )
+}
+
+fn browser_modifiers_from_flags(shift: bool, ctrl: bool, alt: bool, meta: bool) -> Modifiers {
     let mut modifiers = Modifiers::empty();
-    if event.shift_key() {
+    if shift {
         modifiers |= Modifiers::SHIFT;
     }
-    if event.ctrl_key() {
+    if ctrl {
         modifiers |= Modifiers::CONTROL;
     }
-    if event.alt_key() {
+    if alt {
         modifiers |= Modifiers::ALT;
     }
-    if event.meta_key() {
+    if meta {
         modifiers |= Modifiers::META;
     }
     modifiers
@@ -1982,8 +2007,8 @@ mod tests {
 #[cfg(all(test, target_arch = "wasm32"))]
 mod wasm_tests {
     use super::*;
-    use sparsh_core::Rect;
     use serde_json::json;
+    use sparsh_core::Rect;
     use wasm_bindgen_test::*;
 
     wasm_bindgen_test_configure!(run_in_browser);

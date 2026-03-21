@@ -65,12 +65,15 @@ pub(crate) fn add_widget_to_layout(
     }
 
     let is_scroll = widget.is_scroll_container();
+    let child_keys: Vec<_> = (0..widget.children().len())
+        .map(|index| widget.child_path_key(index))
+        .collect();
     let children_ids: Vec<_> = widget
         .children_mut()
         .iter_mut()
         .enumerate()
         .map(|(index, child)| {
-            path.push(index);
+            path.push(child_keys[index]);
             let id = add_widget_to_layout(
                 child.as_mut(),
                 tree,
@@ -203,7 +206,7 @@ pub(crate) fn collect_accessibility_tree(
         let mut focused_node = None;
 
         for (index, child) in widget.children().iter().enumerate() {
-            path.push(index);
+            path.push(widget.child_path_key(index));
             let child_result = visit(
                 child.as_ref(),
                 layout_tree,
@@ -399,12 +402,26 @@ fn transform_event_for_children(event: &InputEvent, offset: glam::Vec2) -> Input
             pos: *pos + offset,
             button: *button,
         },
-        InputEvent::Scroll { pos, delta } => InputEvent::Scroll {
+        InputEvent::Scroll {
+            pos,
+            delta,
+            modifiers,
+        } => InputEvent::Scroll {
             pos: *pos + offset,
             delta: *delta,
+            modifiers: *modifiers,
         },
         _ => event.clone(),
     }
+}
+
+fn scroll_container_prehandles_event(event: &InputEvent) -> bool {
+    matches!(
+        event,
+        InputEvent::PointerMove { .. }
+            | InputEvent::PointerDown { .. }
+            | InputEvent::PointerUp { .. }
+    )
 }
 
 fn dispatch_widget_event_recursive(
@@ -428,17 +445,35 @@ fn dispatch_widget_event_recursive(
     };
 
     let child_offset = widget.child_event_offset();
-    let transformed_event = if should_descend && child_offset != glam::Vec2::ZERO && event.is_pointer_event()
-    {
-        Some(transform_event_for_children(event, child_offset))
-    } else {
-        None
-    };
+    let transformed_event =
+        if should_descend && child_offset != glam::Vec2::ZERO && event.is_pointer_event() {
+            Some(transform_event_for_children(event, child_offset))
+        } else {
+            None
+        };
     let child_event = transformed_event.as_ref().unwrap_or(event);
+    let child_keys: Vec<_> = (0..widget.children().len())
+        .map(|index| widget.child_path_key(index))
+        .collect();
+
+    if widget.is_scroll_container() && scroll_container_prehandles_event(event) {
+        dispatch_widget_event_here(
+            widget,
+            layout_tree,
+            focused_id,
+            capture_path,
+            event,
+            path,
+            outcome,
+        );
+        if outcome.commands.stop_propagation {
+            return;
+        }
+    }
 
     if should_descend {
         for (index, child) in widget.children_mut().iter_mut().enumerate() {
-            path.push(index);
+            path.push(child_keys[index]);
             dispatch_widget_event_recursive(
                 child.as_mut(),
                 layout_tree,
@@ -455,15 +490,17 @@ fn dispatch_widget_event_recursive(
         }
     }
 
-    dispatch_widget_event_here(
-        widget,
-        layout_tree,
-        focused_id,
-        capture_path,
-        event,
-        path,
-        outcome,
-    );
+    if !(widget.is_scroll_container() && scroll_container_prehandles_event(event)) {
+        dispatch_widget_event_here(
+            widget,
+            layout_tree,
+            focused_id,
+            capture_path,
+            event,
+            path,
+            outcome,
+        );
+    }
 }
 
 fn dispatch_widget_event_at_path(
@@ -497,7 +534,11 @@ fn dispatch_widget_event_at_path(
     };
     let child_event = transformed_event.as_ref().unwrap_or(event);
 
-    let Some(child) = widget.children_mut().get_mut(target_path[0]) else {
+    let Some(child_slot) = widget.child_slot_for_path_key(target_path[0]) else {
+        return false;
+    };
+
+    let Some(child) = widget.children_mut().get_mut(child_slot) else {
         return false;
     };
 
@@ -580,7 +621,8 @@ fn with_widget_mut_inner<R>(
         return f.take().map(|apply| apply(widget));
     }
 
-    let child = widget.children_mut().get_mut(path[0])?;
+    let child_slot = widget.child_slot_for_path_key(path[0])?;
+    let child = widget.children_mut().get_mut(child_slot)?;
     with_widget_mut_inner(child.as_mut(), &path[1..], f)
 }
 
@@ -739,6 +781,78 @@ mod tests {
                     ctx.stop_propagation();
                 }
             }
+        }
+    }
+
+    struct ScrollContainerProbe {
+        id: WidgetId,
+        seen_scroll: Arc<AtomicUsize>,
+        size: (f32, f32),
+        children: Vec<Box<dyn Widget>>,
+    }
+
+    impl ScrollContainerProbe {
+        fn new(size: (f32, f32)) -> (Self, Arc<AtomicUsize>) {
+            let seen_scroll = Arc::new(AtomicUsize::new(0));
+            (
+                Self {
+                    id: WidgetId::default(),
+                    seen_scroll: Arc::clone(&seen_scroll),
+                    size,
+                    children: Vec::new(),
+                },
+                seen_scroll,
+            )
+        }
+
+        fn child(mut self, child: impl Widget + 'static) -> Self {
+            self.children.push(Box::new(child));
+            self
+        }
+    }
+
+    impl Widget for ScrollContainerProbe {
+        fn id(&self) -> WidgetId {
+            self.id
+        }
+
+        fn set_id(&mut self, id: WidgetId) {
+            self.id = id;
+        }
+
+        fn style(&self) -> taffy::Style {
+            taffy::Style {
+                size: Size {
+                    width: length(self.size.0),
+                    height: length(self.size.1),
+                },
+                display: Display::Flex,
+                flex_direction: FlexDirection::Column,
+                ..Default::default()
+            }
+        }
+
+        fn paint(&self, _ctx: &mut PaintContext) {}
+
+        fn is_scroll_container(&self) -> bool {
+            true
+        }
+
+        fn event(&mut self, ctx: &mut EventContext, event: &InputEvent) {
+            if let InputEvent::Scroll { pos, .. } = event {
+                if ctx.contains(*pos) {
+                    self.seen_scroll.fetch_add(1, Ordering::SeqCst);
+                    ctx.stop_propagation();
+                }
+            }
+        }
+
+        fn children(&self) -> &[Box<dyn Widget>] {
+            &self.children
+        }
+
+        fn children_mut(&mut self) -> &mut [Box<dyn Widget>] {
+            &mut self.children
         }
     }
 
@@ -912,6 +1026,7 @@ mod tests {
             &InputEvent::Scroll {
                 pos: glam::vec2(10.0, 30.0),
                 delta: glam::vec2(0.0, -1.0),
+                modifiers: sparsh_input::Modifiers::default(),
             },
         );
 
@@ -919,10 +1034,32 @@ mod tests {
     }
 
     #[test]
-    fn semantics_overrides_merge_into_descendant_accessible_node() {
-        let mut root = Container::new().child(
-            Semantics::new(Button::new("Save")).label("Explicit accessible label"),
+    fn nested_scroll_wheel_events_reach_inner_scroll_container_first() {
+        let (inner, inner_seen_scroll) = ScrollContainerProbe::new((200.0, 100.0));
+        let (mut outer, outer_seen_scroll) = ScrollContainerProbe::new((200.0, 200.0));
+        outer = outer.child(inner);
+        let (layout_tree, _) = build_registry(&mut outer);
+
+        let _ = dispatch_widget_event(
+            &mut outer,
+            &layout_tree,
+            None,
+            None,
+            &InputEvent::Scroll {
+                pos: glam::vec2(10.0, 10.0),
+                delta: glam::vec2(0.0, -24.0),
+                modifiers: sparsh_input::Modifiers::default(),
+            },
         );
+
+        assert_eq!(inner_seen_scroll.load(Ordering::SeqCst), 1);
+        assert_eq!(outer_seen_scroll.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn semantics_overrides_merge_into_descendant_accessible_node() {
+        let mut root = Container::new()
+            .child(Semantics::new(Button::new("Save")).label("Explicit accessible label"));
         let (layout_tree, _) = build_registry(&mut root);
         let tree = collect_accessibility_tree(&root, &layout_tree, None);
 
@@ -944,8 +1081,14 @@ mod tests {
         let mut registry = WidgetRuntimeRegistry::default();
         let mut text = TextSystem::new_headless();
         let mut path = Vec::new();
-        let root_id =
-            add_widget_to_layout(&mut root, &mut tree, &mut text, &mut registry, &mut path, false);
+        let root_id = add_widget_to_layout(
+            &mut root,
+            &mut tree,
+            &mut text,
+            &mut registry,
+            &mut path,
+            false,
+        );
         tree.set_root(root_id);
         tree.compute_layout(800.0, 600.0);
         let tree_b = collect_accessibility_tree(&root, &tree, Some(&vec![1]));

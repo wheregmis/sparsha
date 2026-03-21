@@ -5,7 +5,7 @@
 - [x] Milestone 2: Finish Input, Focus, And Editing
 - [x] Milestone 3: Make Accessibility Real
 - [x] Milestone 4: Finish Web Parity
-- [ ] Milestone 5: Polish Core Widgets
+- [x] Milestone 5: Polish Core Widgets
 - [ ] Milestone 6: Release Engineering And Quality Gates
 
 ## Current Baseline
@@ -27,7 +27,8 @@
 - [x] Focus traversal exists in the input model, and it is now wired end to end through the app loops.
 - [ ] Accessibility has definitions and data structures, but it is not yet integrated into the runtime and widget tree.
 - [x] `TextInput` now covers the expected editing shortcuts and selection behavior, and multiline editing ships as `TextArea`.
-- [ ] `Scroll` is usable, but `ScrollDirection::Both` is not fully symmetric and the interaction model is still basic.
+- [x] `Scroll` now supports polished vertical, horizontal, and both-axis behavior with interactive scrollbars.
+- [x] `List` now keeps the simple owned-children mode for small data and also supports fixed-extent virtualization for larger data sets.
 - [ ] Router paths are static-only; dynamic route patterns are rejected.
 - [ ] The web runtime still behaves more like a visual retained layer than a fully semantic browser-native surface.
 - [ ] There is no checked-in CI workflow or release automation, so quality gates are still manual.
@@ -88,13 +89,13 @@
 
 ## Milestone 5: Polish Core Widgets
 ### Tasks
-- [ ] Finish `Scroll` so horizontal, vertical, and combined-axis behavior is consistent and predictable.
-- [ ] Decide whether `List` should stay a simple owned-children container or grow virtualization for larger data sets.
-- [ ] Tighten widget state handling for hover, focus, disabled, and pressed states so all core controls feel consistent.
-- [ ] Revisit theme defaults and size metrics so the shipped widgets read as one design system rather than separate demos.
+- [x] Finish `Scroll` so horizontal, vertical, and combined-axis behavior is consistent and predictable.
+- [x] Decide whether `List` should stay a simple owned-children container or grow virtualization for larger data sets.
+- [x] Tighten widget state handling for hover, focus, disabled, and pressed states so all core controls feel consistent.
+- [x] Revisit theme defaults and size metrics so the shipped widgets read as one design system rather than separate demos.
 
 ### Exit Criteria
-- [ ] The built-in widgets feel intentional enough to be the default surface of a 1.0 app.
+- [x] The built-in widgets feel intentional enough to be the default surface of a 1.0 app.
 
 ## Milestone 6: Release Engineering And Quality Gates
 ### Tasks

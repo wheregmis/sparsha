@@ -758,7 +758,8 @@ impl AppRunner {
             );
         });
 
-        state.needs_repaint = paint_commands.request_next_frame;
+        state.needs_layout |= paint_commands.request_layout;
+        state.needs_repaint = paint_commands.request_next_frame || paint_commands.request_layout;
     }
 
     fn handle_event(&mut self, event: InputEvent) {
@@ -999,6 +1000,7 @@ impl winit::application::ApplicationHandler<NativeUserEvent> for AppRunner {
                 window_for_scheduler.request_redraw();
             });
 
+            set_current_theme(self.theme.resolve_theme());
             self.router.initialize(None);
             let router = self.router.clone();
             let root_widget = signal_runtime
@@ -1112,7 +1114,11 @@ impl winit::application::ApplicationHandler<NativeUserEvent> for AppRunner {
                 }
                 self.handle_event(InputEvent::PointerMove { pos });
             }
-            WindowEvent::MouseInput { state: btn_state, button, .. } => {
+            WindowEvent::MouseInput {
+                state: btn_state,
+                button,
+                ..
+            } => {
                 let pos = self.state.as_ref().map(|s| s.mouse_pos).unwrap_or_default();
                 let button = match button {
                     winit::event::MouseButton::Left => PointerButton::Primary,
@@ -1138,7 +1144,16 @@ impl winit::application::ApplicationHandler<NativeUserEvent> for AppRunner {
                         glam::Vec2::new(p.x as f32 / 20.0, p.y as f32 / 20.0)
                     }
                 };
-                self.handle_event(InputEvent::Scroll { pos, delta });
+                let modifiers = self
+                    .state
+                    .as_ref()
+                    .map(|state| state.modifiers)
+                    .unwrap_or_default();
+                self.handle_event(InputEvent::Scroll {
+                    pos,
+                    delta,
+                    modifiers,
+                });
             }
             WindowEvent::ModifiersChanged(modifiers) => {
                 if let Some(state) = self.state.as_mut() {

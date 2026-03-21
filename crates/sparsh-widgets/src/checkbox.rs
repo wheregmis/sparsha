@@ -1,6 +1,7 @@
 //! Checkbox widget.
 
 use crate::{
+    control_state::{focus_ring_border_width, focus_ring_bounds, focus_ring_color, ControlState},
     current_theme, AccessibilityAction, AccessibilityInfo, AccessibilityRole, EventContext,
     PaintContext, Widget,
 };
@@ -50,8 +51,7 @@ pub struct Checkbox {
     id: WidgetId,
     checked: bool,
     disabled: bool,
-    hovered: bool,
-    pressed: bool,
+    interaction: ControlState,
     style: CheckboxStyle,
     use_theme_defaults: bool,
     size_override: Option<f32>,
@@ -65,8 +65,7 @@ impl Checkbox {
             id: WidgetId::default(),
             checked: false,
             disabled: false,
-            hovered: false,
-            pressed: false,
+            interaction: ControlState::default(),
             style: CheckboxStyle::default(),
             use_theme_defaults: true,
             size_override: None,
@@ -88,6 +87,9 @@ impl Checkbox {
     /// Set disabled state.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
+        if disabled {
+            self.interaction.clear_interaction();
+        }
         self
     }
 
@@ -125,7 +127,7 @@ impl Checkbox {
     fn themed_default_style() -> CheckboxStyle {
         let theme = current_theme();
         CheckboxStyle {
-            size: 18.0,
+            size: theme.controls.checkbox_size,
             corner_radius: theme.radii.sm,
             border_width: 1.0,
             background: theme.colors.surface,
@@ -193,7 +195,7 @@ impl Widget for Checkbox {
             (style.background_disabled, style.border_color_disabled)
         } else if self.checked {
             (style.background_checked, style.border_color_checked)
-        } else if self.hovered || self.pressed {
+        } else if self.interaction.hovered() || self.interaction.pressed() {
             (style.background_hovered, style.border_color)
         } else {
             (style.background, style.border_color)
@@ -220,19 +222,14 @@ impl Widget for Checkbox {
         }
 
         if ctx.has_focus() && !self.disabled {
-            let offset = 2.0 * scale;
-            let focus_bounds = sparsh_core::Rect::new(
-                bounds.x - offset,
-                bounds.y - offset,
-                bounds.width + offset * 2.0,
-                bounds.height + offset * 2.0,
-            );
+            let controls = current_theme().controls;
+            let focus_bounds = focus_ring_bounds(bounds, scale, &controls);
             ctx.fill_bordered_rect(
                 focus_bounds,
                 Color::TRANSPARENT,
                 style.corner_radius + 2.0,
-                2.0,
-                style.focus_color,
+                focus_ring_border_width(scale, &controls),
+                focus_ring_color(style.focus_color),
             );
         }
     }
@@ -244,27 +241,22 @@ impl Widget for Checkbox {
 
         match event {
             InputEvent::PointerMove { pos } => {
-                let hovered = ctx.contains(*pos);
-                if self.hovered != hovered {
-                    self.hovered = hovered;
+                if self.interaction.pointer_move(ctx.contains(*pos)) {
                     ctx.request_paint();
                 }
             }
             InputEvent::PointerDown { pos, .. } => {
-                if ctx.contains(*pos) {
-                    self.pressed = true;
+                if self.interaction.pointer_down(ctx.contains(*pos)) {
                     ctx.capture_pointer();
                 }
             }
             InputEvent::PointerUp { pos, .. } => {
-                if self.pressed {
-                    self.pressed = false;
-                    if ctx.contains(*pos) {
+                if self.interaction.pressed() {
+                    let should_toggle = self.interaction.pointer_up(ctx.contains(*pos));
+                    if should_toggle {
                         self.toggle();
-                        ctx.release_pointer();
-                    } else {
-                        ctx.release_pointer();
                     }
+                    ctx.release_pointer();
                 }
             }
             InputEvent::KeyDown { .. } => {

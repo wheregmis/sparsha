@@ -202,17 +202,24 @@ impl<'a> PaintContext<'a> {
     pub fn request_next_frame(&mut self) {
         self.commands.request_next_frame = true;
     }
+
+    /// Request a relayout after this paint.
+    pub fn request_layout(&mut self) {
+        self.commands.request_layout = true;
+    }
 }
 
 /// Commands emitted during painting.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PaintCommands {
     pub request_next_frame: bool,
+    pub request_layout: bool,
 }
 
 impl PaintCommands {
     pub fn merge(&mut self, other: PaintCommands) {
         self.request_next_frame |= other.request_next_frame;
+        self.request_layout |= other.request_layout;
     }
 }
 

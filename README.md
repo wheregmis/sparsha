@@ -6,7 +6,7 @@ Sparsh is a Rust UI framework built around a single widget tree that runs on des
 
 ## Status
 
-- Current milestone: Foundation freeze
+- Current milestone: Polish core widgets
 - Public 1.0 surface: app runner, router, themes, task runtime, widgets, accessibility metadata, signals, input, layout, render, text, and core primitives exposed at crate roots
 - Provisional/internal: raw implementation modules, platform glue like `ui_events_winit`, and runtime adapters behind the public accessibility surface
 
@@ -31,6 +31,12 @@ The built-in widget layer currently supports:
 - `Scroll`
 - `DrawSurface`
 - `Semantics`
+
+Notable current behavior:
+
+- `Scroll` supports vertical, horizontal, and both-axis scrolling with interactive scrollbars
+- `List` supports both simple owned-children mode and fixed-extent virtualization for large data sets
+- Default widget sizing and focus-ring behavior are aligned through shared theme control tokens
 
 ## Web Story
 

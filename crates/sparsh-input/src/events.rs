@@ -21,7 +21,11 @@ pub enum InputEvent {
     /// Pointer button released.
     PointerUp { pos: Vec2, button: PointerButton },
     /// Scroll wheel event.
-    Scroll { pos: Vec2, delta: Vec2 },
+    Scroll {
+        pos: Vec2,
+        delta: Vec2,
+        modifiers: Modifiers,
+    },
     /// Key pressed.
     KeyDown { event: KeyboardEvent },
     /// Key released.

@@ -10,6 +10,7 @@ pub struct Theme {
     pub typography: ThemeTypography,
     pub spacing: ThemeSpacing,
     pub radii: ThemeRadii,
+    pub controls: ThemeControls,
 }
 
 impl Theme {
@@ -41,6 +42,7 @@ impl Theme {
             typography: ThemeTypography::default(),
             spacing: ThemeSpacing::default(),
             radii: ThemeRadii::default(),
+            controls: ThemeControls::default(),
         }
     }
 }
@@ -52,6 +54,7 @@ impl Default for Theme {
             typography: ThemeTypography::default(),
             spacing: ThemeSpacing::default(),
             radii: ThemeRadii::default(),
+            controls: ThemeControls::default(),
         }
     }
 }
@@ -162,6 +165,30 @@ impl Default for ThemeRadii {
             sm: 4.0,
             md: 6.0,
             lg: 12.0,
+        }
+    }
+}
+
+/// Shared control metrics used by the built-in widgets.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ThemeControls {
+    pub control_height: f32,
+    pub control_padding_x: f32,
+    pub control_padding_y: f32,
+    pub focus_ring_width: f32,
+    pub checkbox_size: f32,
+    pub scrollbar_thickness: f32,
+}
+
+impl Default for ThemeControls {
+    fn default() -> Self {
+        Self {
+            control_height: 38.0,
+            control_padding_x: 12.0,
+            control_padding_y: 8.0,
+            focus_ring_width: 2.0,
+            checkbox_size: 18.0,
+            scrollbar_thickness: 10.0,
         }
     }
 }

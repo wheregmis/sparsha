@@ -1,6 +1,6 @@
 # Sparsh Examples
 
-> Runnable reference apps for the frozen Milestone 1 surface.
+> Runnable reference apps for the current polished 1.0 candidate surface.
 
 Each example is a normal Cargo binary. The examples are intended to demonstrate the stable crate-root APIs rather than internal modules.
 
@@ -8,10 +8,10 @@ Each example is a normal Cargo binary. The examples are intended to demonstrate 
 
 | Example | What it shows |
 |---|---|
-| `kitchen-sink` | Core widget set, layout composition, theming, scrolling, and input |
+| `kitchen-sink` | Polished core widgets, theming, two-axis scroll, text editing, and virtualized lists |
 | `fractal-clock` | Draw-heavy rendering with `DrawSurface` and reactive state |
 | `hybrid-overlay` | DOM-backed UI with a hybrid GPU surface on the web path |
-| `todo` | Signals, routing, list rendering, and background task usage in a small app |
+| `todo` | Signals, routing, simple owned-child lists, and background task usage in a small app |
 
 ## Native
 
@@ -58,8 +58,9 @@ Direct `trunk serve` from an example directory remains useful for manual iterati
 
 - Accessibility smoke verification is still manual in this milestone
 - `todo` intentionally keeps `TextInput` single-line while `kitchen-sink` demonstrates `TextArea`
+- `todo` intentionally keeps the simple owned-children `List` path while `kitchen-sink` exercises the virtualized mode
 - Router usage stays on static paths
-- CI/lighthouse automation is not required to consider the examples healthy for Milestone 1
+- CI/lighthouse automation is not required to consider the examples healthy in this milestone
 
 ## Verification
 

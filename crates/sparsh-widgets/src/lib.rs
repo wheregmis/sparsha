@@ -7,9 +7,11 @@ mod button;
 mod checkbox;
 mod container;
 mod context;
+mod control_state;
 mod draw_surface;
 mod list;
 mod scroll;
+mod scroll_model;
 mod semantics;
 mod text;
 mod text_area;
@@ -34,7 +36,8 @@ pub use text_area::{TextArea, TextAreaStyle};
 pub use text_editor::TextEditorState;
 pub use text_input::{TextInput, TextInputStyle};
 pub use theme::{
-    current_theme, set_current_theme, Theme, ThemeColors, ThemeRadii, ThemeSpacing, ThemeTypography,
+    current_theme, set_current_theme, Theme, ThemeColors, ThemeControls, ThemeRadii, ThemeSpacing,
+    ThemeTypography,
 };
 pub use widget::Widget;
 

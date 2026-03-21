@@ -2,6 +2,7 @@
 
 use crate::text_editor::{EditorCore, TextEditorState};
 use crate::{
+    control_state::{focus_ring_border_width, focus_ring_bounds, focus_ring_color},
     current_theme, AccessibilityAction, AccessibilityInfo, AccessibilityRole, EventContext,
     PaintContext, Widget,
 };
@@ -53,7 +54,7 @@ impl Default for TextInputStyle {
             padding_v: 8.0,
             font_size: 14.0,
             min_width: 180.0,
-            min_height: 36.0,
+            min_height: 38.0,
         }
     }
 }
@@ -238,11 +239,11 @@ impl TextInput {
             border_color_focused: theme.colors.primary,
             border_width: 1.0,
             corner_radius: theme.radii.md,
-            padding_h: theme.spacing.md,
-            padding_v: theme.spacing.sm,
+            padding_h: theme.controls.control_padding_x,
+            padding_v: theme.controls.control_padding_y,
             font_size: theme.typography.body_size,
             min_width: 180.0,
-            min_height: 36.0,
+            min_height: theme.controls.control_height,
         }
     }
 
@@ -475,19 +476,14 @@ impl Widget for TextInput {
         ctx.fill_bordered_rect(bounds, bg, style.corner_radius, style.border_width, border);
 
         if focused {
-            let offset = 2.0 * scale;
-            let focus_bounds = sparsh_core::Rect::new(
-                bounds.x - offset,
-                bounds.y - offset,
-                bounds.width + offset * 2.0,
-                bounds.height + offset * 2.0,
-            );
+            let controls = current_theme().controls;
+            let focus_bounds = focus_ring_bounds(bounds, scale, &controls);
             ctx.fill_bordered_rect(
                 focus_bounds,
                 Color::TRANSPARENT,
                 style.corner_radius + 2.0,
-                2.0,
-                current_theme().colors.border_focus.with_alpha(0.5),
+                focus_ring_border_width(scale, &controls),
+                focus_ring_color(current_theme().colors.border_focus),
             );
         }
 

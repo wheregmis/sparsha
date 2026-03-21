@@ -101,6 +101,18 @@ pub trait Widget {
         glam::Vec2::ZERO
     }
 
+    /// Stable logical key for a child position.
+    #[doc(hidden)]
+    fn child_path_key(&self, child_position: usize) -> usize {
+        child_position
+    }
+
+    /// Realized child slot for a stable logical key.
+    #[doc(hidden)]
+    fn child_slot_for_path_key(&self, key: usize) -> Option<usize> {
+        Some(key)
+    }
+
     /// Whether accessibility metadata should override the first accessible descendant.
     #[doc(hidden)]
     fn accessibility_merge_descendant(&self) -> bool {

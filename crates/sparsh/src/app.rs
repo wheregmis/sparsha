@@ -45,8 +45,10 @@ pub struct AppConfig {
     pub width: u32,
     /// Initial window height.
     pub height: u32,
-    /// Background color.
-    pub background: Color,
+    /// Optional background color override.
+    ///
+    /// When unset, the active theme background is used.
+    pub background_override: Option<Color>,
 }
 
 impl Default for AppConfig {
@@ -55,9 +57,16 @@ impl Default for AppConfig {
             title: String::from("Sparsh App"),
             width: 800,
             height: 600,
-            background: Color::from_hex(0xF3F4F6),
+            background_override: None,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ThemeMode {
+    #[default]
+    Light,
+    Dark,
 }
 
 #[derive(Clone)]
@@ -71,6 +80,21 @@ impl ThemeSource {
         match self {
             Self::Static(theme) => theme.clone(),
             Self::Dynamic(theme) => theme.get(),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub(crate) enum ThemeModeSource {
+    Static(ThemeMode),
+    Dynamic(ReadSignal<ThemeMode>),
+}
+
+impl ThemeModeSource {
+    pub(crate) fn resolve(&self) -> ThemeMode {
+        match self {
+            Self::Static(mode) => *mode,
+            Self::Dynamic(mode) => mode.get(),
         }
     }
 }
@@ -107,10 +131,74 @@ impl From<ReadSignal<Theme>> for ThemeInput {
     }
 }
 
+pub enum ThemeModeInput {
+    Static(ThemeMode),
+    Dynamic(ReadSignal<ThemeMode>),
+}
+
+impl ThemeModeInput {
+    fn into_source(self) -> ThemeModeSource {
+        match self {
+            Self::Static(mode) => ThemeModeSource::Static(mode),
+            Self::Dynamic(mode) => ThemeModeSource::Dynamic(mode),
+        }
+    }
+}
+
+impl From<ThemeMode> for ThemeModeInput {
+    fn from(value: ThemeMode) -> Self {
+        Self::Static(value)
+    }
+}
+
+impl From<Signal<ThemeMode>> for ThemeModeInput {
+    fn from(value: Signal<ThemeMode>) -> Self {
+        Self::Dynamic(value.read_only())
+    }
+}
+
+impl From<ReadSignal<ThemeMode>> for ThemeModeInput {
+    fn from(value: ReadSignal<ThemeMode>) -> Self {
+        Self::Dynamic(value)
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct AppTheme {
+    light: ThemeSource,
+    dark: Option<ThemeSource>,
+    mode: ThemeModeSource,
+}
+
+impl AppTheme {
+    pub(crate) fn new(light: ThemeSource) -> Self {
+        Self {
+            light,
+            dark: None,
+            mode: ThemeModeSource::Static(ThemeMode::Light),
+        }
+    }
+
+    pub(crate) fn resolve_theme(&self) -> Theme {
+        match self.mode.resolve() {
+            ThemeMode::Light => self.light.resolve(),
+            ThemeMode::Dark => self
+                .dark
+                .as_ref()
+                .map(ThemeSource::resolve)
+                .unwrap_or_else(|| self.light.resolve()),
+        }
+    }
+
+    pub(crate) fn resolve_background(&self, background_override: Option<Color>) -> Color {
+        background_override.unwrap_or_else(|| self.resolve_theme().colors.background)
+    }
+}
+
 /// The main application struct.
 pub struct App {
     config: AppConfig,
-    theme: ThemeSource,
+    theme: AppTheme,
     router: Router,
 }
 
@@ -119,7 +207,7 @@ impl App {
     pub fn new() -> Self {
         Self {
             config: AppConfig::default(),
-            theme: ThemeSource::Static(Theme::default()),
+            theme: AppTheme::new(ThemeSource::Static(Theme::default())),
             router: Router::new()
                 .route("/", || Box::new(sparsh_widgets::Container::new().fill()))
                 .fallback("/"),
@@ -141,13 +229,25 @@ impl App {
 
     /// Set the background color.
     pub fn background(mut self, color: Color) -> Self {
-        self.config.background = color;
+        self.config.background_override = Some(color);
         self
     }
 
     /// Set application theme source.
     pub fn theme<T: Into<ThemeInput>>(mut self, theme: T) -> Self {
-        self.theme = theme.into().into_source();
+        self.theme.light = theme.into().into_source();
+        self
+    }
+
+    /// Set dark theme source.
+    pub fn dark_theme<T: Into<ThemeInput>>(mut self, theme: T) -> Self {
+        self.theme.dark = Some(theme.into().into_source());
+        self
+    }
+
+    /// Set theme mode source.
+    pub fn theme_mode<T: Into<ThemeModeInput>>(mut self, mode: T) -> Self {
+        self.theme.mode = mode.into().into_source();
         self
     }
 
@@ -186,7 +286,7 @@ impl Default for App {
 #[cfg(not(target_arch = "wasm32"))]
 struct AppRunner {
     config: AppConfig,
-    theme: ThemeSource,
+    theme: AppTheme,
     router: Router,
     state: Option<AppState>,
 }
@@ -204,7 +304,7 @@ struct AppState {
     focus_manager: FocusManager,
     signal_runtime: RuntimeHandle,
     task_runtime: TaskRuntime,
-    theme: ThemeSource,
+    theme: AppTheme,
     root_widget: Box<dyn Widget>,
     start_time: Instant,
     mouse_pos: glam::Vec2,
@@ -215,7 +315,7 @@ struct AppState {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl AppRunner {
-    fn new(config: AppConfig, theme: ThemeSource, router: Router) -> Self {
+    fn new(config: AppConfig, theme: AppTheme, router: Router) -> Self {
         Self {
             config,
             theme,
@@ -232,7 +332,7 @@ impl AppRunner {
         state.layout_tree = LayoutTree::new();
 
         runtime.with_tracking(SubscriberKind::Rebuild, || {
-            set_current_theme(state.theme.resolve());
+            set_current_theme(state.theme.resolve_theme());
 
             fn rebuild_widget(widget: &mut dyn Widget, build_ctx: &mut BuildContext) {
                 widget.rebuild(build_ctx);
@@ -299,7 +399,7 @@ impl AppRunner {
         }
 
         let root_id = runtime.with_tracking(SubscriberKind::Layout, || {
-            set_current_theme(state.theme.resolve());
+            set_current_theme(state.theme.resolve_theme());
             add_to_layout(
                 state.root_widget.as_mut(),
                 &mut state.layout_tree,
@@ -411,7 +511,7 @@ impl AppRunner {
         }
 
         runtime.with_tracking(SubscriberKind::Paint, || {
-            set_current_theme(state.theme.resolve());
+            set_current_theme(state.theme.resolve_theme());
             paint_widget(
                 state.root_widget.as_ref(),
                 &state.layout_tree,
@@ -793,7 +893,9 @@ impl winit::application::ApplicationHandler for AppRunner {
                             label: Some("sparsh_encoder"),
                         });
 
-                let bg = self.config.background;
+                let bg = state
+                    .theme
+                    .resolve_background(self.config.background_override);
                 state.renderer.render(
                     &mut encoder,
                     &view,
@@ -854,6 +956,61 @@ mod tests {
     use sparsh_signals::{RuntimeHandle, SubscriberKind};
 
     #[test]
+    fn app_theme_mode_resolves_light_or_dark() {
+        let mut light = Theme::light();
+        light.colors.primary = Color::from_hex(0x22C55E);
+        let mut dark = Theme::dark();
+        dark.colors.primary = Color::from_hex(0xF59E0B);
+
+        let light_active = AppTheme {
+            light: ThemeSource::Static(light.clone()),
+            dark: Some(ThemeSource::Static(dark.clone())),
+            mode: ThemeModeSource::Static(ThemeMode::Light),
+        };
+        assert_eq!(light_active.resolve_theme(), light);
+
+        let dark_active = AppTheme {
+            light: ThemeSource::Static(light.clone()),
+            dark: Some(ThemeSource::Static(dark.clone())),
+            mode: ThemeModeSource::Static(ThemeMode::Dark),
+        };
+        assert_eq!(dark_active.resolve_theme(), dark);
+    }
+
+    #[test]
+    fn app_theme_dark_mode_falls_back_to_light_when_missing_dark_theme() {
+        let mut light = Theme::light();
+        light.colors.primary = Color::from_hex(0x6366F1);
+
+        let app_theme = AppTheme {
+            light: ThemeSource::Static(light.clone()),
+            dark: None,
+            mode: ThemeModeSource::Static(ThemeMode::Dark),
+        };
+        assert_eq!(app_theme.resolve_theme(), light);
+    }
+
+    #[test]
+    fn app_theme_background_uses_theme_unless_override_is_set() {
+        let mut light = Theme::light();
+        light.colors.background = Color::from_hex(0x111827);
+        let app_theme = AppTheme {
+            light: ThemeSource::Static(light),
+            dark: None,
+            mode: ThemeModeSource::Static(ThemeMode::Light),
+        };
+
+        assert_eq!(
+            app_theme.resolve_background(None),
+            Color::from_hex(0x111827)
+        );
+        assert_eq!(
+            app_theme.resolve_background(Some(Color::from_hex(0xFEF3C7))),
+            Color::from_hex(0xFEF3C7)
+        );
+    }
+
+    #[test]
     fn dynamic_theme_source_marks_rebuild_dirty() {
         let runtime = RuntimeHandle::new();
         runtime.run_with_current(|| {
@@ -867,6 +1024,30 @@ mod tests {
             let mut updated = Theme::default();
             updated.typography.body_size = 20.0;
             theme_signal.set(updated);
+
+            let dirty = runtime.take_dirty_flags();
+            assert!(dirty.rebuild);
+            assert!(dirty.layout);
+            assert!(dirty.paint);
+        });
+    }
+
+    #[test]
+    fn dynamic_theme_mode_source_marks_rebuild_dirty() {
+        let runtime = RuntimeHandle::new();
+        runtime.run_with_current(|| {
+            let mode_signal = Signal::new(ThemeMode::Light);
+            let source = AppTheme {
+                light: ThemeSource::Static(Theme::light()),
+                dark: Some(ThemeSource::Static(Theme::dark())),
+                mode: ThemeModeInput::from(mode_signal.read_only()).into_source(),
+            };
+
+            runtime.with_tracking(SubscriberKind::Rebuild, || {
+                let _ = source.resolve_theme();
+            });
+
+            mode_signal.set(ThemeMode::Dark);
 
             let dirty = runtime.take_dirty_flags();
             assert!(dirty.rebuild);

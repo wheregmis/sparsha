@@ -2,7 +2,7 @@
 
 use serde_json::json;
 use sparsh::prelude::*;
-use sparsh::widgets::{BuildContext, EventContext, PaintContext, WidgetId};
+use sparsh::widgets::{current_theme, BuildContext, EventContext, PaintContext, WidgetId};
 
 fn main() {
     #[cfg(target_arch = "wasm32")]
@@ -12,54 +12,48 @@ fn main() {
     env_logger::init();
 
     let theme_mode = Signal::new(ThemeMode::Light);
-    let theme_signal = Signal::new(todo_theme(ThemeMode::Light));
 
     App::new()
         .title("Sparsh Todo")
         .size(960, 720)
-        .background(Color::from_hex(0xF3F4F6))
-        .theme(theme_signal)
+        .theme(todo_light_theme())
+        .dark_theme(todo_dark_theme())
+        .theme_mode(theme_mode)
         .router(
             Router::new()
-                .route("/", move || {
-                    Box::new(TodoApp::new(theme_signal, theme_mode))
-                })
+                .route("/", move || Box::new(TodoApp::new(theme_mode)))
                 .fallback("/"),
         )
         .run();
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ThemeMode {
-    Light,
-    Dark,
-}
-
-impl ThemeMode {
-    fn toggle(self) -> Self {
-        match self {
-            Self::Light => Self::Dark,
-            Self::Dark => Self::Light,
-        }
-    }
-
-    fn switch_label(self) -> &'static str {
-        match self {
-            Self::Light => "Switch to Dark",
-            Self::Dark => "Switch to Light",
-        }
+fn toggle_mode(mode: ThemeMode) -> ThemeMode {
+    match mode {
+        ThemeMode::Light => ThemeMode::Dark,
+        ThemeMode::Dark => ThemeMode::Light,
     }
 }
 
-fn todo_theme(mode: ThemeMode) -> Theme {
-    let mut theme = match mode {
-        ThemeMode::Light => Theme::light(),
-        ThemeMode::Dark => Theme::dark(),
-    };
+fn switch_label(mode: ThemeMode) -> &'static str {
+    match mode {
+        ThemeMode::Light => "Switch to Dark",
+        ThemeMode::Dark => "Switch to Light",
+    }
+}
+
+fn apply_todo_brand(mut theme: Theme) -> Theme {
     theme.colors.primary = Color::from_hex(0x2563EB);
     theme.colors.primary_hovered = Color::from_hex(0x1D4ED8);
     theme.colors.primary_pressed = Color::from_hex(0x1E40AF);
     theme
+}
+
+fn todo_light_theme() -> Theme {
+    apply_todo_brand(Theme::light())
+}
+
+fn todo_dark_theme() -> Theme {
+    apply_todo_brand(Theme::dark())
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -150,7 +144,6 @@ fn apply_action(model: Signal<TodoModel>, action: TodoAction) {
 struct TodoApp {
     id: WidgetId,
     model: Signal<TodoModel>,
-    theme_signal: Signal<Theme>,
     theme_mode: Signal<ThemeMode>,
     analysis_text: Signal<String>,
     analysis_generation: Signal<u64>,
@@ -177,7 +170,7 @@ fn value_to_u64(value: Option<&serde_json::Value>) -> u64 {
 }
 
 impl TodoApp {
-    fn new(theme_signal: Signal<Theme>, theme_mode: Signal<ThemeMode>) -> Self {
+    fn new(theme_mode: Signal<ThemeMode>) -> Self {
         let task_runtime = TaskRuntime::current_or_default();
         let analysis_text = Signal::new(String::from("Background analyzer is idle."));
         let analysis_for_results = analysis_text;
@@ -205,7 +198,6 @@ impl TodoApp {
         let mut app = Self {
             id: WidgetId::default(),
             model: Signal::new(TodoModel::default()),
-            theme_signal,
             theme_mode,
             analysis_text,
             analysis_generation: Signal::new(0),
@@ -218,15 +210,12 @@ impl TodoApp {
 
     fn toggle_theme_button(&self) -> Button {
         let theme_mode = self.theme_mode;
-        let theme_signal = self.theme_signal;
-        let label = theme_mode.get().switch_label();
+        let label = switch_label(theme_mode.get());
 
         Button::new(label).on_click(move || {
-            let next_mode = theme_mode.with_mut(|mode| {
-                *mode = mode.toggle();
-                *mode
+            theme_mode.with_mut(|mode| {
+                *mode = toggle_mode(*mode);
             });
-            theme_signal.set(todo_theme(next_mode));
         })
     }
 
@@ -237,7 +226,7 @@ impl TodoApp {
 
     fn rebuild_children(&mut self) {
         let model = self.model.get();
-        let theme = self.theme_signal.get();
+        let theme = current_theme();
         let is_dark = self.theme_mode.get() == ThemeMode::Dark;
         let analysis_text = self.analysis_text.get();
         let active_count = model.todos.iter().filter(|todo| !todo.done).count();
@@ -338,7 +327,7 @@ impl TodoApp {
     }
 
     fn input_row(&self, model: &TodoModel) -> Container {
-        let theme = self.theme_signal.get();
+        let theme = current_theme();
         let model_for_change = self.model;
         let model_for_submit = self.model;
         let model_for_add = self.model;
@@ -393,7 +382,7 @@ impl TodoApp {
     }
 
     fn filter_button(&self, label: &str, filter: Filter, current_filter: Filter) -> Button {
-        let theme = self.theme_signal.get();
+        let theme = current_theme();
         let selected = current_filter == filter;
         let background = if selected {
             theme.colors.primary
@@ -415,7 +404,7 @@ impl TodoApp {
     }
 
     fn clear_completed_button(&self) -> Button {
-        let theme = self.theme_signal.get();
+        let theme = current_theme();
         let model = self.model;
         Button::new("Clear Completed")
             .background(theme.colors.surface_variant)
@@ -426,7 +415,7 @@ impl TodoApp {
     }
 
     fn todo_row(&self, todo: TodoItem) -> Container {
-        let theme = self.theme_signal.get();
+        let theme = current_theme();
         let text_color = if todo.done {
             theme.colors.text_muted
         } else {
@@ -531,10 +520,7 @@ mod tests {
     fn todo_app_signal_actions_update_state() {
         let runtime = sparsh::signals::RuntimeHandle::new();
         runtime.run_with_current(|| {
-            let app = TodoApp::new(
-                Signal::new(todo_theme(ThemeMode::Light)),
-                Signal::new(ThemeMode::Light),
-            );
+            let app = TodoApp::new(Signal::new(ThemeMode::Light));
             apply_action(app.model, TodoAction::SetDraft("Alpha".to_owned()));
             apply_action(app.model, TodoAction::AddDraft);
 

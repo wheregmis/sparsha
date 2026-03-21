@@ -47,7 +47,7 @@ mod web_surface_manager;
 #[cfg(target_arch = "wasm32")]
 mod web_text_metrics;
 
-pub use app::{App, ThemeInput};
+pub use app::{App, ThemeInput, ThemeMode, ThemeModeInput};
 pub use router::{hash_to_path, path_to_hash, Navigator, Route, Router};
 pub use sparsh_widgets::{Theme, ThemeColors, ThemeRadii, ThemeSpacing, ThemeTypography};
 pub use tasks::{
@@ -64,7 +64,7 @@ pub mod prelude {
         Generation, TaskHandle, TaskId, TaskKey, TaskPayload, TaskPolicy, TaskResult, TaskRuntime,
         TaskStatus,
     };
-    pub use crate::{App, Navigator, Route, Router, ThemeInput};
+    pub use crate::{App, Navigator, Route, Router, ThemeInput, ThemeMode, ThemeModeInput};
     pub use sparsh_core::{Color, Rect};
     pub use sparsh_input::{InputEvent, Key, Modifiers, PointerButton};
     pub use sparsh_layout::taffy;

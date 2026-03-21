@@ -4,7 +4,7 @@
 
 use crate::tasks::{TaskRuntime, TaskStatus};
 use crate::{
-    app::{AppConfig, ThemeSource},
+    app::{AppConfig, AppTheme},
     dom_renderer::DomRenderer,
     router::{hash_to_path, path_to_hash, Navigator, Router, RouterHost},
     web_surface_manager::{HybridSurfaceManager, SurfaceFrame},
@@ -26,7 +26,7 @@ use std::{
 use wasm_bindgen::{closure::Closure, JsCast};
 use web_sys::{CustomEvent, KeyboardEvent as WebKeyboardEvent, MouseEvent, WheelEvent, Window};
 
-pub(crate) fn run_dom_app(config: AppConfig, theme: ThemeSource, router: Router) {
+pub(crate) fn run_dom_app(config: AppConfig, theme: AppTheme, router: Router) {
     let window = web_sys::window().expect("window should be available");
     let document = window.document().expect("document should be available");
     let dom_renderer = DomRenderer::mount_to_body(&document).expect("failed to mount DOM renderer");
@@ -92,7 +92,7 @@ pub(crate) fn run_dom_app(config: AppConfig, theme: ThemeSource, router: Router)
 
 struct WebAppState {
     config: AppConfig,
-    theme: ThemeSource,
+    theme: AppTheme,
     router_navigator: Navigator,
     dom_renderer: DomRenderer,
     text_system: TextSystem,
@@ -251,7 +251,7 @@ impl WebAppState {
         self.layout_tree = LayoutTree::new();
 
         runtime.with_tracking(SubscriberKind::Rebuild, || {
-            set_current_theme(self.theme.resolve());
+            set_current_theme(self.theme.resolve_theme());
 
             fn rebuild_widget(widget: &mut dyn Widget, build_ctx: &mut BuildContext) {
                 widget.rebuild(build_ctx);
@@ -315,7 +315,7 @@ impl WebAppState {
         }
 
         let root_id = runtime.with_tracking(SubscriberKind::Layout, || {
-            set_current_theme(self.theme.resolve());
+            set_current_theme(self.theme.resolve_theme());
             add_to_layout(
                 self.root_widget.as_mut(),
                 &mut self.layout_tree,
@@ -339,7 +339,7 @@ impl WebAppState {
         let mut paint_commands = PaintCommands::default();
 
         runtime.with_tracking(SubscriberKind::Paint, || {
-            set_current_theme(self.theme.resolve());
+            set_current_theme(self.theme.resolve_theme());
             paint_widget_subtree(
                 self.root_widget.as_ref(),
                 &self.layout_tree,
@@ -471,10 +471,11 @@ impl WebAppState {
         }
         if self.needs_repaint {
             self.paint();
-            if let Err(err) = self
-                .dom_renderer
-                .render(&self.draw_list, self.config.background)
-            {
+            if let Err(err) = self.dom_renderer.render(
+                &self.draw_list,
+                self.theme
+                    .resolve_background(self.config.background_override),
+            ) {
                 log::error!("dom render failed: {:?}", err);
             } else {
                 log::trace!(

@@ -5,7 +5,7 @@ use spark_input::FocusManager;
 use spark_layout::{ComputedLayout, LayoutTree};
 use spark_render::{DrawCommand, DrawList};
 use spark_text::TextSystem;
-use spark_widgets::{Button, PaintContext, Widget};
+use spark_widgets::{Button, PaintCommands, PaintContext, Widget};
 
 #[test]
 fn button_paint_emits_rect_and_text_commands() {
@@ -14,6 +14,7 @@ fn button_paint_emits_rect_and_text_commands() {
     let layout_tree = LayoutTree::new();
     let focus = FocusManager::new();
     let mut text_system = TextSystem::new_headless();
+    let mut paint_commands = PaintCommands::default();
 
     let button = Button::new("OK");
 
@@ -26,6 +27,7 @@ fn button_paint_emits_rect_and_text_commands() {
         scale_factor: 1.0,
         text_system: &mut text_system,
         elapsed_time: 0.0,
+        commands: &mut paint_commands,
     };
 
     button.paint(&mut ctx);
@@ -54,6 +56,7 @@ fn button_text_run_contains_label() {
     let layout_tree = LayoutTree::new();
     let focus = FocusManager::new();
     let mut text_system = TextSystem::new_headless();
+    let mut paint_commands = PaintCommands::default();
 
     let button = Button::new("Hello");
     let mut ctx = PaintContext {
@@ -65,6 +68,7 @@ fn button_text_run_contains_label() {
         scale_factor: 1.0,
         text_system: &mut text_system,
         elapsed_time: 0.0,
+        commands: &mut paint_commands,
     };
 
     button.paint(&mut ctx);

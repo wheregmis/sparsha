@@ -3,16 +3,24 @@
 #![cfg(target_arch = "wasm32")]
 
 use crate::tasks::{TaskRuntime, TaskStatus};
-use crate::{app::AppConfig, dom_renderer::DomRenderer};
+use crate::{
+    app::AppConfig,
+    dom_renderer::DomRenderer,
+    web_surface_manager::{HybridSurfaceManager, SurfaceFrame},
+};
+use spark_core::Color;
 use spark_input::{FocusManager, InputEvent, PointerButton};
 use spark_layout::LayoutTree;
 use spark_render::DrawList;
 use spark_signals::{RuntimeHandle, SubscriberKind};
 use spark_text::TextSystem;
 use spark_widgets::{
-    BuildContext, EventCommands, EventContext, LayoutContext, PaintContext, Widget,
+    BuildContext, EventCommands, EventContext, LayoutContext, PaintCommands, PaintContext, Widget,
 };
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+};
 use wasm_bindgen::{closure::Closure, JsCast};
 use web_sys::{CustomEvent, KeyboardEvent as WebKeyboardEvent, MouseEvent, WheelEvent, Window};
 
@@ -23,6 +31,8 @@ where
     let window = web_sys::window().expect("window should be available");
     let document = window.document().expect("document should be available");
     let dom_renderer = DomRenderer::mount_to_body(&document).expect("failed to mount DOM renderer");
+    let surface_manager =
+        HybridSurfaceManager::new(dom_renderer.root()).expect("failed to initialize hybrid surface manager");
     let signal_runtime = RuntimeHandle::new();
     let task_runtime = TaskRuntime::new();
     task_runtime.set_worker_script_url("spark-worker.js?v=2");
@@ -34,6 +44,7 @@ where
         dom_renderer,
         text_system: TextSystem::new_headless(),
         draw_list: DrawList::new(),
+        surface_frames: Vec::new(),
         layout_tree: LayoutTree::new(),
         focus_manager: FocusManager::new(),
         signal_runtime,
@@ -41,17 +52,31 @@ where
         root_widget,
         start_time: web_time::Instant::now(),
         mouse_pos: glam::Vec2::ZERO,
+        scale_factor: 1.0,
         viewport_width: 0.0,
         viewport_height: 0.0,
         needs_layout: true,
         needs_repaint: true,
         first_paint_emitted: false,
+        surface_manager,
     };
     state.update_viewport();
+    state.surface_manager.start_init();
 
     let state = Rc::new(RefCell::new(state));
-    install_event_listeners(&window, &state);
-    start_animation_loop(&window, &state);
+    let frame_cb: Rc<RefCell<Option<Closure<dyn FnMut(f64)>>>> = Rc::new(RefCell::new(None));
+    let pending_animation_frame = Rc::new(Cell::new(false));
+    {
+        let signal_runtime = state.borrow().signal_runtime.clone();
+        let window_for_scheduler = window.clone();
+        let frame_cb = Rc::clone(&frame_cb);
+        let pending_animation_frame = Rc::clone(&pending_animation_frame);
+        signal_runtime.set_scheduler(move || {
+            schedule_animation_frame(&window_for_scheduler, &pending_animation_frame, &frame_cb);
+        });
+    }
+    install_event_listeners(&window, &state, &pending_animation_frame, &frame_cb);
+    start_animation_loop(&window, &state, &pending_animation_frame, &frame_cb);
 }
 
 struct WebAppState {
@@ -59,6 +84,7 @@ struct WebAppState {
     dom_renderer: DomRenderer,
     text_system: TextSystem,
     draw_list: DrawList,
+    surface_frames: Vec<SurfaceFrame>,
     layout_tree: LayoutTree,
     focus_manager: FocusManager,
     signal_runtime: RuntimeHandle,
@@ -66,11 +92,13 @@ struct WebAppState {
     root_widget: Box<dyn Widget>,
     start_time: web_time::Instant,
     mouse_pos: glam::Vec2,
+    scale_factor: f32,
     viewport_width: f32,
     viewport_height: f32,
     needs_layout: bool,
     needs_repaint: bool,
     first_paint_emitted: bool,
+    surface_manager: HybridSurfaceManager,
 }
 
 impl WebAppState {
@@ -82,6 +110,7 @@ impl WebAppState {
             if let Ok(height) = window.inner_height() {
                 self.viewport_height = height.as_f64().unwrap_or(self.config.height as f64) as f32;
             }
+            self.scale_factor = window.device_pixel_ratio() as f32;
         }
     }
 
@@ -189,19 +218,78 @@ impl WebAppState {
     fn paint(&mut self) {
         let runtime = self.signal_runtime.clone();
         self.draw_list.clear();
+        self.surface_frames.clear();
         let elapsed_time = self.start_time.elapsed().as_secs_f32();
         let text_system_ptr = &mut self.text_system as *mut TextSystem;
+        let mut paint_commands = PaintCommands::default();
 
         fn paint_widget(
             widget: &dyn Widget,
             layout_tree: &LayoutTree,
             focus: &FocusManager,
             draw_list: &mut DrawList,
+            surface_frames: &mut Vec<SurfaceFrame>,
+            scale_factor: f32,
             text_system_ptr: *mut TextSystem,
             elapsed_time: f32,
+            paint_commands: &mut PaintCommands,
         ) {
             let id = widget.id();
             if let Some(layout) = layout_tree.get_absolute_layout(id) {
+                if let Some(surface) = widget.draw_surface() {
+                    let mut local_commands = PaintCommands::default();
+                    let mut surface_draw_list = DrawList::new();
+                    let mut surface_ctx = spark_widgets::DrawSurfaceContext {
+                        draw_list: &mut surface_draw_list,
+                        bounds: spark_core::Rect::new(
+                            0.0,
+                            0.0,
+                            layout.bounds.width * scale_factor,
+                            layout.bounds.height * scale_factor,
+                        ),
+                        scale_factor,
+                        elapsed_time,
+                        commands: &mut local_commands,
+                    };
+                    surface.scene(&mut surface_ctx);
+                    surface_frames.push(SurfaceFrame {
+                        css_bounds: layout.bounds,
+                        scale_factor,
+                        elapsed_time,
+                        draw_list: surface_draw_list,
+                    });
+                    paint_commands.merge(local_commands);
+                }
+
+                let text_system = unsafe { &mut *text_system_ptr };
+                let mut local_commands = PaintCommands::default();
+                {
+                    let mut ctx = PaintContext {
+                        draw_list,
+                        layout,
+                        layout_tree,
+                        focus,
+                        widget_id: id,
+                        scale_factor: 1.0,
+                        text_system,
+                        elapsed_time,
+                        commands: &mut local_commands,
+                    };
+                    widget.paint(&mut ctx);
+                }
+                for child in widget.children() {
+                    paint_widget(
+                        child.as_ref(),
+                        layout_tree,
+                        focus,
+                        draw_list,
+                        surface_frames,
+                        scale_factor,
+                        text_system_ptr,
+                        elapsed_time,
+                        &mut local_commands,
+                    );
+                }
                 let text_system = unsafe { &mut *text_system_ptr };
                 let mut ctx = PaintContext {
                     draw_list,
@@ -212,19 +300,10 @@ impl WebAppState {
                     scale_factor: 1.0,
                     text_system,
                     elapsed_time,
+                    commands: &mut local_commands,
                 };
-                widget.paint(&mut ctx);
-                for child in widget.children() {
-                    paint_widget(
-                        child.as_ref(),
-                        layout_tree,
-                        focus,
-                        ctx.draw_list,
-                        text_system_ptr,
-                        elapsed_time,
-                    );
-                }
                 widget.paint_after_children(&mut ctx);
+                paint_commands.merge(local_commands);
             }
         }
 
@@ -234,11 +313,14 @@ impl WebAppState {
                 &self.layout_tree,
                 &self.focus_manager,
                 &mut self.draw_list,
+                &mut self.surface_frames,
+                self.scale_factor,
                 text_system_ptr,
                 elapsed_time,
+                &mut paint_commands,
             );
         });
-        self.needs_repaint = false;
+        self.needs_repaint = paint_commands.request_next_frame;
     }
 
     fn handle_event(&mut self, event: InputEvent) {
@@ -361,44 +443,100 @@ impl WebAppState {
             {
                 log::error!("dom render failed: {:?}", err);
             } else {
+                log::trace!(
+                    "dom frame: active_nodes={} mutated_nodes={}",
+                    self.dom_renderer.active_node_count(),
+                    self.dom_renderer.mutated_node_count()
+                );
                 self.emit_first_paint_event();
+            }
+            if let Err(err) = self
+                .surface_manager
+                .render(&self.surface_frames, Color::TRANSPARENT)
+            {
+                log::error!("hybrid surface render failed: {:?}", err);
             }
         }
     }
+
+    fn should_schedule_frame(&self) -> bool {
+        self.needs_layout || self.needs_repaint || self.task_runtime.has_in_flight()
+    }
 }
 
-fn start_animation_loop(window: &Window, state: &Rc<RefCell<WebAppState>>) {
-    let frame_cb: Rc<RefCell<Option<Closure<dyn FnMut(f64)>>>> = Rc::new(RefCell::new(None));
-    let frame_cb_clone = Rc::clone(&frame_cb);
+fn start_animation_loop(
+    window: &Window,
+    state: &Rc<RefCell<WebAppState>>,
+    pending_animation_frame: &Rc<Cell<bool>>,
+    frame_cb: &Rc<RefCell<Option<Closure<dyn FnMut(f64)>>>>,
+) {
+    let frame_cb_clone = Rc::clone(frame_cb);
     let window_for_loop = window.clone();
     let state = Rc::clone(state);
+    let state_for_callback = Rc::clone(&state);
+    let frame_cb_for_callback = Rc::clone(frame_cb);
+    let pending_animation_frame_for_callback = Rc::clone(pending_animation_frame);
 
     *frame_cb_clone.borrow_mut() = Some(Closure::wrap(Box::new(move |_ts: f64| {
-        state.borrow_mut().frame();
-        if let Some(cb) = frame_cb.borrow().as_ref() {
-            let _ = window_for_loop.request_animation_frame(cb.as_ref().unchecked_ref());
+        pending_animation_frame_for_callback.set(false);
+        {
+            let mut state = state_for_callback.borrow_mut();
+            state.frame();
+        }
+        if state_for_callback.borrow().should_schedule_frame() {
+            schedule_animation_frame(
+                &window_for_loop,
+                &pending_animation_frame_for_callback,
+                &frame_cb_for_callback,
+            );
         }
     }) as Box<dyn FnMut(f64)>));
 
-    let cb_ref = frame_cb_clone.borrow();
+    schedule_animation_frame(window, pending_animation_frame, frame_cb);
+}
+
+fn schedule_animation_frame(
+    window: &Window,
+    pending_animation_frame: &Rc<Cell<bool>>,
+    frame_cb: &Rc<RefCell<Option<Closure<dyn FnMut(f64)>>>>,
+) {
+    if pending_animation_frame.get() {
+        return;
+    }
+    pending_animation_frame.set(true);
+
+    let cb_ref = frame_cb.borrow();
     let cb = cb_ref
         .as_ref()
         .expect("animation callback should be initialized");
     let _ = window.request_animation_frame(cb.as_ref().unchecked_ref());
 }
 
-fn install_event_listeners(window: &Window, state: &Rc<RefCell<WebAppState>>) {
+fn install_event_listeners(
+    window: &Window,
+    state: &Rc<RefCell<WebAppState>>,
+    pending_animation_frame: &Rc<Cell<bool>>,
+    frame_cb: &Rc<RefCell<Option<Closure<dyn FnMut(f64)>>>>,
+) {
     let root = state.borrow().dom_renderer.root().clone();
 
     {
         let state = Rc::clone(state);
+        let pending_animation_frame = Rc::clone(pending_animation_frame);
+        let frame_cb = Rc::clone(frame_cb);
+        let window = window.clone();
         let target = root.clone();
         let root_for_event = target.clone();
         let on_move = Closure::wrap(Box::new(move |event: MouseEvent| {
             let pos = mouse_pos(&root_for_event, &event);
-            let mut state = state.borrow_mut();
-            state.mouse_pos = pos;
-            state.handle_event(InputEvent::PointerMove { pos });
+            let mut state_ref = state.borrow_mut();
+            state_ref.mouse_pos = pos;
+            state_ref.handle_event(InputEvent::PointerMove { pos });
+            let should_schedule = state_ref.should_schedule_frame();
+            drop(state_ref);
+            if should_schedule {
+                schedule_animation_frame(&window, &pending_animation_frame, &frame_cb);
+            }
         }) as Box<dyn FnMut(_)>);
         let _ =
             target.add_event_listener_with_callback("mousemove", on_move.as_ref().unchecked_ref());
@@ -407,15 +545,23 @@ fn install_event_listeners(window: &Window, state: &Rc<RefCell<WebAppState>>) {
 
     {
         let state = Rc::clone(state);
+        let pending_animation_frame = Rc::clone(pending_animation_frame);
+        let frame_cb = Rc::clone(frame_cb);
+        let window = window.clone();
         let target = root.clone();
         let root_for_event = target.clone();
         let on_down = Closure::wrap(Box::new(move |event: MouseEvent| {
             let pos = mouse_pos(&root_for_event, &event);
             let button = mouse_button(event.button());
             root_for_event.focus().ok();
-            let mut state = state.borrow_mut();
-            state.mouse_pos = pos;
-            state.handle_event(InputEvent::PointerDown { pos, button });
+            let mut state_ref = state.borrow_mut();
+            state_ref.mouse_pos = pos;
+            state_ref.handle_event(InputEvent::PointerDown { pos, button });
+            let should_schedule = state_ref.should_schedule_frame();
+            drop(state_ref);
+            if should_schedule {
+                schedule_animation_frame(&window, &pending_animation_frame, &frame_cb);
+            }
         }) as Box<dyn FnMut(_)>);
         let _ =
             target.add_event_listener_with_callback("mousedown", on_down.as_ref().unchecked_ref());
@@ -424,14 +570,22 @@ fn install_event_listeners(window: &Window, state: &Rc<RefCell<WebAppState>>) {
 
     {
         let state = Rc::clone(state);
+        let pending_animation_frame = Rc::clone(pending_animation_frame);
+        let frame_cb = Rc::clone(frame_cb);
+        let window = window.clone();
         let target = root.clone();
         let root_for_event = target.clone();
         let on_up = Closure::wrap(Box::new(move |event: MouseEvent| {
             let pos = mouse_pos(&root_for_event, &event);
             let button = mouse_button(event.button());
-            let mut state = state.borrow_mut();
-            state.mouse_pos = pos;
-            state.handle_event(InputEvent::PointerUp { pos, button });
+            let mut state_ref = state.borrow_mut();
+            state_ref.mouse_pos = pos;
+            state_ref.handle_event(InputEvent::PointerUp { pos, button });
+            let should_schedule = state_ref.should_schedule_frame();
+            drop(state_ref);
+            if should_schedule {
+                schedule_animation_frame(&window, &pending_animation_frame, &frame_cb);
+            }
         }) as Box<dyn FnMut(_)>);
         let _ = target.add_event_listener_with_callback("mouseup", on_up.as_ref().unchecked_ref());
         on_up.forget();
@@ -439,6 +593,9 @@ fn install_event_listeners(window: &Window, state: &Rc<RefCell<WebAppState>>) {
 
     {
         let state = Rc::clone(state);
+        let pending_animation_frame = Rc::clone(pending_animation_frame);
+        let frame_cb = Rc::clone(frame_cb);
+        let window = window.clone();
         let target = root.clone();
         let root_for_event = target.clone();
         let on_wheel = Closure::wrap(Box::new(move |event: WheelEvent| {
@@ -450,10 +607,16 @@ fn install_event_listeners(window: &Window, state: &Rc<RefCell<WebAppState>>) {
                 delta_x /= 20.0;
                 delta_y /= 20.0;
             }
-            state.borrow_mut().handle_event(InputEvent::Scroll {
+            let mut state_ref = state.borrow_mut();
+            state_ref.handle_event(InputEvent::Scroll {
                 pos,
                 delta: glam::Vec2::new(delta_x, delta_y),
             });
+            let should_schedule = state_ref.should_schedule_frame();
+            drop(state_ref);
+            if should_schedule {
+                schedule_animation_frame(&window, &pending_animation_frame, &frame_cb);
+            }
         }) as Box<dyn FnMut(_)>);
         let _ = target.add_event_listener_with_callback("wheel", on_wheel.as_ref().unchecked_ref());
         on_wheel.forget();
@@ -461,6 +624,9 @@ fn install_event_listeners(window: &Window, state: &Rc<RefCell<WebAppState>>) {
 
     {
         let state = Rc::clone(state);
+        let pending_animation_frame = Rc::clone(pending_animation_frame);
+        let frame_cb = Rc::clone(frame_cb);
+        let window = window.clone();
         let on_key_down = Closure::wrap(Box::new(move |event: WebKeyboardEvent| {
             if let Some(key) = map_browser_key(event.key()) {
                 let code = spark_input::ui_events::keyboard::Code::Unidentified;
@@ -475,6 +641,9 @@ fn install_event_listeners(window: &Window, state: &Rc<RefCell<WebAppState>>) {
                     .borrow_mut()
                     .handle_event(InputEvent::TextInput { text: event.key() });
             }
+            if state.borrow().should_schedule_frame() {
+                schedule_animation_frame(&window, &pending_animation_frame, &frame_cb);
+            }
         }) as Box<dyn FnMut(_)>);
         let _ =
             root.add_event_listener_with_callback("keydown", on_key_down.as_ref().unchecked_ref());
@@ -483,6 +652,9 @@ fn install_event_listeners(window: &Window, state: &Rc<RefCell<WebAppState>>) {
 
     {
         let state = Rc::clone(state);
+        let pending_animation_frame = Rc::clone(pending_animation_frame);
+        let frame_cb = Rc::clone(frame_cb);
+        let window = window.clone();
         let on_key_up = Closure::wrap(Box::new(move |event: WebKeyboardEvent| {
             if let Some(key) = map_browser_key(event.key()) {
                 let code = spark_input::ui_events::keyboard::Code::Unidentified;
@@ -490,6 +662,9 @@ fn install_event_listeners(window: &Window, state: &Rc<RefCell<WebAppState>>) {
                 state
                     .borrow_mut()
                     .handle_event(InputEvent::KeyUp { event: kb_event });
+                if state.borrow().should_schedule_frame() {
+                    schedule_animation_frame(&window, &pending_animation_frame, &frame_cb);
+                }
             }
         }) as Box<dyn FnMut(_)>);
         let _ = root.add_event_listener_with_callback("keyup", on_key_up.as_ref().unchecked_ref());
@@ -498,8 +673,14 @@ fn install_event_listeners(window: &Window, state: &Rc<RefCell<WebAppState>>) {
 
     {
         let state = Rc::clone(state);
+        let pending_animation_frame = Rc::clone(pending_animation_frame);
+        let frame_cb = Rc::clone(frame_cb);
+        let window = window.clone();
         let on_focus = Closure::wrap(Box::new(move || {
             state.borrow_mut().handle_event(InputEvent::FocusGained);
+            if state.borrow().should_schedule_frame() {
+                schedule_animation_frame(&window, &pending_animation_frame, &frame_cb);
+            }
         }) as Box<dyn FnMut()>);
         let _ = root.add_event_listener_with_callback("focus", on_focus.as_ref().unchecked_ref());
         on_focus.forget();
@@ -507,8 +688,14 @@ fn install_event_listeners(window: &Window, state: &Rc<RefCell<WebAppState>>) {
 
     {
         let state = Rc::clone(state);
+        let pending_animation_frame = Rc::clone(pending_animation_frame);
+        let frame_cb = Rc::clone(frame_cb);
+        let window = window.clone();
         let on_blur = Closure::wrap(Box::new(move || {
             state.borrow_mut().handle_event(InputEvent::FocusLost);
+            if state.borrow().should_schedule_frame() {
+                schedule_animation_frame(&window, &pending_animation_frame, &frame_cb);
+            }
         }) as Box<dyn FnMut()>);
         let _ = root.add_event_listener_with_callback("blur", on_blur.as_ref().unchecked_ref());
         on_blur.forget();
@@ -516,10 +703,22 @@ fn install_event_listeners(window: &Window, state: &Rc<RefCell<WebAppState>>) {
 
     {
         let state = Rc::clone(state);
+        let pending_animation_frame = Rc::clone(pending_animation_frame);
+        let frame_cb = Rc::clone(frame_cb);
+        let window_for_resize = window.clone();
         let on_resize = Closure::wrap(Box::new(move || {
-            let mut state = state.borrow_mut();
-            state.update_viewport();
-            state.needs_layout = true;
+            let mut state_ref = state.borrow_mut();
+            state_ref.update_viewport();
+            state_ref.needs_layout = true;
+            let should_schedule = state_ref.should_schedule_frame();
+            drop(state_ref);
+            if should_schedule {
+                schedule_animation_frame(
+                    &window_for_resize,
+                    &pending_animation_frame,
+                    &frame_cb,
+                );
+            }
         }) as Box<dyn FnMut()>);
         let _ =
             window.add_event_listener_with_callback("resize", on_resize.as_ref().unchecked_ref());

@@ -11,6 +11,7 @@ use parley::{
     FontContext, Layout, LayoutContext,
 };
 use spark_core::{Color, GlyphInstance};
+use std::collections::HashMap;
 use swash::{
     scale::{Render, ScaleContext, Source, StrikeWith},
     zeno::{Format, Vector},
@@ -109,6 +110,40 @@ pub struct TextSystem {
     layout_cx: LayoutContext<[u8; 4]>,
     scale_cx: ScaleContext,
     atlas: Option<GlyphAtlas>,
+    measure_cache: HashMap<TextCacheKey, (f32, f32)>,
+    shape_cache: HashMap<TextCacheKey, ShapedText>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct TextCacheKey {
+    text: String,
+    family: String,
+    font_size_bits: u32,
+    line_height_bits: u32,
+    color_bits: [u32; 4],
+    bold: bool,
+    italic: bool,
+    max_width_bits: Option<u32>,
+}
+
+impl TextCacheKey {
+    fn new(text: &str, style: &TextStyle, max_width: Option<f32>) -> Self {
+        Self {
+            text: text.to_owned(),
+            family: style.family.clone(),
+            font_size_bits: style.font_size.to_bits(),
+            line_height_bits: style.line_height.to_bits(),
+            color_bits: [
+                style.color.r.to_bits(),
+                style.color.g.to_bits(),
+                style.color.b.to_bits(),
+                style.color.a.to_bits(),
+            ],
+            bold: style.bold,
+            italic: style.italic,
+            max_width_bits: max_width.map(f32::to_bits),
+        }
+    }
 }
 
 impl TextSystem {
@@ -142,6 +177,8 @@ impl TextSystem {
             layout_cx,
             scale_cx,
             atlas: None,
+            measure_cache: HashMap::new(),
+            shape_cache: HashMap::new(),
         }
     }
 
@@ -163,6 +200,7 @@ impl TextSystem {
     fn ensure_atlas(&mut self, device: &Device) {
         if self.atlas.is_none() {
             self.atlas = Some(GlyphAtlas::new(device, 1024, 1024));
+            self.shape_cache.clear();
         }
     }
 
@@ -177,6 +215,10 @@ impl TextSystem {
     ) -> ShapedText {
         if text.is_empty() {
             return ShapedText::default();
+        }
+        let cache_key = TextCacheKey::new(text, style, max_width);
+        if let Some(cached) = self.shape_cache.get(&cache_key) {
+            return cached.clone();
         }
         self.ensure_atlas(device);
 
@@ -243,6 +285,7 @@ impl TextSystem {
                     );
                     if reset_atlas {
                         self.atlas = Some(GlyphAtlas::new(device, 2048, 2048));
+                        self.shape_cache.clear();
                     }
                 }
             }
@@ -267,11 +310,13 @@ impl TextSystem {
             style.font_size * style.line_height
         };
 
-        ShapedText {
+        let shaped = ShapedText {
             glyphs,
             width: layout.width(),
             height: total_height,
-        }
+        };
+        cache_insert(&mut self.shape_cache, cache_key, shaped.clone(), 512);
+        shaped
     }
 
     fn render_glyph_run(
@@ -426,6 +471,10 @@ impl TextSystem {
         if text.is_empty() {
             return (0.0, style.font_size * style.line_height);
         }
+        let cache_key = TextCacheKey::new(text, style, max_width);
+        if let Some(cached) = self.measure_cache.get(&cache_key) {
+            return *cached;
+        }
 
         // Build layout with Parley
         let mut builder = self
@@ -487,8 +536,17 @@ impl TextSystem {
             }
         };
 
-        (width, height)
+        let measured = (width, height);
+        cache_insert(&mut self.measure_cache, cache_key, measured, 1024);
+        measured
     }
+}
+
+fn cache_insert<V: Clone>(cache: &mut HashMap<TextCacheKey, V>, key: TextCacheKey, value: V, max: usize) {
+    if cache.len() >= max {
+        cache.clear();
+    }
+    cache.insert(key, value);
 }
 
 #[cfg(test)]

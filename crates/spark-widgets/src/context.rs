@@ -45,6 +45,8 @@ pub struct PaintContext<'a> {
     pub text_system: &'a mut TextSystem,
     /// Elapsed time in seconds (for animations like cursor blinking).
     pub elapsed_time: f32,
+    /// Commands requested during paint.
+    pub commands: &'a mut PaintCommands,
 }
 
 impl<'a> PaintContext<'a> {
@@ -87,6 +89,20 @@ impl<'a> PaintContext<'a> {
         let scaled_border = border_width * self.scale_factor;
         self.draw_list
             .bordered_rect(bounds, color, scaled_radius, scaled_border, border_color);
+    }
+
+    /// Draw a line segment.
+    /// Coordinates and thickness are in physical pixels.
+    pub fn stroke_line(
+        &mut self,
+        start: spark_core::Point,
+        end: spark_core::Point,
+        thickness: f32,
+        color: Color,
+    ) {
+        let scaled_thickness = thickness * self.scale_factor;
+        self.draw_list
+            .line((start.x, start.y), (end.x, end.y), scaled_thickness, color);
     }
 
     /// Push a clip rectangle.
@@ -180,6 +196,23 @@ impl<'a> PaintContext<'a> {
             ..style.clone()
         };
         self.text_system.measure(text, &scaled_style, None)
+    }
+
+    /// Request another animation frame after this paint.
+    pub fn request_next_frame(&mut self) {
+        self.commands.request_next_frame = true;
+    }
+}
+
+/// Commands emitted during painting.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PaintCommands {
+    pub request_next_frame: bool,
+}
+
+impl PaintCommands {
+    pub fn merge(&mut self, other: PaintCommands) {
+        self.request_next_frame |= other.request_next_frame;
     }
 }
 

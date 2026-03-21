@@ -31,6 +31,7 @@ struct InstanceInput {
     @location(5) corner_radius: f32,
     @location(6) border_width: f32,
     @location(7) border_color: vec4<f32>,
+    @location(8) rotation: f32,
 };
 
 struct VertexOutput {
@@ -46,16 +47,23 @@ struct VertexOutput {
 @vertex
 fn vs_main(vertex: VertexInput, instance: InstanceInput) -> VertexOutput {
     var out: VertexOutput;
-    
-    // Transform vertex position to pixel coordinates
-    let pixel_pos = instance.pos + vertex.position * instance.size;
+
+    let local_pos = vertex.position * instance.size;
+    let centered = local_pos - instance.size * 0.5;
+    let s = sin(instance.rotation);
+    let c = cos(instance.rotation);
+    let rotated = vec2<f32>(
+        centered.x * c - centered.y * s,
+        centered.x * s + centered.y * c
+    );
+    let pixel_pos = instance.pos + instance.size * 0.5 + rotated;
     
     // Convert to clip space (-1 to 1)
     let clip_pos = (pixel_pos / globals.viewport_size) * 2.0 - 1.0;
     out.clip_position = vec4<f32>(clip_pos.x, -clip_pos.y, 0.0, 1.0);
     
     out.color = instance.color;
-    out.local_pos = vertex.position * instance.size;
+    out.local_pos = local_pos;
     out.size = instance.size;
     out.corner_radius = instance.corner_radius;
     out.border_width = instance.border_width;
@@ -142,6 +150,26 @@ impl ShapePass {
         border_width: f32,
         border_color: [f32; 4],
     ) {
+        self.add_rect_with_rotation(
+            bounds,
+            color,
+            corner_radius,
+            border_width,
+            border_color,
+            0.0,
+        );
+    }
+
+    /// Add a shape instance with rotation.
+    pub fn add_rect_with_rotation(
+        &mut self,
+        bounds: Rect,
+        color: [f32; 4],
+        corner_radius: f32,
+        border_width: f32,
+        border_color: [f32; 4],
+        rotation: f32,
+    ) {
         self.instances.push(ShapeInstance {
             pos: [bounds.x, bounds.y],
             size: [bounds.width, bounds.height],
@@ -149,7 +177,8 @@ impl ShapePass {
             corner_radius,
             border_width,
             border_color,
-            _padding: [0.0, 0.0],
+            rotation,
+            _padding: [0.0],
         });
     }
 

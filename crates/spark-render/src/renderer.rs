@@ -1,7 +1,7 @@
 //! Main renderer that processes draw lists and issues GPU commands.
 
 use crate::{DrawCommand, DrawList, ShapePass, TextPass};
-use spark_core::{GlobalUniforms, Rect};
+use spark_core::{GlobalUniforms, Point, Rect};
 use spark_text::TextSystem;
 use wgpu::{CommandEncoder, Device, Queue, TextureFormat, TextureView};
 
@@ -83,6 +83,42 @@ impl Renderer {
                         *corner_radius,
                         *border_width,
                         border_color.to_array(),
+                    );
+                }
+                DrawCommand::Line {
+                    start,
+                    end,
+                    thickness,
+                    color,
+                } => {
+                    let translation = self.translation_stack.last().copied().unwrap_or((0.0, 0.0));
+                    let start = Point::new(start.0 + translation.0, start.1 + translation.1);
+                    let end = Point::new(end.0 + translation.0, end.1 + translation.1);
+                    let line_bounds = line_bounding_box(start, end, *thickness);
+                    if let Some(clip) = self.clip_stack.last() {
+                        if line_bounds.intersection(clip).is_none() {
+                            continue;
+                        }
+                    }
+                    let delta = end - start;
+                    let length = delta.length();
+                    if length <= f32::EPSILON {
+                        continue;
+                    }
+                    let center = (start + end) * 0.5;
+                    let bounds = Rect::new(
+                        center.x - length * 0.5,
+                        center.y - *thickness * 0.5,
+                        length,
+                        *thickness,
+                    );
+                    self.shape_pass.add_rect_with_rotation(
+                        bounds,
+                        color.to_array(),
+                        *thickness * 0.5,
+                        0.0,
+                        [0.0, 0.0, 0.0, 0.0],
+                        delta.y.atan2(delta.x),
                     );
                 }
                 DrawCommand::Text { glyphs } => {
@@ -239,4 +275,13 @@ impl Renderer {
     pub fn glyph_count(&self) -> usize {
         self.text_pass.instance_count()
     }
+}
+
+fn line_bounding_box(start: Point, end: Point, thickness: f32) -> Rect {
+    let half = thickness * 0.5;
+    let min_x = start.x.min(end.x) - half;
+    let min_y = start.y.min(end.y) - half;
+    let max_x = start.x.max(end.x) + half;
+    let max_y = start.y.max(end.y) + half;
+    Rect::new(min_x, min_y, max_x - min_x, max_y - min_y)
 }

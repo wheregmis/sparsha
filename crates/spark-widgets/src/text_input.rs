@@ -502,6 +502,7 @@ impl Widget for TextInput {
 
         // Draw cursor when focused
         if focused {
+            ctx.request_next_frame();
             // Blink cursor at ~2Hz
             let cursor_visible = (ctx.elapsed_time * 2.0).fract() < 0.5;
 
@@ -724,6 +725,7 @@ mod tests {
         let layout_tree = LayoutTree::new();
         let focus = FocusManager::new();
         let mut text = TextSystem::new_headless();
+        let mut paint_commands = crate::PaintCommands::default();
 
         let mut ctx = PaintContext {
             draw_list: &mut draw_list,
@@ -734,6 +736,7 @@ mod tests {
             scale_factor: 1.0,
             text_system: &mut text,
             elapsed_time: 0.0,
+            commands: &mut paint_commands,
         };
 
         let style = TextStyle::default().with_size(input.style.font_size);

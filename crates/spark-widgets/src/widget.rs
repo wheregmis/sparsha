@@ -25,6 +25,11 @@ pub trait Widget {
         // Default: no-op
     }
 
+    /// Optional draw-heavy surface hook for runtimes that support hybrid rendering.
+    fn draw_surface(&self) -> Option<&crate::DrawSurface> {
+        None
+    }
+
     /// Rebuild dynamic children before layout.
     fn rebuild(&mut self, _ctx: &mut super::BuildContext) {
         // Default: no-op

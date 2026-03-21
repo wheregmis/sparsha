@@ -1,17 +1,14 @@
-use serde_json::json;
 use spark::core::glam::Vec2;
 use spark::input::PointerButton;
 use spark::layout::{taffy, WidgetId};
 use spark::prelude::*;
 use spark::text::TextStyle;
-use spark::widgets::{EventContext, PaintContext};
+use spark::widgets::{DrawSurfaceContext, EventContext, PaintContext};
 use std::f32::consts::{PI, TAU};
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(target_arch = "wasm32")]
 use web_time::{SystemTime, UNIX_EPOCH};
-
-const TICK_MS: u64 = 33;
 
 fn main() {
     #[cfg(target_arch = "wasm32")]
@@ -29,8 +26,13 @@ fn main() {
 
 struct FractalClock {
     id: WidgetId,
-    task_runtime: TaskRuntime,
-    now_utc: Signal<f64>,
+    pointer: Signal<Vec2>,
+    zoom: Signal<f32>,
+    palette_index: Signal<usize>,
+    surface: DrawSurface,
+}
+
+struct FractalClockScene {
     pointer: Signal<Vec2>,
     zoom: Signal<f32>,
     palette_index: Signal<usize>,
@@ -51,28 +53,20 @@ struct Palette {
 
 impl FractalClock {
     fn new() -> Self {
-        let task_runtime = TaskRuntime::current_or_default();
-        let now_utc = Signal::new(current_utc_seconds());
-        let runtime_for_tick = task_runtime.clone();
-        let now_for_results = now_utc;
-
-        task_runtime.on_result(move |result| {
-            if result.task_kind != "sleep_echo" {
-                return;
-            }
-            now_for_results.set(current_utc_seconds());
-            schedule_tick(&runtime_for_tick);
-        });
-
-        schedule_tick(&task_runtime);
-
+        let pointer = Signal::new(Vec2::ZERO);
+        let zoom = Signal::new(1.0);
+        let palette_index = Signal::new(0);
+        let scene = FractalClockScene {
+            pointer,
+            zoom,
+            palette_index,
+        };
         Self {
             id: WidgetId::default(),
-            task_runtime,
-            now_utc,
-            pointer: Signal::new(Vec2::ZERO),
-            zoom: Signal::new(1.0),
-            palette_index: Signal::new(0),
+            pointer,
+            zoom,
+            palette_index,
+            surface: DrawSurface::new(move |ctx| scene.paint(ctx)).fill(),
         }
     }
 
@@ -80,16 +74,103 @@ impl FractalClock {
         palette(self.palette_index.get())
     }
 
-    fn digital_time(&self, seconds: f64) -> String {
-        let total = (seconds.floor() as u64) % 86_400;
-        let hours = total / 3_600;
-        let minutes = (total / 60) % 60;
-        let secs = total % 60;
-        format!("{hours:02}:{minutes:02}:{secs:02} UTC")
+    fn paint_hud(&self, ctx: &mut PaintContext) {
+        let bounds = ctx.bounds();
+        let palette = self.palette();
+        let seconds = current_utc_seconds();
+        let zoom = self.zoom.get();
+        let ambient = 0.55 + 0.45 * (seconds as f32 * 0.33).sin().abs();
+
+        let title = TextStyle::new()
+            .with_family("Inter")
+            .with_size(15.0)
+            .with_color(palette.text)
+            .bold();
+        let body = TextStyle::new()
+            .with_family("Inter")
+            .with_size(12.0)
+            .with_color(palette.dim);
+        let hero = TextStyle::new()
+            .with_family("Inter")
+            .with_size(30.0)
+            .with_color(palette.text)
+            .bold();
+
+        let info_panel = Rect::new(bounds.x + 26.0, bounds.y + 24.0, 250.0, 108.0);
+        ctx.fill_bordered_rect(
+            info_panel,
+            palette.veil.with_alpha(0.62),
+            16.0,
+            1.0,
+            palette.second.with_alpha(0.08),
+        );
+        ctx.draw_text("FRACTAL CLOCK", &title, info_panel.x + 16.0, info_panel.y + 16.0);
+        ctx.draw_text(
+            palette.name,
+            &body.clone().with_color(palette.minute),
+            info_panel.x + 16.0,
+            info_panel.y + 42.0,
+        );
+        ctx.draw_text(
+            "Primary click shifts palette",
+            &body,
+            info_panel.x + 16.0,
+            info_panel.y + 64.0,
+        );
+        ctx.draw_text(
+            "Scroll adjusts orbit density",
+            &body,
+            info_panel.x + 16.0,
+            info_panel.y + 84.0,
+        );
+
+        let time_panel = Rect::new(bounds.x + 26.0, bounds.y + bounds.height - 110.0, 320.0, 72.0);
+        ctx.fill_bordered_rect(
+            time_panel,
+            palette.veil.with_alpha(0.66),
+            18.0,
+            1.0,
+            palette.second.with_alpha(0.08),
+        );
+        ctx.draw_text(
+            &digital_time(seconds),
+            &hero,
+            time_panel.x + 18.0,
+            time_panel.y + 18.0,
+        );
+        ctx.draw_text(
+            "Time source: UTC lattice / paint-driven frame loop",
+            &body,
+            time_panel.x + 20.0,
+            time_panel.y + 52.0,
+        );
+
+        let stats = format!(
+            "Zoom {:>4.0}%   Pulse {:>3.0}%   Mode live",
+            zoom * 100.0,
+            ambient * 100.0,
+        );
+        let stats_style = body.with_color(palette.hour);
+        let (stats_width, _) = ctx.measure_text(&stats, &stats_style);
+        let stats_x = bounds.x + bounds.width - stats_width - 28.0;
+        let stats_y = bounds.y + bounds.height - 42.0;
+        ctx.draw_text(&stats, &stats_style, stats_x, stats_y);
+    }
+}
+
+impl FractalClockScene {
+    fn palette(&self) -> Palette {
+        palette(self.palette_index.get())
     }
 
-    fn draw_scene(&self, ctx: &mut PaintContext, palette: Palette, seconds: f64) {
-        let bounds = ctx.bounds();
+    fn paint(&self, ctx: &mut DrawSurfaceContext) {
+        ctx.request_next_frame();
+        let palette = self.palette();
+        self.draw_scene(ctx, palette, current_utc_seconds());
+    }
+
+    fn draw_scene(&self, ctx: &mut DrawSurfaceContext, palette: Palette, seconds: f64) {
+        let bounds = ctx.bounds;
         let size = bounds.size();
         let center = bounds.center()
             + Vec2::new(
@@ -165,10 +246,9 @@ impl FractalClock {
         }
 
         self.draw_core(ctx, center, orbit_radius, palette, drift);
-        self.draw_hud(ctx, bounds, palette, seconds, zoom, ambient);
     }
 
-    fn draw_backdrop(&self, ctx: &mut PaintContext, bounds: Rect, palette: Palette, drift: f32) {
+    fn draw_backdrop(&self, ctx: &mut DrawSurfaceContext, bounds: Rect, palette: Palette, drift: f32) {
         let w = bounds.width;
         let h = bounds.height;
         for i in 0..18 {
@@ -191,7 +271,7 @@ impl FractalClock {
         );
     }
 
-    fn draw_stars(&self, ctx: &mut PaintContext, bounds: Rect, palette: Palette, drift: f32) {
+    fn draw_stars(&self, ctx: &mut DrawSurfaceContext, bounds: Rect, palette: Palette, drift: f32) {
         for i in 0..160 {
             let seed = i as f32 * 1.371;
             let x = bounds.x + hash(seed + 1.1) * bounds.width;
@@ -211,7 +291,7 @@ impl FractalClock {
 
     fn draw_orbit(
         &self,
-        ctx: &mut PaintContext,
+        ctx: &mut DrawSurfaceContext,
         center: Vec2,
         radius: f32,
         palette: Palette,
@@ -234,7 +314,7 @@ impl FractalClock {
 
     fn draw_hour_markers(
         &self,
-        ctx: &mut PaintContext,
+        ctx: &mut DrawSurfaceContext,
         center: Vec2,
         radius: f32,
         palette: Palette,
@@ -266,7 +346,7 @@ impl FractalClock {
     #[allow(clippy::too_many_arguments)]
     fn draw_fractal_hand(
         &self,
-        ctx: &mut PaintContext,
+        ctx: &mut DrawSurfaceContext,
         origin: Vec2,
         angle: f32,
         length: f32,
@@ -297,7 +377,7 @@ impl FractalClock {
     #[allow(clippy::too_many_arguments)]
     fn draw_branch(
         &self,
-        ctx: &mut PaintContext,
+        ctx: &mut DrawSurfaceContext,
         origin: Vec2,
         angle: f32,
         length: f32,
@@ -385,7 +465,7 @@ impl FractalClock {
 
     fn draw_satellites(
         &self,
-        ctx: &mut PaintContext,
+        ctx: &mut DrawSurfaceContext,
         center: Vec2,
         radius: f32,
         palette: Palette,
@@ -407,7 +487,7 @@ impl FractalClock {
 
     fn draw_core(
         &self,
-        ctx: &mut PaintContext,
+        ctx: &mut DrawSurfaceContext,
         center: Vec2,
         radius: f32,
         palette: Palette,
@@ -445,95 +525,9 @@ impl FractalClock {
         );
     }
 
-    fn draw_hud(
-        &self,
-        ctx: &mut PaintContext,
-        bounds: Rect,
-        palette: Palette,
-        seconds: f64,
-        zoom: f32,
-        ambient: f32,
-    ) {
-        let title = TextStyle::new()
-            .with_family("Inter")
-            .with_size(15.0)
-            .with_color(palette.text)
-            .bold();
-        let body = TextStyle::new()
-            .with_family("Inter")
-            .with_size(12.0)
-            .with_color(palette.dim);
-        let hero = TextStyle::new()
-            .with_family("Inter")
-            .with_size(30.0)
-            .with_color(palette.text)
-            .bold();
-
-        let info_panel = Rect::new(bounds.x + 26.0, bounds.y + 24.0, 250.0, 108.0);
-        ctx.fill_bordered_rect(
-            info_panel,
-            palette.veil.with_alpha(0.62),
-            16.0,
-            1.0,
-            palette.second.with_alpha(0.08),
-        );
-        ctx.draw_text("FRACTAL CLOCK", &title, info_panel.x + 16.0, info_panel.y + 16.0);
-        ctx.draw_text(
-            palette.name,
-            &body.clone().with_color(palette.minute),
-            info_panel.x + 16.0,
-            info_panel.y + 42.0,
-        );
-        ctx.draw_text(
-            "Primary click shifts palette",
-            &body,
-            info_panel.x + 16.0,
-            info_panel.y + 64.0,
-        );
-        ctx.draw_text(
-            "Scroll adjusts orbit density",
-            &body,
-            info_panel.x + 16.0,
-            info_panel.y + 84.0,
-        );
-
-        let time_panel = Rect::new(bounds.x + 26.0, bounds.y + bounds.height - 110.0, 320.0, 72.0);
-        ctx.fill_bordered_rect(
-            time_panel,
-            palette.veil.with_alpha(0.66),
-            18.0,
-            1.0,
-            palette.second.with_alpha(0.08),
-        );
-        ctx.draw_text(
-            &self.digital_time(seconds),
-            &hero,
-            time_panel.x + 18.0,
-            time_panel.y + 18.0,
-        );
-        ctx.draw_text(
-            "Time source: UTC lattice / live task ticker",
-            &body,
-            time_panel.x + 20.0,
-            time_panel.y + 52.0,
-        );
-
-        let stats = format!(
-            "Zoom {:>4.0}%   Pulse {:>3.0}%   Worker {}",
-            zoom * 100.0,
-            ambient * 100.0,
-            if self.task_runtime.has_in_flight() { "active" } else { "idle" }
-        );
-        let stats_style = body.with_color(palette.hour);
-        let (stats_width, _) = ctx.measure_text(&stats, &stats_style);
-        let stats_x = bounds.x + bounds.width - stats_width - 28.0;
-        let stats_y = bounds.y + bounds.height - 42.0;
-        ctx.draw_text(&stats, &stats_style, stats_x, stats_y);
-    }
-
     fn draw_segment(
         &self,
-        ctx: &mut PaintContext,
+        ctx: &mut DrawSurfaceContext,
         start: Vec2,
         end: Vec2,
         thickness: f32,
@@ -545,17 +539,8 @@ impl FractalClock {
             return;
         }
 
-        let steps = ((distance / (thickness.max(1.0) * 1.65)).ceil() as usize).clamp(1, 26);
-        for i in 0..=steps {
-            let t = i as f32 / steps as f32;
-            let pos = start.lerp(end, t);
-            let taper = 0.86 - (t - 0.5).abs() * 0.24;
-            let size = (thickness * taper).max(0.9);
-            ctx.fill_rect(
-                Rect::new(pos.x - size * 0.5, pos.y - size * 0.5, size, size),
-                color,
-            );
-        }
+        let _ = distance;
+        ctx.stroke_line(start, end, thickness, color);
     }
 }
 
@@ -579,8 +564,12 @@ impl Widget for FractalClock {
     }
 
     fn paint(&self, ctx: &mut PaintContext) {
-        let palette = self.palette();
-        self.draw_scene(ctx, palette, self.now_utc.get());
+        self.surface.paint(ctx);
+        self.paint_hud(ctx);
+    }
+
+    fn draw_surface(&self) -> Option<&DrawSurface> {
+        Some(&self.surface)
     }
 
     fn event(&mut self, ctx: &mut EventContext, event: &InputEvent) {
@@ -611,15 +600,19 @@ impl Widget for FractalClock {
     }
 }
 
-fn schedule_tick(runtime: &TaskRuntime) {
-    runtime.spawn("sleep_echo", json!({ "millis": TICK_MS, "data": null }));
-}
-
 fn current_utc_seconds() -> f64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs_f64())
         .unwrap_or_default()
+}
+
+fn digital_time(seconds: f64) -> String {
+    let total = (seconds.floor() as u64) % 86_400;
+    let hours = total / 3_600;
+    let minutes = (total / 60) % 60;
+    let secs = total % 60;
+    format!("{hours:02}:{minutes:02}:{secs:02} UTC")
 }
 
 fn direction(angle: f32) -> Vec2 {

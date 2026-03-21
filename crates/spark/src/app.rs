@@ -20,7 +20,9 @@ use spark_signals::{RuntimeHandle, SubscriberKind};
 #[cfg(not(target_arch = "wasm32"))]
 use spark_text::TextSystem;
 #[cfg(not(target_arch = "wasm32"))]
-use spark_widgets::{BuildContext, EventCommands, EventContext, LayoutContext, PaintContext};
+use spark_widgets::{
+    BuildContext, EventCommands, EventContext, LayoutContext, PaintCommands, PaintContext,
+};
 #[cfg(not(target_arch = "wasm32"))]
 use wgpu::{Device, Queue};
 #[cfg(not(target_arch = "wasm32"))]
@@ -264,6 +266,7 @@ impl<F: FnOnce() -> Box<dyn Widget>> AppRunner<F> {
         // We need to use raw pointers to pass mutable references through the recursive function
         // This is safe because we control the lifetime and don't alias
         let text_system_ptr = &mut state.text_system as *mut TextSystem;
+        let mut paint_commands = PaintCommands::default();
 
         #[allow(clippy::too_many_arguments)]
         fn paint_widget(
@@ -274,12 +277,14 @@ impl<F: FnOnce() -> Box<dyn Widget>> AppRunner<F> {
             scale_factor: f32,
             text_system_ptr: *mut TextSystem,
             elapsed_time: f32,
+            paint_commands: &mut PaintCommands,
         ) {
             let id = widget.id();
 
             if let Some(layout) = layout_tree.get_absolute_layout(id) {
                 // SAFETY: We control the lifetime and ensure no aliasing within this function
                 let text_system = unsafe { &mut *text_system_ptr };
+                let mut local_commands = PaintCommands::default();
 
                 // Scale layout bounds from logical to physical pixels
                 // Layout is computed in logical pixels, but renderer uses physical pixels
@@ -290,6 +295,37 @@ impl<F: FnOnce() -> Box<dyn Widget>> AppRunner<F> {
                     layout.bounds.height * scale_factor,
                 ));
 
+                {
+                    let mut ctx = PaintContext {
+                        draw_list,
+                        layout: scaled_layout,
+                        layout_tree,
+                        focus,
+                        widget_id: id,
+                        scale_factor,
+                        text_system,
+                        elapsed_time,
+                        commands: &mut local_commands,
+                    };
+                    widget.paint(&mut ctx);
+                }
+
+                // Paint children
+                for child in widget.children() {
+                    paint_widget(
+                        child.as_ref(),
+                        layout_tree,
+                        focus,
+                        draw_list,
+                        scale_factor,
+                        text_system_ptr,
+                        elapsed_time,
+                        &mut local_commands,
+                    );
+                }
+
+                // Call after-paint hook for cleanup (e.g., pop transforms/clips)
+                let text_system = unsafe { &mut *text_system_ptr };
                 let mut ctx = PaintContext {
                     draw_list,
                     layout: scaled_layout,
@@ -299,24 +335,10 @@ impl<F: FnOnce() -> Box<dyn Widget>> AppRunner<F> {
                     scale_factor,
                     text_system,
                     elapsed_time,
+                    commands: &mut local_commands,
                 };
-                widget.paint(&mut ctx);
-
-                // Paint children
-                for child in widget.children() {
-                    paint_widget(
-                        child.as_ref(),
-                        layout_tree,
-                        focus,
-                        ctx.draw_list,
-                        scale_factor,
-                        text_system_ptr,
-                        elapsed_time,
-                    );
-                }
-
-                // Call after-paint hook for cleanup (e.g., pop transforms/clips)
                 widget.paint_after_children(&mut ctx);
+                paint_commands.merge(local_commands);
             }
         }
 
@@ -329,10 +351,11 @@ impl<F: FnOnce() -> Box<dyn Widget>> AppRunner<F> {
                 state.scale_factor,
                 text_system_ptr,
                 elapsed_time,
+                &mut paint_commands,
             );
         });
 
-        state.needs_repaint = false;
+        state.needs_repaint = paint_commands.request_next_frame;
     }
 
     fn handle_event(&mut self, event: InputEvent) {

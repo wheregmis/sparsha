@@ -25,6 +25,13 @@ pub enum DrawCommand {
         border_width: f32,
         border_color: Color,
     },
+    /// Draw a line segment with thickness.
+    Line {
+        start: (f32, f32),
+        end: (f32, f32),
+        thickness: f32,
+        color: Color,
+    },
     /// Draw text glyphs.
     Text { glyphs: Vec<GlyphInstance> },
     /// Draw a text run (backend-neutral text command).
@@ -78,6 +85,16 @@ impl DrawCommand {
             border_color,
         }
     }
+
+    /// Create a line segment.
+    pub fn line(start: (f32, f32), end: (f32, f32), thickness: f32, color: Color) -> Self {
+        Self::Line {
+            start,
+            end,
+            thickness,
+            color,
+        }
+    }
 }
 
 /// A list of draw commands to be rendered in order.
@@ -123,6 +140,13 @@ impl DrawList {
             border_width,
             border_color,
         ));
+    }
+
+    /// Draw a line segment.
+    pub fn line(&mut self, start: (f32, f32), end: (f32, f32), thickness: f32, color: Color) {
+        if thickness > 0.0 {
+            self.push(DrawCommand::line(start, end, thickness, color));
+        }
     }
 
     /// Draw text glyphs.

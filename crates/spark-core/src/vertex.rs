@@ -65,8 +65,10 @@ pub struct ShapeInstance {
     pub border_width: f32,
     /// Border color RGBA.
     pub border_color: [f32; 4],
+    /// Rotation in radians around the instance center.
+    pub rotation: f32,
     /// Padding for alignment.
-    pub _padding: [f32; 2],
+    pub _padding: [f32; 1],
 }
 
 impl Default for ShapeInstance {
@@ -78,13 +80,14 @@ impl Default for ShapeInstance {
             corner_radius: 0.0,
             border_width: 0.0,
             border_color: [0.0, 0.0, 0.0, 0.0],
-            _padding: [0.0, 0.0],
+            rotation: 0.0,
+            _padding: [0.0],
         }
     }
 }
 
 impl ShapeInstance {
-    pub const ATTRIBS: [VertexAttribute; 6] = wgpu::vertex_attr_array![
+    pub const ATTRIBS: [VertexAttribute; 7] = wgpu::vertex_attr_array![
         // Start at location 2 (after Vertex2D uses 0 and 1)
         2 => Float32x2,   // pos
         3 => Float32x2,   // size
@@ -92,6 +95,7 @@ impl ShapeInstance {
         5 => Float32,     // corner_radius
         6 => Float32,     // border_width
         7 => Float32x4,   // border_color
+        8 => Float32,     // rotation
         // _padding not needed in shader
     ];
 

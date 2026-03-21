@@ -30,6 +30,8 @@ mod web;
 #[cfg(target_arch = "wasm32")]
 mod web_app;
 #[cfg(target_arch = "wasm32")]
+mod web_surface_manager;
+#[cfg(target_arch = "wasm32")]
 mod web_text_metrics;
 
 pub use app::{App, AppConfig};
@@ -53,8 +55,9 @@ pub mod prelude {
     pub use spark_layout::taffy;
     pub use spark_signals::{Effect, Memo, ReadSignal, Signal, WriteSignal};
     pub use spark_widgets::{
-        BuildContext, Button, ButtonStyle, Checkbox, CheckboxStyle, Container, EventCommands, List,
-        ListDirection, Scroll, ScrollDirection, Text, TextAlign, TextInput, Widget,
+        BuildContext, Button, ButtonStyle, Checkbox, CheckboxStyle, Container, DrawSurface,
+        EventCommands, List, ListDirection, Scroll, ScrollDirection, Text, TextAlign, TextInput,
+        Widget,
     };
 }
 

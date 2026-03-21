@@ -55,6 +55,31 @@ trunk serve
 
 Then open `http://127.0.0.1:8080`.
 
+## Fractal Clock
+
+**Path:** `examples/fractal-clock`
+
+A full-screen generative clock demo that turns the current UTC time into an animated fractal field with layered glow, orbit markers, and interactive palette/zoom controls.
+
+**Run:**
+```bash
+cargo run -p fractal-clock --release
+```
+
+For development:
+```bash
+cargo run -p fractal-clock
+```
+
+For web (WASM + Trunk):
+```bash
+cd examples/fractal-clock
+rustup target add wasm32-unknown-unknown
+trunk serve
+```
+
+Then open `http://127.0.0.1:8082`.
+
 ## Todo
 
 **Path:** `examples/todo`

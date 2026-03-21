@@ -210,15 +210,19 @@ impl Widget for Checkbox {
         );
 
         if self.checked {
-            // Simple square check mark for now.
-            let mark_inset = (4.0 * scale).max(2.0);
+            let theme = current_theme();
+            let mark_style = sparsha_text::TextStyle::new()
+                .with_family(theme.typography.font_family.clone())
+                .with_size(style.size * 0.9)
+                .with_color(style.mark_color)
+                .bold();
             let mark_bounds = sparsha_core::Rect::new(
-                bounds.x + mark_inset,
-                bounds.y + mark_inset,
-                (bounds.width - mark_inset * 2.0).max(1.0),
-                (bounds.height - mark_inset * 2.0).max(1.0),
+                bounds.x,
+                bounds.y + style.size * scale * 0.03,
+                bounds.width,
+                bounds.height,
             );
-            ctx.fill_rounded_rect(mark_bounds, style.mark_color, 2.0);
+            ctx.draw_text_centered("✓", &mark_style, mark_bounds);
         }
 
         if ctx.has_focus() && !self.disabled {

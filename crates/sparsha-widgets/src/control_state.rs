@@ -1,6 +1,6 @@
 use sparsha_core::{Color, Rect};
 
-use crate::ThemeControls;
+use crate::{current_viewport, ThemeControls, ViewportClass};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct ControlState {
@@ -47,7 +47,7 @@ impl ControlState {
 }
 
 pub(crate) fn focus_ring_bounds(bounds: Rect, scale_factor: f32, controls: &ThemeControls) -> Rect {
-    let ring_width = controls.focus_ring_width * scale_factor;
+    let ring_width = resolved_focus_ring_width(controls) * scale_factor;
     Rect::new(
         bounds.x - ring_width,
         bounds.y - ring_width,
@@ -57,9 +57,17 @@ pub(crate) fn focus_ring_bounds(bounds: Rect, scale_factor: f32, controls: &Them
 }
 
 pub(crate) fn focus_ring_border_width(scale_factor: f32, controls: &ThemeControls) -> f32 {
-    controls.focus_ring_width * scale_factor
+    resolved_focus_ring_width(controls) * scale_factor
 }
 
 pub(crate) fn focus_ring_color(color: Color) -> Color {
     color.with_alpha(0.5)
+}
+
+fn resolved_focus_ring_width(controls: &ThemeControls) -> f32 {
+    match current_viewport().class {
+        ViewportClass::Desktop => controls.focus_ring_width,
+        ViewportClass::Tablet => (controls.focus_ring_width - 0.25).max(1.5),
+        ViewportClass::Mobile => (controls.focus_ring_width - 0.5).max(1.5),
+    }
 }

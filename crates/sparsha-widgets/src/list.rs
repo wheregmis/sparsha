@@ -1,7 +1,7 @@
 //! List widget for dynamic collections of child widgets.
 
 use crate::{
-    current_theme,
+    current_theme, responsive_theme_controls,
     scroll_model::{ScrollAxes, ScrollModel},
     AccessibilityInfo, AccessibilityRole, EventContext, IntoWidget, PaintContext, Widget,
 };
@@ -388,11 +388,12 @@ impl List {
 
     fn resolved_scrollbar(&self) -> crate::ScrollbarStyle {
         let theme = current_theme();
+        let controls = responsive_theme_controls(&theme);
         crate::ScrollbarStyle {
             track_color: theme.colors.surface_variant,
             thumb_color: theme.colors.border,
             thumb_hover_color: theme.colors.primary_hovered,
-            width: theme.controls.scrollbar_thickness,
+            width: controls.scrollbar_thickness,
             corner_radius: theme.radii.md,
         }
     }

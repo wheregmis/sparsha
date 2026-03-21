@@ -1,8 +1,9 @@
 use crate::{Navigator, TaskKey, TaskPayload, TaskResult, TaskResultSubscription, TaskRuntime};
+use sparsha_layout::taffy::prelude::{AlignItems, Display, FlexDirection, Style};
 use sparsha_layout::WidgetId;
 use sparsha_signals::{Effect, Memo, Signal};
 use sparsha_widgets::context::BuildStateStore;
-use sparsha_widgets::{BuildContext, IntoWidget, Theme, Widget};
+use sparsha_widgets::{current_viewport, BuildContext, IntoWidget, Theme, ViewportInfo, Widget};
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -196,6 +197,12 @@ impl<'a> ComponentContext<'a> {
         self.build.theme()
     }
 
+    pub fn viewport(&self) -> ViewportInfo {
+        self.build
+            .resource::<ViewportInfo>()
+            .unwrap_or_else(current_viewport)
+    }
+
     pub fn navigator(&self) -> Navigator {
         self.build
             .resource::<Navigator>()
@@ -262,6 +269,15 @@ where
 
     fn set_id(&mut self, id: WidgetId) {
         self.id = id;
+    }
+
+    fn style(&self) -> Style {
+        Style {
+            display: Display::Flex,
+            flex_direction: FlexDirection::Column,
+            align_items: Some(AlignItems::Stretch),
+            ..Default::default()
+        }
     }
 
     fn rebuild(&mut self, ctx: &mut BuildContext) {
@@ -406,6 +422,30 @@ mod tests {
 
             let result = hook.result().expect("completed task result");
             assert_eq!(result.task_key, Some(TaskKey::new("todos.b")));
+        });
+    }
+
+    #[test]
+    fn component_context_exposes_viewport_resource() {
+        let runtime = RuntimeHandle::new();
+        runtime.run_with_current(|| {
+            let observed = Signal::new(None::<ViewportInfo>);
+            let mut store = ComponentStateStore::default();
+
+            let mut build = BuildContext::default();
+            build.set_path(&[0]);
+            build.insert_resource(ViewportInfo::new(820.0, 1180.0));
+            unsafe { build.set_state_store(&mut store) };
+
+            let mut host = component(move |cx| {
+                observed.set(Some(cx.viewport()));
+                Text::new("viewport")
+            });
+            host.rebuild(&mut build);
+
+            let viewport = observed.get().expect("viewport");
+            assert_eq!(viewport.width, 820.0);
+            assert_eq!(viewport.class, sparsha_widgets::ViewportClass::Tablet);
         });
     }
 }

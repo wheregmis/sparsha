@@ -2,8 +2,8 @@
 
 use crate::{
     control_state::{focus_ring_border_width, focus_ring_bounds, focus_ring_color, ControlState},
-    current_theme, AccessibilityAction, AccessibilityInfo, AccessibilityRole, EventContext,
-    PaintContext, Widget,
+    current_theme, responsive_theme_controls, AccessibilityAction, AccessibilityInfo,
+    AccessibilityRole, EventContext, PaintContext, Widget,
 };
 use sparsha_core::Color;
 use sparsha_input::InputEvent;
@@ -126,8 +126,9 @@ impl Checkbox {
 
     fn themed_default_style() -> CheckboxStyle {
         let theme = current_theme();
+        let controls = responsive_theme_controls(&theme);
         CheckboxStyle {
-            size: theme.controls.checkbox_size,
+            size: controls.checkbox_size,
             corner_radius: theme.radii.sm,
             border_width: 1.0,
             background: theme.colors.surface,
@@ -315,6 +316,7 @@ impl Widget for Checkbox {
 mod tests {
     use super::*;
     use crate::test_helpers::{layout_bounds, mock_event_context, pointer_down_at, pointer_up_at};
+    use crate::{set_current_theme, set_current_viewport, Theme, ViewportInfo};
     use sparsha_input::{FocusManager, Key, KeyboardEvent, NamedKey};
     use sparsha_layout::LayoutTree;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -377,5 +379,17 @@ mod tests {
         checkbox.event(&mut ctx, &pointer_down_at(10.0, 10.0));
         checkbox.event(&mut ctx, &pointer_up_at(10.0, 10.0));
         assert!(!checkbox.is_checked());
+    }
+
+    #[test]
+    fn themed_defaults_scale_down_for_mobile_viewport() {
+        let mut theme = Theme::default();
+        theme.controls.checkbox_size = 18.0;
+        set_current_theme(theme);
+        set_current_viewport(ViewportInfo::new(390.0, 844.0));
+
+        let checkbox = Checkbox::new();
+        let style = checkbox.resolved_style();
+        assert!(style.size < 18.0);
     }
 }

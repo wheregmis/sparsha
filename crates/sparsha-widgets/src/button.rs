@@ -2,8 +2,8 @@
 
 use crate::{
     control_state::{focus_ring_border_width, focus_ring_bounds, focus_ring_color, ControlState},
-    current_theme, AccessibilityAction, AccessibilityInfo, AccessibilityRole, EventContext,
-    PaintContext, Widget,
+    current_theme, responsive_theme_controls, responsive_typography, AccessibilityAction,
+    AccessibilityInfo, AccessibilityRole, EventContext, PaintContext, Widget,
 };
 use sparsha_core::Color;
 use sparsha_input::InputEvent;
@@ -146,6 +146,8 @@ impl Button {
 
     fn themed_default_style() -> ButtonStyle {
         let theme = current_theme();
+        let controls = responsive_theme_controls(&theme);
+        let typography = responsive_typography(&theme);
         ButtonStyle {
             background: theme.colors.primary,
             background_hovered: theme.colors.primary_hovered,
@@ -156,11 +158,11 @@ impl Button {
             border_color: Color::TRANSPARENT,
             border_width: 0.0,
             corner_radius: theme.radii.md,
-            padding_h: theme.controls.control_padding_x,
-            padding_v: theme.controls.control_padding_y,
-            font_size: theme.typography.button_size,
+            padding_h: controls.control_padding_x,
+            padding_v: controls.control_padding_y,
+            font_size: typography.button_size,
             min_width: 0.0,
-            min_height: theme.controls.control_height,
+            min_height: controls.control_height,
         }
     }
 
@@ -370,7 +372,7 @@ mod tests {
     use crate::test_helpers::{
         layout_bounds, mock_event_context, pointer_down_at, pointer_move_at, pointer_up_at,
     };
-    use crate::{set_current_theme, Theme};
+    use crate::{set_current_theme, set_current_viewport, Theme, ViewportInfo};
     use sparsha_input::{FocusManager, InputEvent, Key, KeyboardEvent, NamedKey};
     use sparsha_layout::LayoutTree;
 
@@ -488,6 +490,7 @@ mod tests {
         let mut theme = Theme::default();
         theme.colors.primary = Color::from_hex(0x10B981);
         theme.typography.button_size = 18.0;
+        set_current_viewport(ViewportInfo::default());
         set_current_theme(theme.clone());
 
         let button = Button::new("Theme");
@@ -500,10 +503,27 @@ mod tests {
     fn button_explicit_background_wins_over_theme() {
         let mut theme = Theme::default();
         theme.colors.primary = Color::from_hex(0x3B82F6);
+        set_current_viewport(ViewportInfo::default());
         set_current_theme(theme);
 
         let button = Button::new("Override").background(Color::from_hex(0xEF4444));
         let style = button.resolved_style();
         assert_eq!(style.background, Color::from_hex(0xEF4444));
+    }
+
+    #[test]
+    fn button_defaults_scale_down_for_mobile_viewport() {
+        let mut theme = Theme::default();
+        theme.typography.button_size = 14.0;
+        theme.controls.control_height = 38.0;
+        theme.controls.control_padding_x = 12.0;
+        set_current_theme(theme);
+        set_current_viewport(ViewportInfo::new(390.0, 844.0));
+
+        let button = Button::new("Mobile");
+        let style = button.resolved_style();
+        assert!(style.font_size < 14.0);
+        assert!(style.min_height < 38.0);
+        assert!(style.padding_h < 12.0);
     }
 }

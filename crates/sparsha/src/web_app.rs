@@ -25,8 +25,8 @@ use sparsha_render::DrawList;
 use sparsha_signals::{RuntimeHandle, SubscriberKind};
 use sparsha_text::TextSystem;
 use sparsha_widgets::{
-    set_current_theme, AccessibilityAction, AccessibilityRole, BuildContext, PaintCommands,
-    PaintContext, TextEditorState, Widget,
+    set_current_theme, set_current_viewport, AccessibilityAction, AccessibilityRole, BuildContext,
+    PaintCommands, PaintContext, TextEditorState, ViewportInfo, Widget,
 };
 use std::{
     cell::{Cell, RefCell},
@@ -72,6 +72,7 @@ pub(crate) fn run_dom_app(
         .ok()
         .map(|hash| hash_to_path(&hash));
     set_current_theme(theme.resolve_theme());
+    set_current_viewport(ViewportInfo::new(config.width as f32, config.height as f32));
     router.initialize(initial_path.as_deref());
     let router_for_build = router.clone();
     let root_widget = signal_runtime.run_with_current(|| {
@@ -552,6 +553,10 @@ fn paint_widget_subtree(
 }
 
 impl WebAppState {
+    fn logical_viewport(&self) -> ViewportInfo {
+        web_viewport_info(self.viewport_width, self.viewport_height)
+    }
+
     fn focused_text_editor_state(&self) -> Option<&sparsha_widgets::TextEditorState> {
         self.focused_path
             .as_ref()
@@ -716,7 +721,9 @@ impl WebAppState {
         runtime.with_tracking(SubscriberKind::Rebuild, || {
             let resolved_theme = self.theme.resolve_theme();
             let navigator = self.router_navigator.clone();
+            let viewport = self.logical_viewport();
             set_current_theme(resolved_theme.clone());
+            set_current_viewport(viewport);
 
             fn rebuild_widget(
                 widget: &mut dyn Widget,
@@ -740,6 +747,7 @@ impl WebAppState {
             build_ctx.insert_resource(navigator);
             build_ctx.insert_resource(self.task_runtime.clone());
             build_ctx.insert_resource(self.signal_runtime.clone());
+            build_ctx.insert_resource(viewport);
             // SAFETY: the rebuild pass owns `component_states` for the entire
             // lifetime of `build_ctx` and does not alias it elsewhere.
             unsafe { build_ctx.set_state_store(&mut self.component_states) };
@@ -751,6 +759,7 @@ impl WebAppState {
         let mut widget_registry = WidgetRuntimeRegistry::default();
         let root_id = runtime.with_tracking(SubscriberKind::Layout, || {
             set_current_theme(self.theme.resolve_theme());
+            set_current_viewport(self.logical_viewport());
             let mut path = Vec::new();
             add_widget_to_layout(
                 self.root_widget.as_mut(),
@@ -789,6 +798,7 @@ impl WebAppState {
 
         runtime.with_tracking(SubscriberKind::Paint, || {
             set_current_theme(self.theme.resolve_theme());
+            set_current_viewport(self.logical_viewport());
             paint_widget_subtree(
                 self.root_widget.as_ref(),
                 &self.layout_tree,
@@ -1831,6 +1841,10 @@ fn event_target_is_checkbox(target: Option<web_sys::EventTarget>) -> bool {
         .is_some_and(|input| input.type_() == "checkbox")
 }
 
+fn web_viewport_info(width: f32, height: f32) -> ViewportInfo {
+    ViewportInfo::new(width, height)
+}
+
 fn event_target_is_text_editor(target: Option<web_sys::EventTarget>) -> bool {
     if let Some(input) = event_target_element(target.clone())
         .and_then(|element| element.dyn_into::<HtmlInputElement>().ok())
@@ -2173,6 +2187,14 @@ mod wasm_tests {
                 sparsha_input::NamedKey::ArrowLeft
             ))
         );
+    }
+
+    #[test]
+    fn web_viewport_info_uses_css_pixel_dimensions() {
+        let viewport = web_viewport_info(390.0, 844.0);
+        assert_eq!(viewport.width, 390.0);
+        assert_eq!(viewport.height, 844.0);
+        assert_eq!(viewport.class, sparsha_widgets::ViewportClass::Mobile);
     }
 
     #[test]

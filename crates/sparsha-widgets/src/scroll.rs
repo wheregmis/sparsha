@@ -1,7 +1,7 @@
 //! Scrollable container widget.
 
 use crate::{
-    current_theme,
+    current_theme, responsive_theme_controls,
     scroll_model::{ScrollAxes, ScrollModel, Scrollbars},
     AccessibilityAction, AccessibilityInfo, AccessibilityRole, EventContext, IntoWidget,
     PaintContext, Widget,
@@ -226,11 +226,12 @@ impl Scroll {
     fn resolved_scrollbar_style(&self) -> ScrollbarStyle {
         self.scrollbar_style_override.clone().unwrap_or_else(|| {
             let theme = current_theme();
+            let controls = responsive_theme_controls(&theme);
             ScrollbarStyle {
                 track_color: theme.colors.surface_variant,
                 thumb_color: theme.colors.border,
                 thumb_hover_color: theme.colors.primary_hovered,
-                width: theme.controls.scrollbar_thickness,
+                width: controls.scrollbar_thickness,
                 corner_radius: theme.radii.md,
             }
         })

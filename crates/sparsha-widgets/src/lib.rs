@@ -22,6 +22,7 @@ mod text_area;
 mod text_editor;
 mod text_input;
 mod theme;
+mod viewport;
 mod widget;
 
 pub use accessibility::{AccessibilityAction, AccessibilityInfo, AccessibilityRole};
@@ -45,6 +46,12 @@ pub use text_input::{TextInput, TextInputStyle};
 pub use theme::{
     current_theme, set_current_theme, Theme, ThemeColors, ThemeControls, ThemeRadii, ThemeSpacing,
     ThemeTypography,
+};
+#[doc(hidden)]
+pub use viewport::set_current_viewport;
+pub use viewport::{current_viewport, ViewportClass, ViewportInfo, ViewportOrientation};
+pub(crate) use viewport::{
+    responsive_text_area_min_height, responsive_theme_controls, responsive_typography,
 };
 pub use widget::{Widget, WidgetChildMode};
 

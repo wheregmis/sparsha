@@ -24,14 +24,22 @@ fn main() -> Result<(), sparsha::AppRunError> {
                 .borrow()
                 .clone()
                 .expect("showcase navigator should be initialized before build");
-            showcase_shell(ShowcaseRoute::Components, navigator)
+            showcase_shell(
+                ShowcaseRoute::Components,
+                navigator.clone(),
+                current_viewport(),
+            )
         })
         .route("/rendering", move || {
             let navigator = rendering_slot
                 .borrow()
                 .clone()
                 .expect("showcase navigator should be initialized before build");
-            showcase_shell(ShowcaseRoute::Rendering, navigator)
+            showcase_shell(
+                ShowcaseRoute::Rendering,
+                navigator.clone(),
+                current_viewport(),
+            )
         })
         .fallback("/components");
 
@@ -89,6 +97,127 @@ impl ShowcaseRoute {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+struct ShowcaseLayout {
+    viewport: ViewportInfo,
+}
+
+impl ShowcaseLayout {
+    fn new(viewport: ViewportInfo) -> Self {
+        Self { viewport }
+    }
+
+    fn is_mobile(self) -> bool {
+        self.viewport.class == ViewportClass::Mobile
+    }
+
+    fn is_tablet(self) -> bool {
+        self.viewport.class == ViewportClass::Tablet
+    }
+
+    fn is_desktop(self) -> bool {
+        self.viewport.class == ViewportClass::Desktop
+    }
+
+    fn shell_is_stacked(self) -> bool {
+        !self.is_desktop()
+    }
+
+    fn page_padding(self) -> f32 {
+        if self.is_mobile() {
+            16.0
+        } else if self.is_tablet() {
+            20.0
+        } else {
+            24.0
+        }
+    }
+
+    fn section_padding(self) -> f32 {
+        if self.is_mobile() {
+            16.0
+        } else {
+            20.0
+        }
+    }
+
+    fn page_gap(self) -> f32 {
+        if self.is_mobile() {
+            16.0
+        } else {
+            20.0
+        }
+    }
+
+    fn top_bar_padding(self) -> f32 {
+        if self.is_mobile() {
+            12.0
+        } else {
+            16.0
+        }
+    }
+
+    fn top_bar_title_size(self) -> f32 {
+        if self.is_mobile() {
+            16.0
+        } else {
+            18.0
+        }
+    }
+
+    fn route_button_min_width(self) -> f32 {
+        if self.is_mobile() {
+            96.0
+        } else if self.is_tablet() {
+            108.0
+        } else {
+            120.0
+        }
+    }
+
+    fn sidebar_width(self) -> f32 {
+        if self.is_desktop() {
+            320.0
+        } else {
+            self.viewport.width.max(0.0)
+        }
+    }
+
+    fn content_width(self) -> f32 {
+        if self.is_desktop() {
+            self.viewport.width.min(1560.0)
+        } else {
+            self.viewport.width.max(1.0)
+        }
+    }
+
+    fn page_intro_title_size(self) -> f32 {
+        if self.is_mobile() {
+            24.0
+        } else if self.is_tablet() {
+            26.0
+        } else {
+            28.0
+        }
+    }
+
+    fn section_title_size(self) -> f32 {
+        if self.is_mobile() {
+            18.0
+        } else {
+            20.0
+        }
+    }
+
+    fn card_gap(self) -> f32 {
+        if self.is_mobile() {
+            14.0
+        } else {
+            16.0
+        }
+    }
+}
+
 fn showcase_theme() -> Theme {
     let mut theme = Theme::dark();
     theme.colors.background = Color::from_hex(0x16181D);
@@ -114,61 +243,112 @@ fn showcase_theme() -> Theme {
     theme
 }
 
-fn showcase_shell(route: ShowcaseRoute, navigator: Navigator) -> Container {
+fn showcase_shell(route: ShowcaseRoute, navigator: Navigator, viewport: ViewportInfo) -> Container {
+    let layout = ShowcaseLayout::new(viewport);
     let theme = current_theme();
+    let shell = if layout.shell_is_stacked() {
+        Container::new()
+            .column()
+            .fill()
+            .width(layout.content_width())
+            .flex_grow(1.0)
+            .child(build_sidebar(route, layout))
+            .child(build_main_area(route, layout))
+    } else {
+        Container::new()
+            .row()
+            .fill()
+            .width(layout.content_width())
+            .flex_grow(1.0)
+            .stretch()
+            .child(build_sidebar(route, layout))
+            .child(build_main_area(route, layout))
+    };
+
     Container::new()
-        .fill()
+        .size(
+            layout.viewport.width.max(1.0),
+            layout.viewport.height.max(1.0),
+        )
         .background(theme.colors.background)
         .column()
-        .child(build_top_bar(route, navigator))
-        .child(
-            Container::new()
-                .row()
-                .fill()
-                .child(build_sidebar(route))
-                .child(build_main_area(route)),
-        )
+        .align_items(AlignItems::Center)
+        .child(build_top_bar(route, navigator, layout))
+        .child(shell)
 }
 
-fn build_top_bar(route: ShowcaseRoute, navigator: Navigator) -> Container {
+fn build_top_bar(route: ShowcaseRoute, navigator: Navigator, layout: ShowcaseLayout) -> Container {
     let theme = current_theme();
-    Container::new()
+    let buttons = Container::new()
         .row()
-        .fill_width()
-        .padding(16.0)
+        .gap(10.0)
+        .wrap()
+        .align_items(AlignItems::Center)
+        .child(route_button(
+            "Components",
+            ShowcaseRoute::Components,
+            route == ShowcaseRoute::Components,
+            navigator.clone(),
+            layout,
+        ))
+        .child(route_button(
+            "Rendering",
+            ShowcaseRoute::Rendering,
+            route == ShowcaseRoute::Rendering,
+            navigator,
+            layout,
+        ));
+
+    let top_bar = if layout.is_mobile() {
+        Container::new()
+            .column()
+            .gap(12.0)
+            .align_items(AlignItems::FlexStart)
+            .child(
+                Container::new()
+                    .column()
+                    .gap(4.0)
+                    .child(
+                        Text::new("Sparsha Showcase")
+                            .size(layout.top_bar_title_size())
+                            .bold(),
+                    )
+                    .child(
+                        Text::new("A page-ready preview surface for widgets and visual checks.")
+                            .size(13.0)
+                            .color(theme.colors.text_muted),
+                    ),
+            )
+            .child(buttons)
+    } else {
+        Container::new()
+            .row()
+            .align_items(AlignItems::Center)
+            .justify_content(JustifyContent::SpaceBetween)
+            .child(
+                Container::new()
+                    .column()
+                    .gap(4.0)
+                    .child(
+                        Text::new("Sparsha Showcase")
+                            .size(layout.top_bar_title_size())
+                            .bold(),
+                    )
+                    .child(
+                        Text::new("A page-ready preview surface for widgets and visual checks.")
+                            .size(13.0)
+                            .color(theme.colors.text_muted),
+                    ),
+            )
+            .child(buttons)
+    };
+
+    Container::new()
+        .width(layout.content_width())
+        .padding(layout.top_bar_padding())
         .background(theme.colors.surface_done)
         .border(1.0, theme.colors.border)
-        .align_items(AlignItems::Center)
-        .justify_content(JustifyContent::SpaceBetween)
-        .child(
-            Container::new()
-                .column()
-                .gap(4.0)
-                .child(Text::new("Sparsha Showcase").size(18.0).bold())
-                .child(
-                    Text::new("A page-ready preview surface for widgets and visual checks.")
-                        .size(13.0)
-                        .color(theme.colors.text_muted),
-                ),
-        )
-        .child(
-            Container::new()
-                .row()
-                .gap(10.0)
-                .align_items(AlignItems::Center)
-                .child(route_button(
-                    "Components",
-                    ShowcaseRoute::Components,
-                    route == ShowcaseRoute::Components,
-                    navigator.clone(),
-                ))
-                .child(route_button(
-                    "Rendering",
-                    ShowcaseRoute::Rendering,
-                    route == ShowcaseRoute::Rendering,
-                    navigator,
-                )),
-        )
+        .child(top_bar)
 }
 
 fn route_button(
@@ -176,6 +356,7 @@ fn route_button(
     destination: ShowcaseRoute,
     active: bool,
     navigator: Navigator,
+    layout: ShowcaseLayout,
 ) -> Button {
     let theme = current_theme();
     let style = ButtonStyle {
@@ -208,10 +389,10 @@ fn route_button(
         },
         border_width: 1.0,
         corner_radius: 10.0,
-        padding_h: 14.0,
-        padding_v: 8.0,
-        font_size: 13.0,
-        min_width: 120.0,
+        padding_h: if layout.is_mobile() { 12.0 } else { 14.0 },
+        padding_v: if layout.is_mobile() { 7.0 } else { 8.0 },
+        font_size: if layout.is_mobile() { 12.0 } else { 13.0 },
+        min_width: layout.route_button_min_width(),
         min_height: 34.0,
     };
 
@@ -220,7 +401,7 @@ fn route_button(
         .on_click(move || navigator.go(destination.path()))
 }
 
-fn build_sidebar(route: ShowcaseRoute) -> Container {
+fn sidebar_content(route: ShowcaseRoute, layout: ShowcaseLayout) -> Container {
     let theme = current_theme();
     let sidebar = match route {
         ShowcaseRoute::Components => Container::new()
@@ -273,31 +454,46 @@ fn build_sidebar(route: ShowcaseRoute) -> Container {
     };
 
     Container::new()
-        .width(320.0)
-        .fill_height()
-        .background(theme.colors.surface)
-        .border(1.0, theme.colors.border)
+        .column()
+        .gap(if layout.is_mobile() { 16.0 } else { 20.0 })
+        .padding(layout.section_padding())
         .child(
-            Scroll::new().vertical().fill_height().content(
-                Container::new()
-                    .column()
-                    .gap(20.0)
-                    .padding(20.0)
-                    .child(
-                        Text::new(route.eyebrow())
-                            .size(11.0)
-                            .bold()
-                            .color(theme.colors.primary),
-                    )
-                    .child(Text::new(route.title()).size(22.0).bold())
-                    .child(
-                        Text::new(route.summary())
-                            .size(13.0)
-                            .color(theme.colors.text_muted),
-                    )
-                    .child(sidebar),
-            ),
+            Text::new(route.eyebrow())
+                .size(11.0)
+                .bold()
+                .color(theme.colors.primary),
         )
+        .child(
+            Text::new(route.title())
+                .size(if layout.is_mobile() { 20.0 } else { 22.0 })
+                .bold(),
+        )
+        .child(
+            Text::new(route.summary())
+                .size(13.0)
+                .color(theme.colors.text_muted),
+        )
+        .child(sidebar)
+}
+
+fn build_sidebar(route: ShowcaseRoute, layout: ShowcaseLayout) -> Container {
+    let theme = current_theme();
+    let content = sidebar_content(route, layout);
+    if layout.is_desktop() {
+        Container::new()
+            .width(layout.sidebar_width())
+            .fill_height()
+            .flex_shrink(0.0)
+            .background(theme.colors.surface)
+            .border(1.0, theme.colors.border)
+            .child(Scroll::new().vertical().fill_height().content(content))
+    } else {
+        Container::new()
+            .fill_width()
+            .background(theme.colors.surface)
+            .border(1.0, theme.colors.border)
+            .child(content)
+    }
 }
 
 fn sidebar_block(title: &'static str, lines: &[&'static str]) -> Container {
@@ -322,54 +518,65 @@ fn sidebar_block(title: &'static str, lines: &[&'static str]) -> Container {
     block
 }
 
-fn build_main_area(route: ShowcaseRoute) -> Scroll {
-    Scroll::new()
+fn build_main_area(route: ShowcaseRoute, layout: ShowcaseLayout) -> Scroll {
+    let scroll = Scroll::new()
         .vertical()
+        .fill_width()
         .fill_height()
         .flex_grow(1.0)
+        .flex_shrink(1.0)
         .content(match route {
-            ShowcaseRoute::Components => build_components_page(),
-            ShowcaseRoute::Rendering => build_rendering_page(),
-        })
+            ShowcaseRoute::Components => build_components_page(layout),
+            ShowcaseRoute::Rendering => build_rendering_page(layout),
+        });
+
+    if layout.is_desktop() {
+        scroll.width((layout.content_width() - layout.sidebar_width()).max(0.0))
+    } else {
+        scroll
+    }
 }
 
-fn build_components_page() -> Container {
+fn build_components_page(layout: ShowcaseLayout) -> Container {
     Container::new()
         .column()
-        .gap(20.0)
-        .padding(24.0)
+        .gap(layout.page_gap())
+        .padding(layout.page_padding())
         .fill_width()
         .child(page_intro(
             ShowcaseRoute::Components,
             "The goal is a quick, reliable read on the default widget set.\nThe page favors intentional samples over a wall of controls.",
+            layout,
         ))
-        .child(build_animation_card())
-        .child(build_controls_card())
-        .child(build_typography_card())
-        .child(build_inputs_card())
-        .child(build_viewport_card())
+        .child(build_animation_card(layout))
+        .child(build_controls_card(layout))
+        .child(build_typography_card(layout))
+        .child(build_inputs_card(layout))
+        .child(build_viewport_card(layout))
 }
 
-fn build_rendering_page() -> Container {
+fn build_rendering_page(layout: ShowcaseLayout) -> Container {
     Container::new()
         .column()
-        .gap(14.0)
-        .padding(24.0)
+        .gap(if layout.is_mobile() { 12.0 } else { 14.0 })
+        .padding(layout.page_padding())
         .fill_width()
         .child(page_intro(
             ShowcaseRoute::Rendering,
             "A compact atlas for line, stroke, and text checks.\nIf the web surface is off, this page should make it obvious.",
+            layout,
         ))
-        .child(rendering_hint_row())
-        .child(rendering_atlas_card())
+        .child(rendering_hint_row(layout))
+        .child(rendering_atlas_card(layout))
 }
 
-fn page_intro(route: ShowcaseRoute, detail: &'static str) -> Container {
+fn page_intro(route: ShowcaseRoute, detail: &'static str, layout: ShowcaseLayout) -> Container {
     let theme = current_theme();
     Container::new()
         .column()
+        .fill_width()
         .gap(10.0)
-        .padding(20.0)
+        .padding(layout.section_padding())
         .background(theme.colors.surface_done)
         .border(1.0, theme.colors.border)
         .corner_radius(16.0)
@@ -379,7 +586,11 @@ fn page_intro(route: ShowcaseRoute, detail: &'static str) -> Container {
                 .bold()
                 .color(theme.colors.primary),
         )
-        .child(Text::new(route.title()).size(28.0).bold())
+        .child(
+            Text::new(route.title())
+                .size(layout.page_intro_title_size())
+                .bold(),
+        )
         .child(Text::new(detail).size(14.0).color(theme.colors.text_muted))
 }
 
@@ -387,16 +598,18 @@ fn section_card(
     title: &'static str,
     description: &'static str,
     content: impl Widget + 'static,
+    layout: ShowcaseLayout,
 ) -> Container {
     let theme = current_theme();
     Container::new()
         .column()
-        .gap(16.0)
-        .padding(20.0)
+        .fill_width()
+        .gap(layout.card_gap())
+        .padding(layout.section_padding())
         .background(theme.colors.surface)
         .border(1.0, theme.colors.border)
         .corner_radius(16.0)
-        .child(Text::new(title).size(20.0).bold())
+        .child(Text::new(title).size(layout.section_title_size()).bold())
         .child(
             Text::new(description)
                 .size(13.0)
@@ -405,7 +618,7 @@ fn section_card(
         .child(content)
 }
 
-fn build_controls_card() -> Container {
+fn build_controls_card(layout: ShowcaseLayout) -> Container {
     let theme = current_theme();
     let secondary_style = ButtonStyle {
         background: theme.colors.surface_variant,
@@ -417,11 +630,11 @@ fn build_controls_card() -> Container {
         border_color: theme.colors.border,
         border_width: 1.0,
         corner_radius: 10.0,
-        padding_h: 14.0,
-        padding_v: 8.0,
-        font_size: 14.0,
-        min_width: 148.0,
-        min_height: 36.0,
+        padding_h: if layout.is_mobile() { 12.0 } else { 14.0 },
+        padding_v: if layout.is_mobile() { 7.0 } else { 8.0 },
+        font_size: if layout.is_mobile() { 13.0 } else { 14.0 },
+        min_width: if layout.is_mobile() { 132.0 } else { 148.0 },
+        min_height: if layout.is_mobile() { 34.0 } else { 36.0 },
     };
 
     section_card(
@@ -469,65 +682,81 @@ fn build_controls_card() -> Container {
                     .color(theme.colors.text_muted),
                 )
         }),
+        layout,
     )
 }
 
-fn build_animation_card() -> Container {
+fn build_animation_card(layout: ShowcaseLayout) -> Container {
     let theme = current_theme();
     section_card(
         "Animations",
-        "The showcase now carries the same motion language as the rest of the examples.\nPage swaps use router slide transitions, and this preview uses the normal widget animation helpers.",
+        "The showcase now carries the same motion language as the rest of the examples.\nPage swaps use router slide transitions, and this preview uses the normal widget animation helpers for a short on-load handoff.",
         Container::new()
             .column()
             .gap(16.0)
             .child(MotionPreview::new())
             .child(
                 Text::new(
-                    "Route changes use the shared slide + overlay transition.\nWithin the page, the preview cycles a single implicit timeline so motion stays intentional and quiet.",
+                    "Route changes use the shared slide + overlay transition.\nWithin the page, the preview runs a short implicit timeline so motion stays intentional and quiet.",
                 )
                 .size(13.0)
                 .color(theme.colors.text_muted),
             ),
+        layout,
     )
 }
 
-fn rendering_hint_row() -> Container {
+fn rendering_hint_row(layout: ShowcaseLayout) -> Container {
     let theme = current_theme();
-    Container::new()
-        .row()
-        .gap(12.0)
-        .wrap()
-        .fill_width()
-        .child(rendering_hint_chip(
-            "Pixel alignment",
-            "Thin lines and square ramp stay sharp.",
-        ))
-        .child(rendering_hint_chip(
-            "Stroke + clip",
-            "Width ladder and clipped band stay clean.",
-        ))
-        .child(rendering_hint_chip(
-            "Text rendering",
-            "Dark and light swatches stay balanced.",
-        ))
-        .background(theme.colors.background)
+    let row = if layout.is_mobile() {
+        Container::new().column().gap(12.0).fill_width()
+    } else {
+        Container::new().row().gap(12.0).wrap().fill_width()
+    };
+
+    row.child(rendering_hint_chip(
+        "Pixel alignment",
+        "Thin lines and square ramp stay sharp.",
+        layout,
+    ))
+    .child(rendering_hint_chip(
+        "Stroke + clip",
+        "Width ladder and clipped band stay clean.",
+        layout,
+    ))
+    .child(rendering_hint_chip(
+        "Text rendering",
+        "Dark and light swatches stay balanced.",
+        layout,
+    ))
+    .background(theme.colors.background)
 }
 
-fn rendering_hint_chip(title: &'static str, detail: &'static str) -> Container {
+fn rendering_hint_chip(
+    title: &'static str,
+    detail: &'static str,
+    layout: ShowcaseLayout,
+) -> Container {
     let theme = current_theme();
-    Container::new()
+    let chip = Container::new()
         .column()
         .gap(6.0)
         .padding(14.0)
-        .min_size(220.0, 0.0)
+        .min_size(if layout.is_mobile() { 0.0 } else { 220.0 }, 0.0)
         .background(theme.colors.surface)
         .border(1.0, theme.colors.border)
         .corner_radius(12.0)
         .child(Text::new(title).size(14.0).bold())
-        .child(Text::new(detail).size(12.0).color(theme.colors.text_muted))
+        .child(Text::new(detail).size(12.0).color(theme.colors.text_muted));
+
+    if layout.is_mobile() {
+        chip.fill_width()
+    } else {
+        chip
+    }
 }
 
-fn build_typography_card() -> Container {
+fn build_typography_card(layout: ShowcaseLayout) -> Container {
     let theme = current_theme();
     section_card(
         "Typography",
@@ -559,63 +788,92 @@ fn build_typography_card() -> Container {
                 .size(13.0)
                 .color(theme.colors.text_muted),
             ),
+        layout,
     )
 }
 
-fn build_inputs_card() -> Container {
+fn build_inputs_card(layout: ShowcaseLayout) -> Container {
     let theme = current_theme();
     section_card(
         "Inputs",
         "Single-line and multiline editors should feel coherent with the same theme.\nLabels are explicit so browser smoke tests can target them directly.",
-        Container::new()
-            .column()
-            .gap(16.0)
-            .child(
-                Semantics::new(
-                    TextInput::new()
-                        .fill_width()
-                        .value("sparsh@example.dev")
-                        .placeholder("Email address"),
+        component(move |cx| {
+            let email = cx.signal("sparsh@example.dev".to_owned());
+            let notes = cx.signal(
+                "Static scenes make rendering bugs easier to spot.\nSmoke tests still probe the route and DOM surface."
+                    .to_owned(),
+            );
+            let email_value = email.get();
+            let notes_value = notes.get();
+
+            Container::new()
+                .column()
+                .gap(16.0)
+                .child(
+                    Semantics::new(
+                        TextInput::new()
+                            .fill_width()
+                            .value(email_value.clone())
+                            .placeholder("Email address")
+                            .on_change(move |value| {
+                                email.set(value.to_owned());
+                            }),
+                    )
+                    .label("Showcase single-line input"),
                 )
-                .label("Showcase single-line input"),
-            )
-            .child(
-                Semantics::new(
-                    TextArea::new()
-                        .fill_width()
-                        .value(
-                            "Static scenes make rendering bugs easier to spot.\nSmoke tests still probe the route and DOM surface.",
-                        )
-                        .placeholder("Notes"),
+                .child(
+                    Semantics::new(
+                        TextArea::new()
+                            .fill_width()
+                            .value(notes_value.clone())
+                            .placeholder("Notes")
+                            .on_change(move |value| {
+                                notes.set(value.to_owned());
+                            }),
+                    )
+                    .label("Showcase multiline input"),
                 )
-                .label("Showcase multiline input"),
-            )
-            .child(
-                Text::new(
-                    "These fields use the same interaction model as the broader examples,\njust in a smaller, more curated setting.",
+                .child(
+                    Text::new(
+                        "These fields use the same interaction model as the broader examples,\njust in a smaller, more curated setting.",
+                    )
+                    .size(13.0)
+                    .color(theme.colors.text_muted),
                 )
-                .size(13.0)
-                .color(theme.colors.text_muted),
-            ),
+        }),
+        layout,
     )
 }
 
-fn build_viewport_card() -> Container {
+fn build_viewport_card(layout: ShowcaseLayout) -> Container {
     let theme = current_theme();
+    let samples = if layout.is_desktop() {
+        Container::new()
+            .row()
+            .gap(16.0)
+            .fill_width()
+            .child(build_scroll_sample().flex_grow(1.0).min_size(0.0, 250.0))
+            .child(
+                build_virtual_list_sample()
+                    .flex_grow(1.0)
+                    .min_size(0.0, 250.0),
+            )
+    } else {
+        Container::new()
+            .column()
+            .gap(16.0)
+            .fill_width()
+            .child(build_scroll_sample().min_size(0.0, 250.0))
+            .child(build_virtual_list_sample().min_size(0.0, 250.0))
+    };
+
     section_card(
         "Viewport",
         "A wide two-axis scroll sample sits next to a compact virtualized list.\nThis keeps the page honest about the core viewport primitives.",
         Container::new()
             .column()
             .gap(16.0)
-            .child(
-                Container::new()
-                    .row()
-                    .gap(16.0)
-                    .fill_width()
-                    .child(build_scroll_sample().flex_grow(1.0).min_size(0.0, 250.0))
-                    .child(build_virtual_list_sample().flex_grow(1.0).min_size(0.0, 250.0)),
-            )
+            .child(samples)
             .child(
                 Text::new(
                     "The left sample should pan both ways. The right sample should recycle rows\ninstead of realizing the whole list at once.",
@@ -623,6 +881,7 @@ fn build_viewport_card() -> Container {
                 .size(13.0)
                 .color(theme.colors.text_muted),
             ),
+        layout,
     )
 }
 
@@ -738,7 +997,7 @@ fn build_virtual_list_sample() -> Container {
         )
 }
 
-fn rendering_atlas_card() -> Container {
+fn rendering_atlas_card(layout: ShowcaseLayout) -> Container {
     let theme = current_theme();
     section_card(
         "Rendering atlas",
@@ -751,6 +1010,7 @@ fn rendering_atlas_card() -> Container {
                 .corner_radius(12.0)
                 .child(RenderingAtlas::new()),
         ),
+        layout,
     )
 }
 
@@ -770,7 +1030,6 @@ struct MotionPreview {
     id: WidgetId,
     progress: RefCell<ImplicitAnimation>,
     initialized: Cell<bool>,
-    rising: Cell<bool>,
 }
 
 impl MotionPreview {
@@ -779,7 +1038,6 @@ impl MotionPreview {
             id: WidgetId::default(),
             progress: RefCell::new(ImplicitAnimation::new(0.0)),
             initialized: Cell::new(false),
-            rising: Cell::new(true),
         }
     }
 }
@@ -818,12 +1076,9 @@ impl Widget for MotionPreview {
         }
 
         let value = progress.sample(ctx.elapsed_time);
-        if !progress.is_animating() {
-            let next = if self.rising.get() { 0.0 } else { 1.0 };
-            self.rising.set(!self.rising.get());
-            progress.set_target(next, ctx.elapsed_time, 1.25, AnimationEasing::EaseInOut);
+        if progress.is_animating() {
+            ctx.request_next_frame();
         }
-        ctx.request_next_frame();
 
         let panel = lerp_color(
             theme.colors.surface_done,
@@ -878,7 +1133,7 @@ impl Widget for MotionPreview {
             bounds.y + 48.0,
         );
         ctx.draw_text(
-            "Router transition: slide + overlay fade",
+            "Router transition: slide + overlay fade, plus a one-shot implicit preview.",
             &body,
             bounds.x + 18.0,
             bounds.y + 68.0,
@@ -896,14 +1151,19 @@ impl Widget for RenderingAtlas {
     }
 
     fn style(&self) -> Style {
+        let height = match current_viewport().class {
+            ViewportClass::Desktop => 320.0,
+            ViewportClass::Tablet => 420.0,
+            ViewportClass::Mobile => 560.0,
+        };
         Style {
             size: Size {
                 width: percent(1.0),
-                height: length(320.0),
+                height: length(height),
             },
             min_size: Size {
                 width: percent(1.0),
-                height: length(320.0),
+                height: length(height),
             },
             ..Default::default()
         }
@@ -924,22 +1184,42 @@ fn scene_label_style(size: f32, color: Color) -> TextStyle {
 fn rendering_atlas_scene(ctx: &mut PaintContext) {
     let bounds = ctx.bounds().inset(8.0);
     let gap = 12.0;
-    let panel_width = (bounds.width - gap * 2.0) / 3.0;
-    let panel_height = bounds.height;
-
-    let left = Rect::new(bounds.x, bounds.y, panel_width, panel_height);
-    let middle = Rect::new(
-        bounds.x + panel_width + gap,
-        bounds.y,
-        panel_width,
-        panel_height,
-    );
-    let right = Rect::new(
-        bounds.x + (panel_width + gap) * 2.0,
-        bounds.y,
-        panel_width,
-        panel_height,
-    );
+    let stack_vertical = current_viewport().class != ViewportClass::Desktop || bounds.width < 720.0;
+    let (left, middle, right) = if stack_vertical {
+        let panel_height = (bounds.height - gap * 2.0) / 3.0;
+        (
+            Rect::new(bounds.x, bounds.y, bounds.width, panel_height),
+            Rect::new(
+                bounds.x,
+                bounds.y + panel_height + gap,
+                bounds.width,
+                panel_height,
+            ),
+            Rect::new(
+                bounds.x,
+                bounds.y + (panel_height + gap) * 2.0,
+                bounds.width,
+                panel_height,
+            ),
+        )
+    } else {
+        let panel_width = (bounds.width - gap * 2.0) / 3.0;
+        (
+            Rect::new(bounds.x, bounds.y, panel_width, bounds.height),
+            Rect::new(
+                bounds.x + panel_width + gap,
+                bounds.y,
+                panel_width,
+                bounds.height,
+            ),
+            Rect::new(
+                bounds.x + (panel_width + gap) * 2.0,
+                bounds.y,
+                panel_width,
+                bounds.height,
+            ),
+        )
+    };
 
     pixel_alignment_scene(ctx, left);
     stroke_and_clip_scene(ctx, middle);

@@ -152,6 +152,14 @@ impl LayoutTree {
     pub fn compute_layout(&mut self, available_width: f32, available_height: f32) {
         if let Some(root_id) = self.root {
             if let Some(node_id) = self.mapping.get_node(root_id) {
+                if let Ok(existing_style) = self.taffy.style(node_id) {
+                    let mut root_style = existing_style.clone();
+                    root_style.size = Size {
+                        width: Dimension::length(available_width),
+                        height: Dimension::length(available_height),
+                    };
+                    self.taffy.set_style(node_id, root_style).ok();
+                }
                 self.taffy
                     .compute_layout(
                         node_id,

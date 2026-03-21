@@ -1,7 +1,8 @@
 //! Text widget for displaying static text.
 
 use crate::{
-    current_theme, AccessibilityInfo, AccessibilityRole, EventContext, PaintContext, Widget,
+    current_theme, responsive_typography, AccessibilityInfo, AccessibilityRole, EventContext,
+    PaintContext, Widget,
 };
 use sparsha_core::Color;
 use sparsha_input::InputEvent;
@@ -18,6 +19,15 @@ pub enum TextAlign {
     Right,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum TextKind {
+    #[default]
+    Body,
+    Header,
+    Subheader,
+    Caption,
+}
+
 /// A simple text display widget.
 pub struct Text {
     id: WidgetId,
@@ -27,6 +37,7 @@ pub struct Text {
     bold: bool,
     italic: bool,
     align: TextAlign,
+    kind: TextKind,
 }
 
 impl Text {
@@ -40,6 +51,7 @@ impl Text {
             bold: false,
             italic: false,
             align: TextAlign::Left,
+            kind: TextKind::Body,
         }
     }
 
@@ -87,28 +99,44 @@ impl Text {
 
     /// Create a header-style text (larger, bold).
     pub fn header(content: impl Into<String>) -> Self {
-        Self::new(content).size(24.0).bold()
+        let mut text = Self::new(content);
+        text.bold = true;
+        text.kind = TextKind::Header;
+        text
     }
 
     /// Create a subheader-style text.
     pub fn subheader(content: impl Into<String>) -> Self {
-        Self::new(content).size(18.0).bold()
+        let mut text = Self::new(content);
+        text.bold = true;
+        text.kind = TextKind::Subheader;
+        text
     }
 
     /// Create a small/caption-style text.
     pub fn caption(content: impl Into<String>) -> Self {
-        let theme = current_theme();
-        Self::new(content)
-            .size(theme.typography.small_size)
-            .color(theme.colors.text_muted)
+        let mut text = Self::new(content);
+        text.kind = TextKind::Caption;
+        text
     }
 
     fn text_style(&self) -> TextStyle {
         let theme = current_theme();
+        let typography = responsive_typography(&theme);
+        let resolved_size = self.font_size.unwrap_or(match self.kind {
+            TextKind::Body => typography.body_size,
+            TextKind::Header => typography.title_size,
+            TextKind::Subheader => typography.subheader_size,
+            TextKind::Caption => typography.small_size,
+        });
+        let resolved_color = self.color.unwrap_or(match self.kind {
+            TextKind::Caption => theme.colors.text_muted,
+            _ => theme.colors.text_primary,
+        });
         let mut style = TextStyle::default()
             .with_family(theme.typography.font_family.clone())
-            .with_size(self.font_size.unwrap_or(theme.typography.body_size))
-            .with_color(self.color.unwrap_or(theme.colors.text_primary));
+            .with_size(resolved_size)
+            .with_color(resolved_color);
 
         if self.bold {
             style = style.bold();
@@ -179,13 +207,14 @@ impl Widget for Text {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{set_current_theme, Theme};
+    use crate::{set_current_theme, set_current_viewport, Theme, ViewportInfo};
 
     #[test]
     fn text_defaults_follow_current_theme() {
         let mut theme = Theme::default();
         theme.typography.body_size = 19.0;
         theme.colors.text_primary = Color::from_hex(0x334155);
+        set_current_viewport(ViewportInfo::default());
         set_current_theme(theme.clone());
 
         let text = Text::new("Theme text");
@@ -198,6 +227,7 @@ mod tests {
     fn explicit_overrides_beat_theme_defaults() {
         let mut theme = Theme::default();
         theme.typography.body_size = 21.0;
+        set_current_viewport(ViewportInfo::default());
         set_current_theme(theme);
 
         let text = Text::new("Override")
@@ -206,5 +236,20 @@ mod tests {
         let style = text.text_style();
         assert_eq!(style.font_size, 14.0);
         assert_eq!(style.color, Color::from_hex(0x22C55E));
+    }
+
+    #[test]
+    fn header_and_caption_follow_responsive_typography() {
+        let mut theme = Theme::default();
+        theme.typography.title_size = 24.0;
+        theme.typography.small_size = 12.0;
+        set_current_theme(theme.clone());
+        set_current_viewport(ViewportInfo::new(390.0, 844.0));
+
+        let header = Text::header("Header");
+        let caption = Text::caption("Caption");
+        assert!(header.text_style().font_size < 24.0);
+        assert!(caption.text_style().font_size <= 12.0);
+        assert_eq!(caption.text_style().color, theme.colors.text_muted);
     }
 }

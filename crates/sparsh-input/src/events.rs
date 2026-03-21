@@ -28,6 +28,14 @@ pub enum InputEvent {
     KeyUp { event: KeyboardEvent },
     /// Text input (after IME processing).
     TextInput { text: String },
+    /// Paste content provided by the runtime clipboard bridge.
+    Paste { text: String },
+    /// IME composition started.
+    CompositionStart,
+    /// IME composition updated.
+    CompositionUpdate { text: String },
+    /// IME composition committed or ended.
+    CompositionEnd { text: String },
     /// Focus gained.
     FocusGained,
     /// Focus lost.
@@ -96,40 +104,56 @@ impl InputEvent {
 /// Helper for checking common key combinations.
 pub mod shortcuts {
     use super::*;
+    use ui_events::keyboard::Modifiers;
 
     fn is_char(event: &KeyboardEvent, ch: char) -> bool {
         matches!(&event.key, Key::Character(s) if s.starts_with(ch.to_ascii_lowercase()) || s.starts_with(ch.to_ascii_uppercase()))
     }
 
-    /// Check if this is Ctrl+C (copy).
+    /// Return whether the platform-primary shortcut modifier is active.
+    ///
+    /// Sparsh treats Meta as primary on macOS and wasm targets, and Control elsewhere.
+    pub fn primary_modifier(modifiers: Modifiers) -> bool {
+        #[cfg(any(target_os = "macos", target_arch = "wasm32"))]
+        {
+            modifiers.meta()
+        }
+
+        #[cfg(not(any(target_os = "macos", target_arch = "wasm32")))]
+        {
+            modifiers.ctrl()
+        }
+    }
+
+    /// Check if this is the primary copy shortcut.
     pub fn is_copy(event: &KeyboardEvent) -> bool {
-        event.modifiers.ctrl() && is_char(event, 'c')
+        primary_modifier(event.modifiers) && is_char(event, 'c')
     }
 
-    /// Check if this is Ctrl+V (paste).
+    /// Check if this is the primary paste shortcut.
     pub fn is_paste(event: &KeyboardEvent) -> bool {
-        event.modifiers.ctrl() && is_char(event, 'v')
+        primary_modifier(event.modifiers) && is_char(event, 'v')
     }
 
-    /// Check if this is Ctrl+X (cut).
+    /// Check if this is the primary cut shortcut.
     pub fn is_cut(event: &KeyboardEvent) -> bool {
-        event.modifiers.ctrl() && is_char(event, 'x')
+        primary_modifier(event.modifiers) && is_char(event, 'x')
     }
 
-    /// Check if this is Ctrl+A (select all).
+    /// Check if this is the primary select-all shortcut.
     pub fn is_select_all(event: &KeyboardEvent) -> bool {
-        event.modifiers.ctrl() && is_char(event, 'a')
+        primary_modifier(event.modifiers) && is_char(event, 'a')
     }
 
-    /// Check if this is Ctrl+Z (undo).
+    /// Check if this is the primary undo shortcut.
     pub fn is_undo(event: &KeyboardEvent) -> bool {
-        event.modifiers.ctrl() && !event.modifiers.shift() && is_char(event, 'z')
+        primary_modifier(event.modifiers) && !event.modifiers.shift() && is_char(event, 'z')
     }
 
-    /// Check if this is Ctrl+Shift+Z or Ctrl+Y (redo).
+    /// Check if this is the primary redo shortcut.
     pub fn is_redo(event: &KeyboardEvent) -> bool {
-        (event.modifiers.ctrl() && event.modifiers.shift() && is_char(event, 'z'))
-            || (event.modifiers.ctrl() && is_char(event, 'y'))
+        (primary_modifier(event.modifiers) && event.modifiers.shift() && is_char(event, 'z'))
+            || (primary_modifier(event.modifiers) && is_char(event, 'y'))
     }
 
     /// Check if this is the Escape key.

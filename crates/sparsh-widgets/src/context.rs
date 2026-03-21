@@ -217,7 +217,7 @@ impl PaintCommands {
 }
 
 /// Commands emitted by a widget during event handling.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct EventCommands {
     pub stop_propagation: bool,
     pub capture_pointer: bool,
@@ -226,6 +226,7 @@ pub struct EventCommands {
     pub clear_focus: bool,
     pub request_layout: bool,
     pub request_paint: bool,
+    pub clipboard_write: Option<String>,
 }
 
 impl EventCommands {
@@ -237,6 +238,9 @@ impl EventCommands {
         self.clear_focus |= other.clear_focus;
         self.request_layout |= other.request_layout;
         self.request_paint |= other.request_paint;
+        if other.clipboard_write.is_some() {
+            self.clipboard_write = other.clipboard_write;
+        }
     }
 }
 
@@ -319,5 +323,10 @@ impl<'a> EventContext<'a> {
     pub fn request_layout(&mut self) {
         self.commands.request_layout = true;
         self.commands.request_paint = true;
+    }
+
+    /// Request writing text to the platform clipboard.
+    pub fn write_clipboard(&mut self, text: impl Into<String>) {
+        self.commands.clipboard_write = Some(text.into());
     }
 }

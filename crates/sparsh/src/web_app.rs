@@ -7,29 +7,33 @@ use crate::{
     app::{AppConfig, AppRunError, AppTheme},
     dom_renderer::DomRenderer,
     router::{hash_to_path, path_to_hash, Navigator, Router, RouterHost},
+    runtime_widget::{
+        add_widget_to_layout, apply_focus_change, dispatch_widget_event, move_focus_path,
+        remap_path, sync_focus_manager, WidgetPath, WidgetRuntimeRegistry,
+    },
     web_surface_manager::{HybridSurfaceManager, SurfaceFrame},
 };
 use sparsh_core::Color;
-use sparsh_input::{FocusManager, InputEvent, PointerButton};
+use sparsh_input::{
+    Action, ActionMapper, FocusManager, InputEvent, Modifiers, PointerButton, StandardAction,
+};
 use sparsh_layout::LayoutTree;
 use sparsh_render::DrawList;
 use sparsh_signals::{RuntimeHandle, SubscriberKind};
 use sparsh_text::TextSystem;
-use sparsh_widgets::{
-    set_current_theme, BuildContext, EventCommands, EventContext, LayoutContext, PaintCommands,
-    PaintContext, Widget,
-};
+use sparsh_widgets::{set_current_theme, BuildContext, PaintCommands, PaintContext, Widget};
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
 };
 use wasm_bindgen::{closure::Closure, JsCast};
-use web_sys::{CustomEvent, KeyboardEvent as WebKeyboardEvent, MouseEvent, WheelEvent, Window};
+use web_sys::{
+    ClipboardEvent, CompositionEvent as WebCompositionEvent, CustomEvent, HtmlTextAreaElement,
+    InputEvent as WebInputEvent, KeyboardEvent as WebKeyboardEvent, MouseEvent, WheelEvent, Window,
+};
 
 fn format_js_error(error: &wasm_bindgen::JsValue) -> String {
-    error
-        .as_string()
-        .unwrap_or_else(|| format!("{error:?}"))
+    error.as_string().unwrap_or_else(|| format!("{error:?}"))
 }
 
 pub(crate) fn run_dom_app(
@@ -45,6 +49,8 @@ pub(crate) fn run_dom_app(
         .map_err(|err| AppRunError::DomMount(format_js_error(&err)))?;
     let surface_manager = HybridSurfaceManager::new(dom_renderer.root())
         .map_err(|err| AppRunError::HybridSurfaceInit(format_js_error(&err)))?;
+    let text_input_bridge = WebTextInputBridge::new(&document, dom_renderer.root())
+        .map_err(|err| AppRunError::DomMount(format_js_error(&err)))?;
     let signal_runtime = RuntimeHandle::current_or_default();
     let task_runtime =
         TaskRuntime::try_new().map_err(|err| AppRunError::TaskRuntimeInit(err.to_string()))?;
@@ -71,7 +77,10 @@ pub(crate) fn run_dom_app(
         draw_list: DrawList::new(),
         surface_frames: Vec::new(),
         layout_tree: LayoutTree::new(),
+        widget_registry: WidgetRuntimeRegistry::default(),
         focus_manager: FocusManager::new(),
+        focused_path: None,
+        capture_path: None,
         signal_runtime,
         task_runtime,
         root_widget,
@@ -84,6 +93,9 @@ pub(crate) fn run_dom_app(
         needs_repaint: true,
         first_paint_emitted: false,
         surface_manager,
+        text_input_bridge,
+        pending_clipboard_write: None,
+        ime_composing: false,
     };
     state.update_viewport();
     state.surface_manager.start_init();
@@ -114,7 +126,10 @@ struct WebAppState {
     draw_list: DrawList,
     surface_frames: Vec<SurfaceFrame>,
     layout_tree: LayoutTree,
+    widget_registry: WidgetRuntimeRegistry,
     focus_manager: FocusManager,
+    focused_path: Option<WidgetPath>,
+    capture_path: Option<WidgetPath>,
     signal_runtime: RuntimeHandle,
     task_runtime: TaskRuntime,
     root_widget: Box<dyn Widget>,
@@ -127,6 +142,76 @@ struct WebAppState {
     needs_repaint: bool,
     first_paint_emitted: bool,
     surface_manager: HybridSurfaceManager,
+    text_input_bridge: WebTextInputBridge,
+    pending_clipboard_write: Option<String>,
+    ime_composing: bool,
+}
+
+struct WebTextInputBridge {
+    element: HtmlTextAreaElement,
+    syncing: bool,
+}
+
+impl WebTextInputBridge {
+    fn new(
+        document: &web_sys::Document,
+        root: &web_sys::HtmlElement,
+    ) -> Result<Self, wasm_bindgen::JsValue> {
+        let element = document
+            .create_element("textarea")?
+            .dyn_into::<HtmlTextAreaElement>()?;
+        element.set_class_name("sparsh-text-editor-bridge");
+        element.set_attribute("aria-hidden", "true")?;
+        element.set_attribute("autocomplete", "off")?;
+        element.set_attribute("autocorrect", "off")?;
+        element.set_attribute("autocapitalize", "off")?;
+        element.set_attribute("spellcheck", "false")?;
+        let style = element.style();
+        style.set_property("position", "absolute")?;
+        style.set_property("left", "-10000px")?;
+        style.set_property("top", "0")?;
+        style.set_property("width", "1px")?;
+        style.set_property("height", "1px")?;
+        style.set_property("opacity", "0")?;
+        style.set_property("pointer-events", "none")?;
+        style.set_property("resize", "none")?;
+        style.set_property("overflow", "hidden")?;
+        style.set_property("white-space", "pre")?;
+        root.append_child(&element)?;
+        Ok(Self {
+            element,
+            syncing: false,
+        })
+    }
+
+    fn is_syncing(&self) -> bool {
+        self.syncing
+    }
+
+    fn element(&self) -> &HtmlTextAreaElement {
+        &self.element
+    }
+
+    fn sync(&mut self, editor_state: Option<&sparsh_widgets::TextEditorState>) {
+        self.syncing = true;
+        if let Some(state) = editor_state {
+            if self.element.value() != state.text {
+                self.element.set_value(&state.text);
+            }
+            let (selection_start, selection_end) = state.selection_range();
+            let _ = self
+                .element
+                .set_selection_start(Some(selection_start as u32));
+            let _ = self.element.set_selection_end(Some(selection_end as u32));
+            let _ = self.element.focus();
+        } else {
+            if !self.element.value().is_empty() {
+                self.element.set_value("");
+            }
+            let _ = self.element.blur();
+        }
+        self.syncing = false;
+    }
 }
 
 fn paint_widget_subtree(
@@ -214,6 +299,23 @@ fn paint_widget_subtree(
 }
 
 impl WebAppState {
+    fn focused_text_editor_state(&self) -> Option<&sparsh_widgets::TextEditorState> {
+        self.focused_path
+            .as_ref()
+            .and_then(|path| self.widget_registry.text_editor_state_for_path(path))
+    }
+
+    fn focused_selection_text(&self) -> Option<String> {
+        let state = self.focused_text_editor_state()?;
+        let (start, end) = state.selection_range();
+        (start < end).then(|| state.text.get(start..end).unwrap_or_default().to_owned())
+    }
+
+    fn sync_text_input_bridge(&mut self) {
+        let editor_state = self.focused_text_editor_state().cloned();
+        self.text_input_bridge.sync(editor_state.as_ref());
+    }
+
     fn update_viewport(&mut self) {
         if let Some(window) = web_sys::window() {
             if let Ok(width) = window.inner_width() {
@@ -279,68 +381,31 @@ impl WebAppState {
             rebuild_widget(self.root_widget.as_mut(), &mut build_ctx);
         });
 
-        fn add_to_layout(
-            widget: &mut dyn Widget,
-            tree: &mut LayoutTree,
-            text_system: &mut TextSystem,
-            in_scroll: bool,
-        ) -> sparsh_layout::WidgetId {
-            use sparsh_layout::taffy::Dimension;
-
-            let mut style = widget.style();
-            if in_scroll {
-                style.flex_shrink = 0.0;
-            }
-            let is_scroll = widget.is_scroll_container();
-            let children_ids: Vec<_> = widget
-                .children_mut()
-                .iter_mut()
-                .map(|child| {
-                    add_to_layout(child.as_mut(), tree, text_system, in_scroll || is_scroll)
-                })
-                .collect();
-
-            let id = if children_ids.is_empty() {
-                let mut layout_ctx = LayoutContext {
-                    text: text_system,
-                    max_width: None,
-                    max_height: None,
-                };
-                if let Some((_, measured_height)) = widget.measure(&mut layout_ctx) {
-                    let valid_height = measured_height.is_finite() && measured_height > 0.0;
-                    if valid_height {
-                        let current_min_height = style.min_size.height;
-                        let current_min_height_value = if current_min_height.is_auto() {
-                            0.0
-                        } else {
-                            current_min_height.value()
-                        };
-                        if measured_height > current_min_height_value {
-                            style.min_size.height = Dimension::length(measured_height);
-                        }
-                    }
-                }
-                tree.new_leaf(style)
-            } else {
-                tree.new_with_children(style, &children_ids)
-            };
-
-            widget.set_id(id);
-            id
-        }
-
+        let mut widget_registry = WidgetRuntimeRegistry::default();
         let root_id = runtime.with_tracking(SubscriberKind::Layout, || {
             set_current_theme(self.theme.resolve_theme());
-            add_to_layout(
+            let mut path = Vec::new();
+            add_widget_to_layout(
                 self.root_widget.as_mut(),
                 &mut self.layout_tree,
                 &mut self.text_system,
+                &mut widget_registry,
+                &mut path,
                 false,
             )
         });
         self.layout_tree.set_root(root_id);
+        self.widget_registry = widget_registry;
         self.layout_tree
             .compute_layout(self.viewport_width.max(1.0), self.viewport_height.max(1.0));
+        self.focused_path = remap_path(self.focused_path.take(), &self.widget_registry);
+        self.capture_path = remap_path(self.capture_path.take(), &self.widget_registry);
+        sync_focus_manager(
+            &mut self.focus_manager,
+            &self.widget_registry,
+            self.focused_path.as_ref(),
+        );
+        self.sync_text_input_bridge();
         self.needs_layout = false;
         self.needs_repaint = true;
     }
@@ -371,75 +436,78 @@ impl WebAppState {
     }
 
     fn handle_event(&mut self, event: InputEvent) {
-        fn dispatch_event(
-            widget: &mut dyn Widget,
-            layout_tree: &LayoutTree,
-            focus_id: Option<sparsh_layout::WidgetId>,
-            event: &InputEvent,
-            aggregate: &mut EventCommands,
-        ) -> Option<sparsh_layout::WidgetId> {
-            let id = widget.id();
-            let layout = match layout_tree.get_absolute_layout(id) {
-                Some(l) => l,
-                None => return focus_id,
-            };
-
-            let mut new_focus = focus_id;
-            for child in widget.children_mut() {
-                new_focus =
-                    dispatch_event(child.as_mut(), layout_tree, new_focus, event, aggregate);
-                if aggregate.stop_propagation {
-                    return new_focus;
+        let runtime = self.signal_runtime.clone();
+        let mapper = ActionMapper::new();
+        if let Some(Action::Standard(action)) = mapper.map_event(&event) {
+            match action {
+                StandardAction::FocusNext | StandardAction::FocusPrevious => {
+                    let next_focus = move_focus_path(
+                        self.focused_path.as_ref(),
+                        &self.widget_registry,
+                        matches!(action, StandardAction::FocusNext),
+                    );
+                    let focus_changed = apply_focus_change(
+                        self.root_widget.as_mut(),
+                        &mut self.focus_manager,
+                        &self.widget_registry,
+                        &mut self.focused_path,
+                        next_focus,
+                    );
+                    if focus_changed {
+                        self.ime_composing = false;
+                        self.sync_text_input_bridge();
+                        self.needs_repaint = true;
+                    }
+                    return;
                 }
+                _ => {}
             }
-
-            let mut temp_focus = FocusManager::new();
-            if let Some(fid) = new_focus {
-                temp_focus.set_focus(fid);
-            }
-
-            let mut ctx = EventContext {
-                layout,
-                layout_tree,
-                focus: &mut temp_focus,
-                widget_id: id,
-                has_capture: false,
-                commands: EventCommands::default(),
-            };
-            widget.event(&mut ctx, event);
-
-            if ctx.commands.request_focus {
-                new_focus = Some(id);
-            } else if ctx.commands.clear_focus && new_focus == Some(id) {
-                new_focus = None;
-            }
-            aggregate.merge(ctx.commands);
-            new_focus
         }
 
-        let runtime = self.signal_runtime.clone();
-        let current_focus = self.focus_manager.focused();
-        let mut commands = EventCommands::default();
-        let new_focus = runtime.run_with_current(|| {
-            dispatch_event(
+        let current_focus_id = self
+            .focused_path
+            .as_ref()
+            .and_then(|path| self.widget_registry.id_for_path(path));
+        let current_capture_path = self.capture_path.clone();
+        let outcome = runtime.run_with_current(|| {
+            dispatch_widget_event(
                 self.root_widget.as_mut(),
                 &self.layout_tree,
-                current_focus,
+                current_focus_id,
+                current_capture_path.as_ref(),
                 &event,
-                &mut commands,
             )
         });
 
-        if let Some(fid) = new_focus {
-            self.focus_manager.set_focus(fid);
-        } else if current_focus.is_some() && new_focus.is_none() {
-            self.focus_manager.clear_focus();
+        if outcome.commands.request_focus || outcome.commands.clear_focus {
+            let focus_changed = apply_focus_change(
+                self.root_widget.as_mut(),
+                &mut self.focus_manager,
+                &self.widget_registry,
+                &mut self.focused_path,
+                outcome.focus_path.clone(),
+            );
+            if focus_changed {
+                self.ime_composing = false;
+                self.needs_repaint = true;
+            }
         }
 
-        if commands.request_paint {
+        if outcome.commands.capture_pointer || outcome.commands.release_pointer {
+            self.capture_path = outcome.capture_path;
             self.needs_repaint = true;
         }
-        if commands.request_layout {
+
+        if outcome.commands.clipboard_write.is_some() {
+            self.pending_clipboard_write = outcome.commands.clipboard_write.clone();
+        }
+
+        self.sync_text_input_bridge();
+
+        if outcome.commands.request_paint {
+            self.needs_repaint = true;
+        }
+        if outcome.commands.request_layout {
             self.needs_layout = true;
         }
 
@@ -583,6 +651,9 @@ fn install_event_listeners(
         let target = root.clone();
         let root_for_event = target.clone();
         let on_move = Closure::wrap(Box::new(move |event: MouseEvent| {
+            if state.borrow().capture_path.is_some() {
+                return;
+            }
             let pos = mouse_pos(&root_for_event, &event);
             let mut state_ref = state.borrow_mut();
             state_ref.mouse_pos = pos;
@@ -631,6 +702,9 @@ fn install_event_listeners(
         let target = root.clone();
         let root_for_event = target.clone();
         let on_up = Closure::wrap(Box::new(move |event: MouseEvent| {
+            if state.borrow().capture_path.is_some() {
+                return;
+            }
             let pos = mouse_pos(&root_for_event, &event);
             let button = mouse_button(event.button());
             let mut state_ref = state.borrow_mut();
@@ -643,6 +717,58 @@ fn install_event_listeners(
             }
         }) as Box<dyn FnMut(_)>);
         let _ = target.add_event_listener_with_callback("mouseup", on_up.as_ref().unchecked_ref());
+        on_up.forget();
+    }
+
+    {
+        let state = Rc::clone(state);
+        let pending_animation_frame = Rc::clone(pending_animation_frame);
+        let frame_cb = Rc::clone(frame_cb);
+        let window = window.clone();
+        let window_for_listener = window.clone();
+        let root_for_event = root.clone();
+        let on_move = Closure::wrap(Box::new(move |event: MouseEvent| {
+            if state.borrow().capture_path.is_none() {
+                return;
+            }
+            let pos = mouse_pos(&root_for_event, &event);
+            let mut state_ref = state.borrow_mut();
+            state_ref.mouse_pos = pos;
+            state_ref.handle_event(InputEvent::PointerMove { pos });
+            let should_schedule = state_ref.should_schedule_frame();
+            drop(state_ref);
+            if should_schedule {
+                schedule_animation_frame(&window_for_listener, &pending_animation_frame, &frame_cb);
+            }
+        }) as Box<dyn FnMut(_)>);
+        let _ =
+            window.add_event_listener_with_callback("mousemove", on_move.as_ref().unchecked_ref());
+        on_move.forget();
+    }
+
+    {
+        let state = Rc::clone(state);
+        let pending_animation_frame = Rc::clone(pending_animation_frame);
+        let frame_cb = Rc::clone(frame_cb);
+        let window = window.clone();
+        let window_for_listener = window.clone();
+        let root_for_event = root.clone();
+        let on_up = Closure::wrap(Box::new(move |event: MouseEvent| {
+            if state.borrow().capture_path.is_none() {
+                return;
+            }
+            let pos = mouse_pos(&root_for_event, &event);
+            let button = mouse_button(event.button());
+            let mut state_ref = state.borrow_mut();
+            state_ref.mouse_pos = pos;
+            state_ref.handle_event(InputEvent::PointerUp { pos, button });
+            let should_schedule = state_ref.should_schedule_frame();
+            drop(state_ref);
+            if should_schedule {
+                schedule_animation_frame(&window_for_listener, &pending_animation_frame, &frame_cb);
+            }
+        }) as Box<dyn FnMut(_)>);
+        let _ = window.add_event_listener_with_callback("mouseup", on_up.as_ref().unchecked_ref());
         on_up.forget();
     }
 
@@ -685,13 +811,33 @@ fn install_event_listeners(
         let on_key_down = Closure::wrap(Box::new(move |event: WebKeyboardEvent| {
             if let Some(key) = map_browser_key(event.key()) {
                 let code = sparsh_input::ui_events::keyboard::Code::Unidentified;
-                let kb_event = sparsh_input::KeyboardEvent::key_down(key, code);
+                let mut kb_event = sparsh_input::KeyboardEvent::key_down(key, code);
+                kb_event.modifiers = browser_modifiers(&event);
+                let mapped = ActionMapper::new().map_event(&InputEvent::KeyDown {
+                    event: kb_event.clone(),
+                });
+                let focused_text_editor = state.borrow().focused_text_editor_state().is_some();
+                if focused_text_editor {
+                    if let Some(Action::Standard(action)) = mapped {
+                        if should_prevent_keydown_for_text_editor_action(action) {
+                            event.prevent_default();
+                        }
+                    }
+                } else if matches!(
+                    mapped,
+                    Some(Action::Standard(
+                        StandardAction::FocusNext | StandardAction::FocusPrevious
+                    ))
+                ) {
+                    event.prevent_default();
+                }
+
                 state
                     .borrow_mut()
                     .handle_event(InputEvent::KeyDown { event: kb_event });
             }
 
-            if should_emit_text(&event) {
+            if !state.borrow().focused_text_editor_state().is_some() && should_emit_text(&event) {
                 state
                     .borrow_mut()
                     .handle_event(InputEvent::TextInput { text: event.key() });
@@ -713,7 +859,8 @@ fn install_event_listeners(
         let on_key_up = Closure::wrap(Box::new(move |event: WebKeyboardEvent| {
             if let Some(key) = map_browser_key(event.key()) {
                 let code = sparsh_input::ui_events::keyboard::Code::Unidentified;
-                let kb_event = sparsh_input::KeyboardEvent::key_up(key, code);
+                let mut kb_event = sparsh_input::KeyboardEvent::key_up(key, code);
+                kb_event.modifiers = browser_modifiers(&event);
                 state
                     .borrow_mut()
                     .handle_event(InputEvent::KeyUp { event: kb_event });
@@ -724,6 +871,247 @@ fn install_event_listeners(
         }) as Box<dyn FnMut(_)>);
         let _ = root.add_event_listener_with_callback("keyup", on_key_up.as_ref().unchecked_ref());
         on_key_up.forget();
+    }
+
+    {
+        let bridge = state.borrow().text_input_bridge.element().clone();
+        let state = Rc::clone(state);
+        let pending_animation_frame = Rc::clone(pending_animation_frame);
+        let frame_cb = Rc::clone(frame_cb);
+        let window = window.clone();
+        let on_before_input = Closure::wrap(Box::new(move |event: WebInputEvent| {
+            if state.borrow().text_input_bridge.is_syncing() {
+                return;
+            }
+            if state.borrow().focused_text_editor_state().is_none() {
+                return;
+            }
+            match event.input_type().as_str() {
+                "insertText" => {
+                    if let Some(text) = event.data() {
+                        event.prevent_default();
+                        state
+                            .borrow_mut()
+                            .handle_event(InputEvent::TextInput { text });
+                    }
+                }
+                _ => {}
+            }
+            if state.borrow().should_schedule_frame() {
+                schedule_animation_frame(&window, &pending_animation_frame, &frame_cb);
+            }
+        }) as Box<dyn FnMut(_)>);
+        let _ = bridge.add_event_listener_with_callback(
+            "beforeinput",
+            on_before_input.as_ref().unchecked_ref(),
+        );
+        on_before_input.forget();
+    }
+
+    {
+        let bridge = state.borrow().text_input_bridge.element().clone();
+        let state = Rc::clone(state);
+        let pending_animation_frame = Rc::clone(pending_animation_frame);
+        let frame_cb = Rc::clone(frame_cb);
+        let window = window.clone();
+        let on_input = Closure::wrap(Box::new(move |_event: WebInputEvent| {
+            if state.borrow().text_input_bridge.is_syncing() {
+                return;
+            }
+            if state.borrow().focused_text_editor_state().is_none() {
+                return;
+            }
+            state.borrow_mut().sync_text_input_bridge();
+            if state.borrow().should_schedule_frame() {
+                schedule_animation_frame(&window, &pending_animation_frame, &frame_cb);
+            }
+        }) as Box<dyn FnMut(_)>);
+        let _ = bridge.add_event_listener_with_callback("input", on_input.as_ref().unchecked_ref());
+        on_input.forget();
+    }
+
+    {
+        let bridge = state.borrow().text_input_bridge.element().clone();
+        let state = Rc::clone(state);
+        let pending_animation_frame = Rc::clone(pending_animation_frame);
+        let frame_cb = Rc::clone(frame_cb);
+        let window = window.clone();
+        let on_composition_start = Closure::wrap(Box::new(move |_event: WebCompositionEvent| {
+            if state.borrow().text_input_bridge.is_syncing() {
+                return;
+            }
+            if state.borrow().focused_text_editor_state().is_none() {
+                return;
+            }
+            let mut state_ref = state.borrow_mut();
+            state_ref.ime_composing = true;
+            state_ref.handle_event(InputEvent::CompositionStart);
+            let should_schedule = state_ref.should_schedule_frame();
+            drop(state_ref);
+            if should_schedule {
+                schedule_animation_frame(&window, &pending_animation_frame, &frame_cb);
+            }
+        }) as Box<dyn FnMut(_)>);
+        let _ = bridge.add_event_listener_with_callback(
+            "compositionstart",
+            on_composition_start.as_ref().unchecked_ref(),
+        );
+        on_composition_start.forget();
+    }
+
+    {
+        let bridge = state.borrow().text_input_bridge.element().clone();
+        let state = Rc::clone(state);
+        let pending_animation_frame = Rc::clone(pending_animation_frame);
+        let frame_cb = Rc::clone(frame_cb);
+        let window = window.clone();
+        let on_composition_update = Closure::wrap(Box::new(move |event: WebCompositionEvent| {
+            if state.borrow().text_input_bridge.is_syncing() {
+                return;
+            }
+            if state.borrow().focused_text_editor_state().is_none() {
+                return;
+            }
+            let text = event.data().unwrap_or_default();
+            state
+                .borrow_mut()
+                .handle_event(InputEvent::CompositionUpdate { text });
+            if state.borrow().should_schedule_frame() {
+                schedule_animation_frame(&window, &pending_animation_frame, &frame_cb);
+            }
+        }) as Box<dyn FnMut(_)>);
+        let _ = bridge.add_event_listener_with_callback(
+            "compositionupdate",
+            on_composition_update.as_ref().unchecked_ref(),
+        );
+        on_composition_update.forget();
+    }
+
+    {
+        let bridge = state.borrow().text_input_bridge.element().clone();
+        let state = Rc::clone(state);
+        let pending_animation_frame = Rc::clone(pending_animation_frame);
+        let frame_cb = Rc::clone(frame_cb);
+        let window = window.clone();
+        let on_composition_end = Closure::wrap(Box::new(move |event: WebCompositionEvent| {
+            if state.borrow().text_input_bridge.is_syncing() {
+                return;
+            }
+            if state.borrow().focused_text_editor_state().is_none() {
+                return;
+            }
+            let mut state_ref = state.borrow_mut();
+            state_ref.ime_composing = false;
+            state_ref.handle_event(InputEvent::CompositionEnd {
+                text: event.data().unwrap_or_default(),
+            });
+            let should_schedule = state_ref.should_schedule_frame();
+            drop(state_ref);
+            if should_schedule {
+                schedule_animation_frame(&window, &pending_animation_frame, &frame_cb);
+            }
+        }) as Box<dyn FnMut(_)>);
+        let _ = bridge.add_event_listener_with_callback(
+            "compositionend",
+            on_composition_end.as_ref().unchecked_ref(),
+        );
+        on_composition_end.forget();
+    }
+
+    {
+        let bridge = state.borrow().text_input_bridge.element().clone();
+        let state = Rc::clone(state);
+        let pending_animation_frame = Rc::clone(pending_animation_frame);
+        let frame_cb = Rc::clone(frame_cb);
+        let window = window.clone();
+        let on_paste = Closure::wrap(Box::new(move |event: ClipboardEvent| {
+            if state.borrow().focused_text_editor_state().is_none() {
+                return;
+            }
+            let Some(clipboard) = event.clipboard_data() else {
+                return;
+            };
+            let Ok(text) = clipboard.get_data("text/plain") else {
+                return;
+            };
+            event.prevent_default();
+            state.borrow_mut().handle_event(InputEvent::Paste { text });
+            if state.borrow().should_schedule_frame() {
+                schedule_animation_frame(&window, &pending_animation_frame, &frame_cb);
+            }
+        }) as Box<dyn FnMut(_)>);
+        let _ = bridge.add_event_listener_with_callback("paste", on_paste.as_ref().unchecked_ref());
+        on_paste.forget();
+    }
+
+    {
+        let bridge = state.borrow().text_input_bridge.element().clone();
+        let state = Rc::clone(state);
+        let on_copy = Closure::wrap(Box::new(move |event: ClipboardEvent| {
+            if state.borrow().focused_text_editor_state().is_none() {
+                return;
+            }
+            let text = {
+                let mut state_ref = state.borrow_mut();
+                state_ref
+                    .pending_clipboard_write
+                    .take()
+                    .or_else(|| state_ref.focused_selection_text())
+            };
+            let Some(text) = text else {
+                return;
+            };
+            if let Some(clipboard) = event.clipboard_data() {
+                let _ = clipboard.set_data("text/plain", &text);
+                event.prevent_default();
+            }
+        }) as Box<dyn FnMut(_)>);
+        let _ = bridge.add_event_listener_with_callback("copy", on_copy.as_ref().unchecked_ref());
+        on_copy.forget();
+    }
+
+    {
+        let bridge = state.borrow().text_input_bridge.element().clone();
+        let state = Rc::clone(state);
+        let pending_animation_frame = Rc::clone(pending_animation_frame);
+        let frame_cb = Rc::clone(frame_cb);
+        let window = window.clone();
+        let on_cut = Closure::wrap(Box::new(move |event: ClipboardEvent| {
+            if state.borrow().focused_text_editor_state().is_none() {
+                return;
+            }
+
+            let fallback_text = state.borrow().focused_selection_text();
+            let mut clipboard_text = {
+                let mut state_ref = state.borrow_mut();
+                state_ref.pending_clipboard_write.take()
+            };
+
+            if clipboard_text.is_none() && fallback_text.is_some() {
+                let mut synthetic = sparsh_input::KeyboardEvent::key_down(
+                    sparsh_input::Key::Character("x".to_owned()),
+                    sparsh_input::ui_events::keyboard::Code::Unidentified,
+                );
+                synthetic.modifiers = primary_shortcut_modifiers();
+                state
+                    .borrow_mut()
+                    .handle_event(InputEvent::KeyDown { event: synthetic });
+                clipboard_text = state.borrow_mut().pending_clipboard_write.take();
+            }
+
+            let Some(text) = clipboard_text.or(fallback_text) else {
+                return;
+            };
+            if let Some(clipboard) = event.clipboard_data() {
+                let _ = clipboard.set_data("text/plain", &text);
+                event.prevent_default();
+            }
+            if state.borrow().should_schedule_frame() {
+                schedule_animation_frame(&window, &pending_animation_frame, &frame_cb);
+            }
+        }) as Box<dyn FnMut(_)>);
+        let _ = bridge.add_event_listener_with_callback("cut", on_cut.as_ref().unchecked_ref());
+        on_cut.forget();
     }
 
     {
@@ -824,6 +1212,58 @@ fn mouse_pos_wheel(root: &web_sys::HtmlElement, event: &WheelEvent) -> glam::Vec
     glam::Vec2::new(
         event.client_x() as f32 - rect.left() as f32,
         event.client_y() as f32 - rect.top() as f32,
+    )
+}
+
+fn browser_modifiers(event: &WebKeyboardEvent) -> Modifiers {
+    let mut modifiers = Modifiers::empty();
+    if event.shift_key() {
+        modifiers |= Modifiers::SHIFT;
+    }
+    if event.ctrl_key() {
+        modifiers |= Modifiers::CONTROL;
+    }
+    if event.alt_key() {
+        modifiers |= Modifiers::ALT;
+    }
+    if event.meta_key() {
+        modifiers |= Modifiers::META;
+    }
+    modifiers
+}
+
+fn primary_shortcut_modifiers() -> Modifiers {
+    Modifiers::META
+}
+
+fn should_prevent_keydown_for_text_editor_action(action: StandardAction) -> bool {
+    matches!(
+        action,
+        StandardAction::FocusNext
+            | StandardAction::FocusPrevious
+            | StandardAction::SelectAll
+            | StandardAction::Undo
+            | StandardAction::Redo
+            | StandardAction::Backspace
+            | StandardAction::Delete
+            | StandardAction::MoveLeft
+            | StandardAction::MoveRight
+            | StandardAction::MoveUp
+            | StandardAction::MoveDown
+            | StandardAction::MoveWordLeft
+            | StandardAction::MoveWordRight
+            | StandardAction::MoveToStart
+            | StandardAction::MoveToEnd
+            | StandardAction::SelectLeft
+            | StandardAction::SelectRight
+            | StandardAction::SelectUp
+            | StandardAction::SelectDown
+            | StandardAction::SelectWordLeft
+            | StandardAction::SelectWordRight
+            | StandardAction::SelectToStart
+            | StandardAction::SelectToEnd
+            | StandardAction::Activate
+            | StandardAction::Cancel
     )
 }
 

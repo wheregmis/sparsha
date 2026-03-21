@@ -163,22 +163,22 @@ impl ActionMapper {
                 NamedKey::Backspace => Some(Backspace),
                 NamedKey::Delete => Some(Delete),
                 NamedKey::ArrowLeft => {
-                    if event.modifiers.shift() && event.modifiers.ctrl() {
+                    if event.modifiers.shift() && shortcuts::primary_modifier(event.modifiers) {
                         Some(SelectWordLeft)
                     } else if event.modifiers.shift() {
                         Some(SelectLeft)
-                    } else if event.modifiers.ctrl() {
+                    } else if shortcuts::primary_modifier(event.modifiers) {
                         Some(MoveWordLeft)
                     } else {
                         Some(MoveLeft)
                     }
                 }
                 NamedKey::ArrowRight => {
-                    if event.modifiers.shift() && event.modifiers.ctrl() {
+                    if event.modifiers.shift() && shortcuts::primary_modifier(event.modifiers) {
                         Some(SelectWordRight)
                     } else if event.modifiers.shift() {
                         Some(SelectRight)
-                    } else if event.modifiers.ctrl() {
+                    } else if shortcuts::primary_modifier(event.modifiers) {
                         Some(MoveWordRight)
                     } else {
                         Some(MoveRight)
@@ -290,6 +290,7 @@ impl ActionContext {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ui_events::keyboard::Modifiers;
 
     #[test]
     fn test_escape_maps_to_cancel() {
@@ -320,6 +321,81 @@ mod tests {
         assert_eq!(
             mapper.map_event(&event),
             Some(Action::Standard(StandardAction::Activate))
+        );
+    }
+
+    #[test]
+    fn test_tab_maps_to_focus_navigation() {
+        let mapper = ActionMapper::new();
+        let forward = InputEvent::KeyDown {
+            event: KeyboardEvent {
+                key: Key::Named(NamedKey::Tab),
+                ..Default::default()
+            },
+        };
+        let backward = InputEvent::KeyDown {
+            event: KeyboardEvent {
+                key: Key::Named(NamedKey::Tab),
+                modifiers: Modifiers::SHIFT,
+                ..Default::default()
+            },
+        };
+
+        assert_eq!(
+            mapper.map_event(&forward),
+            Some(Action::Standard(StandardAction::FocusNext))
+        );
+        assert_eq!(
+            mapper.map_event(&backward),
+            Some(Action::Standard(StandardAction::FocusPrevious))
+        );
+    }
+
+    #[test]
+    fn test_primary_shortcuts_map_copy_and_word_movement() {
+        let mapper = ActionMapper::new();
+        let copy = InputEvent::KeyDown {
+            event: KeyboardEvent {
+                key: Key::Character("c".into()),
+                modifiers: {
+                    #[cfg(any(target_os = "macos", target_arch = "wasm32"))]
+                    {
+                        Modifiers::META
+                    }
+
+                    #[cfg(not(any(target_os = "macos", target_arch = "wasm32")))]
+                    {
+                        Modifiers::CONTROL
+                    }
+                },
+                ..Default::default()
+            },
+        };
+        let move_word = InputEvent::KeyDown {
+            event: KeyboardEvent {
+                key: Key::Named(NamedKey::ArrowRight),
+                modifiers: {
+                    #[cfg(any(target_os = "macos", target_arch = "wasm32"))]
+                    {
+                        Modifiers::META
+                    }
+
+                    #[cfg(not(any(target_os = "macos", target_arch = "wasm32")))]
+                    {
+                        Modifiers::CONTROL
+                    }
+                },
+                ..Default::default()
+            },
+        };
+
+        assert_eq!(
+            mapper.map_event(&copy),
+            Some(Action::Standard(StandardAction::Copy))
+        );
+        assert_eq!(
+            mapper.map_event(&move_word),
+            Some(Action::Standard(StandardAction::MoveWordRight))
         );
     }
 }

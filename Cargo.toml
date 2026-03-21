@@ -23,6 +23,7 @@ pollster = "0.4.0"
 bytemuck = { version = "1.25.0", features = ["derive"] }
 env_logger = "0.11.9"
 log = "0.4.29"
+arboard = "3.6.1"
 tokio = { version = "1.48.0", features = ["rt-multi-thread", "sync", "time"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
@@ -74,6 +75,7 @@ web-sys = { version = "0.3.91", features = [
     "CustomEvent",
     "Node",
     "HtmlElement",
+    "HtmlTextAreaElement",
     "HtmlCanvasElement",
     "CssStyleDeclaration",
     "DomRect",
@@ -83,6 +85,10 @@ web-sys = { version = "0.3.91", features = [
     "MouseEvent",
     "WheelEvent",
     "KeyboardEvent",
+    "InputEvent",
+    "ClipboardEvent",
+    "DataTransfer",
+    "CompositionEvent",
 ] }
 console_error_panic_hook = "0.1.7"
 

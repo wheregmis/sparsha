@@ -142,18 +142,45 @@ fn build_main_area() -> Scroll {
 /// Input fields section
 fn build_input_section() -> Container {
     section(
-        "Input Fields",
+        "Input, Focus, And Editing",
         Container::new()
             .column()
             .gap(12.0)
             .fill_width()
-            .child(TextInput::new().fill_width().placeholder("Enter text..."))
+            .child(
+                Text::new(
+                    "Use Tab and Shift+Tab to move through the checkbox, single-line fields, and multiline editor. Native and web now share copy, cut, paste, undo, redo, word movement, and IME composition behavior.",
+                )
+                .size(13.0)
+                .color(Color::from_hex(0xCBD5E1)),
+            )
+            .child(
+                Container::new()
+                    .row()
+                    .gap(12.0)
+                    .align_start()
+                    .child(Checkbox::with_checked(true))
+                    .child(
+                        Text::new("Focusable checkbox in the same tab order")
+                            .size(14.0)
+                            .color(Color::WHITE),
+                    ),
+            )
+            .child(
+                TextInput::new()
+                    .fill_width()
+                    .placeholder("Single-line input with clipboard + undo"),
+            )
             .child(
                 TextInput::new()
                     .fill_width()
                     .placeholder("Email address..."),
             )
-            .child(TextInput::new().fill_width().placeholder("Password...")),
+            .child(
+                TextArea::new()
+                    .fill_width()
+                    .placeholder("Multiline notes...\nTry Enter, arrow keys, word movement, and paste."),
+            ),
     )
 }
 

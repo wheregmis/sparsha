@@ -1,8 +1,9 @@
 //! Text input widget.
 
+use crate::text_editor::{EditorCore, TextEditorState};
 use crate::{current_theme, EventContext, PaintContext, Widget};
 use sparsh_core::Color;
-use sparsh_input::{shortcuts, InputEvent, Key};
+use sparsh_input::{Action, ActionMapper, InputEvent, Key, NamedKey, StandardAction};
 use sparsh_layout::WidgetId;
 use sparsh_text::TextStyle;
 use std::cell::RefCell;
@@ -57,11 +58,9 @@ impl Default for TextInputStyle {
 /// A single-line text input widget.
 pub struct TextInput {
     id: WidgetId,
-    value: String,
+    editor: EditorCore,
     placeholder: String,
     style: TextInputStyle,
-    cursor_pos: usize,
-    selection_start: Option<usize>,
     on_change: Option<TextInputCallback>,
     on_submit: Option<TextInputCallback>,
     fill_width: bool,
@@ -74,11 +73,9 @@ impl TextInput {
     pub fn new() -> Self {
         Self {
             id: WidgetId::default(),
-            value: String::new(),
+            editor: EditorCore::new(String::new()),
             placeholder: String::new(),
             style: TextInputStyle::default(),
-            cursor_pos: 0,
-            selection_start: None,
             on_change: None,
             on_submit: None,
             fill_width: false,
@@ -89,8 +86,7 @@ impl TextInput {
 
     /// Set the initial value.
     pub fn value(mut self, value: impl Into<String>) -> Self {
-        self.value = value.into();
-        self.cursor_pos = self.value.len();
+        self.editor.set_text(value.into());
         self
     }
 
@@ -127,109 +123,12 @@ impl TextInput {
 
     /// Get the current value.
     pub fn get_value(&self) -> &str {
-        &self.value
-    }
-
-    fn insert_char(&mut self, c: char) {
-        self.delete_selection();
-        self.value.insert(self.cursor_pos, c);
-        self.cursor_pos += c.len_utf8();
-        self.fire_change();
-    }
-
-    #[allow(dead_code)]
-    fn insert_str(&mut self, s: &str) {
-        self.delete_selection();
-        self.value.insert_str(self.cursor_pos, s);
-        self.cursor_pos += s.len();
-        self.fire_change();
-    }
-
-    fn delete_selection(&mut self) {
-        if let Some(start) = self.selection_start.take() {
-            let (from, to) = if start < self.cursor_pos {
-                (start, self.cursor_pos)
-            } else {
-                (self.cursor_pos, start)
-            };
-            self.value.drain(from..to);
-            self.cursor_pos = from;
-        }
-    }
-
-    fn backspace(&mut self) {
-        if self.selection_start.is_some() {
-            self.delete_selection();
-            self.fire_change();
-        } else if self.cursor_pos > 0 {
-            // Find the previous character boundary
-            let prev = self.value[..self.cursor_pos]
-                .char_indices()
-                .last()
-                .map(|(i, _)| i)
-                .unwrap_or(0);
-            self.value.drain(prev..self.cursor_pos);
-            self.cursor_pos = prev;
-            self.fire_change();
-        }
-    }
-
-    fn delete(&mut self) {
-        if self.selection_start.is_some() {
-            self.delete_selection();
-            self.fire_change();
-        } else if self.cursor_pos < self.value.len() {
-            // Find the next character boundary
-            let next = self.value[self.cursor_pos..]
-                .char_indices()
-                .nth(1)
-                .map(|(i, _)| self.cursor_pos + i)
-                .unwrap_or(self.value.len());
-            self.value.drain(self.cursor_pos..next);
-            self.fire_change();
-        }
-    }
-
-    fn move_cursor_left(&mut self, shift: bool) {
-        if !shift {
-            self.selection_start = None;
-        } else if self.selection_start.is_none() {
-            self.selection_start = Some(self.cursor_pos);
-        }
-
-        if self.cursor_pos > 0 {
-            self.cursor_pos = self.value[..self.cursor_pos]
-                .char_indices()
-                .last()
-                .map(|(i, _)| i)
-                .unwrap_or(0);
-        }
-    }
-
-    fn move_cursor_right(&mut self, shift: bool) {
-        if !shift {
-            self.selection_start = None;
-        } else if self.selection_start.is_none() {
-            self.selection_start = Some(self.cursor_pos);
-        }
-
-        if self.cursor_pos < self.value.len() {
-            self.cursor_pos = self.value[self.cursor_pos..]
-                .char_indices()
-                .nth(1)
-                .map(|(i, _)| self.cursor_pos + i)
-                .unwrap_or(self.value.len());
-        }
-    }
-
-    fn select_all(&mut self) {
-        self.selection_start = Some(0);
-        self.cursor_pos = self.value.len();
+        self.editor.text()
     }
 
     fn fire_change(&mut self) {
         if let Some(handler) = &mut self.on_change {
-            handler(&self.value);
+            handler(self.editor.text());
         }
     }
 
@@ -257,8 +156,8 @@ impl TextInput {
     }
 
     fn update_prefix_width_cache_with_paint_ctx(&self, ctx: &mut PaintContext, style: &TextStyle) {
-        let cache = Self::compute_prefix_widths(&self.value, |prefix| {
-            self.measure_width(ctx, style, prefix)
+        let cache = Self::compute_prefix_widths(self.editor.text(), |prefix| {
+            self.measure_width(ctx, style, prefix) / ctx.scale_factor.max(1.0)
         });
         *self.prefix_widths.borrow_mut() = cache;
     }
@@ -268,18 +167,19 @@ impl TextInput {
         ctx: &mut crate::LayoutContext,
         style: &TextStyle,
     ) {
-        let cache =
-            Self::compute_prefix_widths(&self.value, |prefix| ctx.measure_text(prefix, style).0);
+        let cache = Self::compute_prefix_widths(self.editor.text(), |prefix| {
+            ctx.measure_text(prefix, style).0
+        });
         *self.prefix_widths.borrow_mut() = cache;
     }
 
     fn cursor_index_for_x(&self, x: f32) -> usize {
-        if self.value.is_empty() {
+        if self.editor.text().is_empty() {
             return 0;
         }
         let prefix = self.prefix_widths.borrow();
         if prefix.is_empty() {
-            return self.value.len();
+            return self.editor.text().len();
         }
 
         if x <= 0.0 {
@@ -291,7 +191,7 @@ impl TextInput {
             }
         }
 
-        let mut best = (self.value.len(), f32::MAX);
+        let mut best = (self.editor.text().len(), f32::MAX);
         for (idx, width) in prefix.iter() {
             let dist = (*width - x).abs();
             if dist < best.1 {
@@ -309,10 +209,10 @@ impl TextInput {
     }
 
     fn cursor_offset_for(&self, ctx: &mut PaintContext, style: &TextStyle) -> f32 {
-        if let Some(width) = self.prefix_width_for(self.cursor_pos) {
-            return width;
+        if let Some(width) = self.prefix_width_for(self.editor.cursor()) {
+            return width * ctx.scale_factor;
         }
-        let text_before_cursor = &self.value[..self.cursor_pos];
+        let text_before_cursor = &self.editor.text()[..self.editor.cursor()];
         self.measure_width(ctx, style, text_before_cursor)
     }
 
@@ -349,6 +249,129 @@ impl TextInput {
         } else {
             self.style.clone()
         }
+    }
+
+    fn handle_action(&mut self, ctx: &mut EventContext, action: StandardAction) -> bool {
+        let changed = match action {
+            StandardAction::SelectAll => {
+                self.editor.select_all();
+                ctx.request_paint();
+                false
+            }
+            StandardAction::Copy => {
+                if let Some(text) = self.editor.copy_selection() {
+                    ctx.write_clipboard(text);
+                }
+                ctx.request_paint();
+                false
+            }
+            StandardAction::Cut => {
+                if let Some(text) = self.editor.cut_selection() {
+                    ctx.write_clipboard(text);
+                    self.fire_change();
+                    ctx.request_layout();
+                    true
+                } else {
+                    false
+                }
+            }
+            StandardAction::Undo => {
+                let changed = self.editor.undo();
+                if changed {
+                    self.fire_change();
+                    ctx.request_layout();
+                }
+                changed
+            }
+            StandardAction::Redo => {
+                let changed = self.editor.redo();
+                if changed {
+                    self.fire_change();
+                    ctx.request_layout();
+                }
+                changed
+            }
+            StandardAction::Backspace => {
+                let changed = self.editor.backspace();
+                if changed {
+                    self.fire_change();
+                    ctx.request_layout();
+                }
+                changed
+            }
+            StandardAction::Delete => {
+                let changed = self.editor.delete_forward();
+                if changed {
+                    self.fire_change();
+                    ctx.request_layout();
+                }
+                changed
+            }
+            StandardAction::MoveLeft => {
+                self.editor.move_left(false);
+                ctx.request_paint();
+                false
+            }
+            StandardAction::MoveRight => {
+                self.editor.move_right(false);
+                ctx.request_paint();
+                false
+            }
+            StandardAction::SelectLeft => {
+                self.editor.move_left(true);
+                ctx.request_paint();
+                false
+            }
+            StandardAction::SelectRight => {
+                self.editor.move_right(true);
+                ctx.request_paint();
+                false
+            }
+            StandardAction::MoveWordLeft => {
+                self.editor.move_word_left(false);
+                ctx.request_paint();
+                false
+            }
+            StandardAction::MoveWordRight => {
+                self.editor.move_word_right(false);
+                ctx.request_paint();
+                false
+            }
+            StandardAction::SelectWordLeft => {
+                self.editor.move_word_left(true);
+                ctx.request_paint();
+                false
+            }
+            StandardAction::SelectWordRight => {
+                self.editor.move_word_right(true);
+                ctx.request_paint();
+                false
+            }
+            StandardAction::MoveToStart => {
+                self.editor.move_to_start(false);
+                ctx.request_paint();
+                false
+            }
+            StandardAction::MoveToEnd => {
+                self.editor.move_to_end(false);
+                ctx.request_paint();
+                false
+            }
+            StandardAction::SelectToStart => {
+                self.editor.move_to_start(true);
+                ctx.request_paint();
+                false
+            }
+            StandardAction::SelectToEnd => {
+                self.editor.move_to_end(true);
+                ctx.request_paint();
+                false
+            }
+            _ => false,
+        };
+
+        ctx.stop_propagation();
+        changed
     }
 }
 
@@ -446,10 +469,8 @@ impl Widget for TextInput {
             style.border_color
         };
 
-        // Draw background
         ctx.fill_bordered_rect(bounds, bg, style.corner_radius, style.border_width, border);
 
-        // Focus ring (scale the offset values)
         if focused {
             let offset = 2.0 * scale;
             let focus_bounds = sparsh_core::Rect::new(
@@ -467,12 +488,10 @@ impl Widget for TextInput {
             );
         }
 
-        // Calculate text area (inside padding) - scale padding for physical pixels
         let padding_h = style.padding_h * scale;
         let text_x = bounds.x + padding_h;
         let text_width = bounds.width - padding_h * 2.0;
 
-        // Create text style (font size is in logical pixels, will be scaled by draw_text)
         let text_style = TextStyle::default()
             .with_family(current_theme().typography.font_family.clone())
             .with_size(style.font_size)
@@ -485,34 +504,19 @@ impl Widget for TextInput {
 
         self.update_prefix_width_cache_with_paint_ctx(ctx, &text_style);
 
-        // Measure text height for vertical centering
         let (_, text_height) = ctx.measure_text("Ay", &text_style);
         let text_y = bounds.y + (bounds.height - text_height) / 2.0;
 
-        // Draw placeholder or value
-        if self.value.is_empty() {
-            // Draw placeholder text
+        if self.editor.text().is_empty() {
             if !self.placeholder.is_empty() {
                 ctx.draw_text(&self.placeholder, &placeholder_style, text_x, text_y);
             }
         } else {
-            // Draw selection highlight if any
-            if let Some(sel_start) = self.selection_start {
-                let (start, end) = if sel_start < self.cursor_pos {
-                    (sel_start, self.cursor_pos)
-                } else {
-                    (self.cursor_pos, sel_start)
-                };
-
-                // Measure text before selection start
-                let text_before_sel = &self.value[..start];
+            if let Some((start, end)) = self.editor.selection_range() {
+                let text_before_sel = &self.editor.text()[..start];
                 let sel_x_start = self.measure_width(ctx, &text_style, text_before_sel);
-
-                // Measure selected text
-                let selected_text = &self.value[start..end];
+                let selected_text = &self.editor.text()[start..end];
                 let sel_width = self.measure_width(ctx, &text_style, selected_text);
-
-                // Draw selection rectangle
                 if sel_width > 0.0 {
                     let sel_rect = sparsh_core::Rect::new(
                         text_x + sel_x_start,
@@ -524,26 +528,17 @@ impl Widget for TextInput {
                 }
             }
 
-            // Draw the text value
-            ctx.draw_text(&self.value, &text_style, text_x, text_y);
+            ctx.draw_text(self.editor.text(), &text_style, text_x, text_y);
         }
 
-        // Draw cursor when focused
         if focused {
             ctx.request_next_frame();
-            // Blink cursor at ~2Hz
             let cursor_visible = (ctx.elapsed_time * 2.0).fract() < 0.5;
-
             if cursor_visible {
                 let cursor_x_offset = self.cursor_offset_for(ctx, &text_style);
-
                 let cursor_x = text_x + cursor_x_offset;
-                let cursor_height = text_height;
-
-                // Draw cursor line (scale cursor width)
-                let cursor_width = 2.0 * scale;
                 let cursor_rect =
-                    sparsh_core::Rect::new(cursor_x, text_y, cursor_width, cursor_height);
+                    sparsh_core::Rect::new(cursor_x, text_y, 2.0 * scale, text_height);
                 ctx.fill_rect(cursor_rect, style.text_color);
             }
         }
@@ -557,10 +552,29 @@ impl Widget for TextInput {
                     ctx.request_focus();
                     let local = ctx.to_local(*pos);
                     let click_x = (local.x - style.padding_h).max(0.0);
-                    self.cursor_pos = self.cursor_index_for_x(click_x);
-                    self.selection_start = None;
-                    ctx.stop_propagation();
+                    self.editor
+                        .set_cursor(self.cursor_index_for_x(click_x), false);
+                    ctx.capture_pointer();
+                }
+            }
+            InputEvent::PointerMove { pos } => {
+                if ctx.has_capture {
+                    let style = self.resolved_style();
+                    let local = ctx.to_local(*pos);
+                    let click_x = (local.x - style.padding_h).max(0.0);
+                    self.editor
+                        .set_cursor(self.cursor_index_for_x(click_x), true);
                     ctx.request_paint();
+                }
+            }
+            InputEvent::PointerUp { pos, .. } => {
+                if ctx.has_capture {
+                    let style = self.resolved_style();
+                    let local = ctx.to_local(*pos);
+                    let click_x = (local.x - style.padding_h).max(0.0);
+                    self.editor
+                        .set_cursor(self.cursor_index_for_x(click_x), true);
+                    ctx.release_pointer();
                 }
             }
             InputEvent::KeyDown { event } => {
@@ -568,75 +582,17 @@ impl Widget for TextInput {
                     return;
                 }
 
-                use sparsh_input::NamedKey;
-
-                // Handle shortcuts
-                if shortcuts::is_select_all(event) {
-                    self.select_all();
-                    ctx.stop_propagation();
-                    ctx.request_paint();
-                    return;
-                }
-
-                if shortcuts::is_backspace(event) {
-                    self.backspace();
-                    ctx.stop_propagation();
-                    ctx.request_layout();
-                    return;
-                }
-
-                if shortcuts::is_delete(event) {
-                    self.delete();
-                    ctx.stop_propagation();
-                    ctx.request_layout();
-                    return;
-                }
-
-                // Arrow keys
                 match &event.key {
-                    Key::Named(NamedKey::ArrowLeft) => {
-                        self.move_cursor_left(event.modifiers.shift());
-                        ctx.stop_propagation();
-                        ctx.request_paint();
-                        return;
-                    }
-                    Key::Named(NamedKey::ArrowRight) => {
-                        self.move_cursor_right(event.modifiers.shift());
-                        ctx.stop_propagation();
-                        ctx.request_paint();
-                        return;
-                    }
-                    Key::Named(NamedKey::Home) => {
-                        if !event.modifiers.shift() {
-                            self.selection_start = None;
-                        } else if self.selection_start.is_none() {
-                            self.selection_start = Some(self.cursor_pos);
-                        }
-                        self.cursor_pos = 0;
-                        ctx.stop_propagation();
-                        ctx.request_paint();
-                        return;
-                    }
-                    Key::Named(NamedKey::End) => {
-                        if !event.modifiers.shift() {
-                            self.selection_start = None;
-                        } else if self.selection_start.is_none() {
-                            self.selection_start = Some(self.cursor_pos);
-                        }
-                        self.cursor_pos = self.value.len();
-                        ctx.stop_propagation();
-                        ctx.request_paint();
-                        return;
-                    }
                     Key::Named(NamedKey::Enter) => {
                         if let Some(handler) = &mut self.on_submit {
-                            handler(&self.value);
+                            handler(self.editor.text());
                         }
                         ctx.stop_propagation();
                         ctx.request_paint();
                         return;
                     }
                     Key::Named(NamedKey::Escape) => {
+                        self.editor.clear_composition();
                         ctx.release_focus();
                         ctx.stop_propagation();
                         ctx.request_paint();
@@ -644,15 +600,45 @@ impl Widget for TextInput {
                     }
                     _ => {}
                 }
+
+                let mapper = ActionMapper::new();
+                let input_event = InputEvent::KeyDown {
+                    event: event.clone(),
+                };
+                if let Some(Action::Standard(action)) = mapper.map_event(&input_event) {
+                    let _ = self.handle_action(ctx, action);
+                }
             }
             InputEvent::TextInput { text } => {
+                if ctx.has_focus() && self.editor.insert_text(text, false) {
+                    self.fire_change();
+                    ctx.stop_propagation();
+                    ctx.request_layout();
+                }
+            }
+            InputEvent::Paste { text } => {
+                if ctx.has_focus() && self.editor.paste_text(text, false) {
+                    self.fire_change();
+                    ctx.stop_propagation();
+                    ctx.request_layout();
+                }
+            }
+            InputEvent::CompositionStart => {
                 if ctx.has_focus() {
-                    // Filter out control characters
-                    for c in text.chars() {
-                        if !c.is_control() {
-                            self.insert_char(c);
-                        }
-                    }
+                    self.editor.begin_composition();
+                    ctx.stop_propagation();
+                    ctx.request_paint();
+                }
+            }
+            InputEvent::CompositionUpdate { text } => {
+                if ctx.has_focus() && self.editor.update_composition(text, false) {
+                    ctx.stop_propagation();
+                    ctx.request_layout();
+                }
+            }
+            InputEvent::CompositionEnd { text } => {
+                if ctx.has_focus() && self.editor.end_composition(text, false) {
+                    self.fire_change();
                     ctx.stop_propagation();
                     ctx.request_layout();
                 }
@@ -671,14 +657,14 @@ impl Widget for TextInput {
             .with_family(current_theme().typography.font_family)
             .with_size(style.font_size);
         self.update_prefix_width_cache_with_layout_ctx(ctx, &text_style);
-        let sample = if self.value.is_empty() {
+        let sample = if self.editor.text().is_empty() {
             if self.placeholder.is_empty() {
                 "M"
             } else {
                 &self.placeholder
             }
         } else {
-            &self.value
+            self.editor.text()
         };
         let (text_width, text_height) = ctx.measure_text(sample, &text_style);
 
@@ -690,22 +676,31 @@ impl Widget for TextInput {
     }
 
     fn on_focus(&mut self) {
-        // Select all on focus
-        self.select_all();
+        self.editor.clear_composition();
     }
 
     fn on_blur(&mut self) {
-        self.selection_start = None;
+        self.editor.clear_selection();
+        self.editor.clear_composition();
+    }
+
+    fn text_editor_state(&self) -> Option<TextEditorState> {
+        Some(self.editor.state(false))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_helpers::{layout_bounds, mock_event_context, pointer_down_at};
-    use sparsh_input::FocusManager;
+    use crate::test_helpers::{
+        layout_bounds, mock_event_context, pointer_down_at, pointer_move_at, pointer_up_at,
+    };
+    use crate::{PaintCommands, PaintContext};
+    use sparsh_input::{FocusManager, InputEvent, KeyboardEvent, Modifiers};
     use sparsh_layout::LayoutTree;
+    use sparsh_render::DrawList;
     use sparsh_text::TextSystem;
+    use std::sync::{Arc, Mutex};
 
     fn prepare_input_with_cache(input: &TextInput) {
         let mut text = TextSystem::new_headless();
@@ -715,6 +710,18 @@ mod tests {
             max_height: None,
         };
         let _ = input.measure(&mut ctx);
+    }
+
+    fn primary_modifiers() -> Modifiers {
+        #[cfg(any(target_os = "macos", target_arch = "wasm32"))]
+        {
+            Modifiers::META
+        }
+
+        #[cfg(not(any(target_os = "macos", target_arch = "wasm32")))]
+        {
+            Modifiers::CONTROL
+        }
     }
 
     #[test]
@@ -728,50 +735,179 @@ mod tests {
         let mut focus = FocusManager::new();
         let mut event_ctx = mock_event_context(layout, &layout_tree, &mut focus, input.id(), false);
 
-        let _ = input.event(&mut event_ctx, &pointer_down_at(2.0, 18.0));
-        assert_eq!(input.cursor_pos, 0);
+        input.event(&mut event_ctx, &pointer_down_at(2.0, 18.0));
+        assert_eq!(input.editor.cursor(), 0);
 
         let mid_prefix_width = input
             .prefix_widths
             .borrow()
             .iter()
             .find_map(|(idx, width)| (*idx == 3).then_some(*width))
-            .expect("missing width for index 3");
-        let _ = input.event(
-            &mut event_ctx,
-            &pointer_down_at(mid_prefix_width + input.style.padding_h, 18.0),
+            .unwrap_or_default();
+        let mut move_ctx = mock_event_context(layout, &layout_tree, &mut focus, input.id(), true);
+        input.event(
+            &mut move_ctx,
+            &pointer_move_at(mid_prefix_width + input.style.padding_h, 18.0),
         );
-        assert_eq!(input.cursor_pos, 3);
+        assert_eq!(input.editor.cursor(), 3);
 
-        let _ = input.event(&mut event_ctx, &pointer_down_at(238.0, 18.0));
-        assert_eq!(input.cursor_pos, input.value.len());
+        let mut end_ctx = mock_event_context(layout, &layout_tree, &mut focus, input.id(), false);
+        input.event(&mut end_ctx, &pointer_down_at(238.0, 18.0));
+        assert_eq!(input.editor.cursor(), input.get_value().len());
     }
 
     #[test]
-    fn cursor_offset_prefers_prefix_cache() {
-        let input = TextInput::new().value("hello");
-        *input.prefix_widths.borrow_mut() = vec![(0, 0.0), (5, 77.5)];
+    fn drag_selection_uses_pointer_capture() {
+        let mut input = TextInput::new().value("hello world");
+        input.set_id(Default::default());
+        prepare_input_with_cache(&input);
 
-        let mut draw_list = sparsh_render::DrawList::new();
         let layout = layout_bounds(0.0, 0.0, 240.0, 36.0);
         let layout_tree = LayoutTree::new();
-        let focus = FocusManager::new();
-        let mut text = TextSystem::new_headless();
-        let mut paint_commands = crate::PaintCommands::default();
+        let mut focus = FocusManager::new();
+        let mut down_ctx = mock_event_context(layout, &layout_tree, &mut focus, input.id(), false);
+        input.event(&mut down_ctx, &pointer_down_at(2.0, 18.0));
+        assert!(down_ctx.commands.capture_pointer);
 
-        let mut ctx = PaintContext {
+        let width = input
+            .prefix_widths
+            .borrow()
+            .iter()
+            .find_map(|(idx, width)| (*idx == 5).then_some(*width))
+            .unwrap_or_default();
+        let mut move_ctx = mock_event_context(layout, &layout_tree, &mut focus, input.id(), true);
+        input.event(
+            &mut move_ctx,
+            &pointer_move_at(width + input.style.padding_h, 18.0),
+        );
+        assert_eq!(input.editor.selection_range(), Some((0, 5)));
+
+        let mut up_ctx = mock_event_context(layout, &layout_tree, &mut focus, input.id(), true);
+        input.event(
+            &mut up_ctx,
+            &pointer_up_at(width + input.style.padding_h, 18.0),
+        );
+        assert!(up_ctx.commands.release_pointer);
+    }
+
+    #[test]
+    fn copy_cut_paste_and_undo_roundtrip() {
+        let changes = Arc::new(Mutex::new(Vec::new()));
+        let changes_for_cb = Arc::clone(&changes);
+        let mut input = TextInput::new()
+            .value("hello")
+            .on_change(move |value| changes_for_cb.lock().unwrap().push(value.to_owned()));
+        input.set_id(Default::default());
+
+        let layout = layout_bounds(0.0, 0.0, 240.0, 36.0);
+        let layout_tree = LayoutTree::new();
+        let mut focus = FocusManager::new();
+        focus.set_focus(input.id());
+
+        input.editor.select_all();
+        let mut copy_ctx = mock_event_context(layout, &layout_tree, &mut focus, input.id(), false);
+        input.event(
+            &mut copy_ctx,
+            &InputEvent::KeyDown {
+                event: KeyboardEvent {
+                    key: Key::Character("c".into()),
+                    modifiers: primary_modifiers(),
+                    ..Default::default()
+                },
+            },
+        );
+        assert_eq!(copy_ctx.commands.clipboard_write.as_deref(), Some("hello"));
+
+        let mut cut_ctx = mock_event_context(layout, &layout_tree, &mut focus, input.id(), false);
+        input.event(
+            &mut cut_ctx,
+            &InputEvent::KeyDown {
+                event: KeyboardEvent {
+                    key: Key::Character("x".into()),
+                    modifiers: primary_modifiers(),
+                    ..Default::default()
+                },
+            },
+        );
+        assert_eq!(input.get_value(), "");
+        assert_eq!(cut_ctx.commands.clipboard_write.as_deref(), Some("hello"));
+
+        let mut paste_ctx = mock_event_context(layout, &layout_tree, &mut focus, input.id(), false);
+        input.event(
+            &mut paste_ctx,
+            &InputEvent::Paste {
+                text: "world".to_owned(),
+            },
+        );
+        assert_eq!(input.get_value(), "world");
+
+        let mut undo_ctx = mock_event_context(layout, &layout_tree, &mut focus, input.id(), false);
+        input.event(
+            &mut undo_ctx,
+            &InputEvent::KeyDown {
+                event: KeyboardEvent {
+                    key: Key::Character("z".into()),
+                    modifiers: primary_modifiers(),
+                    ..Default::default()
+                },
+            },
+        );
+        assert_eq!(input.get_value(), "");
+
+        let mut redo_ctx = mock_event_context(layout, &layout_tree, &mut focus, input.id(), false);
+        input.event(
+            &mut redo_ctx,
+            &InputEvent::KeyDown {
+                event: KeyboardEvent {
+                    key: Key::Character("z".into()),
+                    modifiers: primary_modifiers() | Modifiers::SHIFT,
+                    ..Default::default()
+                },
+            },
+        );
+        assert_eq!(input.get_value(), "world");
+        assert!(!changes.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn text_editor_state_matches_cursor_and_selection() {
+        let mut input = TextInput::new().value("hello");
+        input.editor.select_all();
+        let state = input.text_editor_state().expect("text editor state");
+        assert_eq!(state.text, "hello");
+        assert_eq!(state.selection_range(), (0, 5));
+        assert!(!state.multiline);
+    }
+
+    #[test]
+    fn pointer_hit_testing_stays_correct_after_scaled_paint() {
+        let mut input = TextInput::new().value("hello world");
+        input.set_id(Default::default());
+
+        let layout_tree = LayoutTree::new();
+        let focus = FocusManager::new();
+        let mut draw_list = DrawList::new();
+        let mut text = TextSystem::new_headless();
+        let mut commands = PaintCommands::default();
+        let mut paint_ctx = PaintContext {
             draw_list: &mut draw_list,
-            layout,
+            layout: layout_bounds(0.0, 0.0, 480.0, 72.0),
             layout_tree: &layout_tree,
             focus: &focus,
             widget_id: input.id(),
-            scale_factor: 1.0,
+            scale_factor: 2.0,
             text_system: &mut text,
             elapsed_time: 0.0,
-            commands: &mut paint_commands,
+            commands: &mut commands,
         };
+        input.paint(&mut paint_ctx);
 
-        let style = TextStyle::default().with_size(input.style.font_size);
-        assert_eq!(input.cursor_offset_for(&mut ctx, &style), 77.5);
+        let layout = layout_bounds(0.0, 0.0, 240.0, 36.0);
+        let mut event_focus = FocusManager::new();
+        let mut event_ctx =
+            mock_event_context(layout, &layout_tree, &mut event_focus, input.id(), false);
+        input.event(&mut event_ctx, &pointer_down_at(238.0, 18.0));
+
+        assert_eq!(input.editor.cursor(), input.get_value().len());
     }
 }

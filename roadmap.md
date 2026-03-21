@@ -2,7 +2,7 @@
 
 ## Master Checklist
 - [x] Milestone 1: Freeze The Foundation
-- [ ] Milestone 2: Finish Input, Focus, And Editing
+- [x] Milestone 2: Finish Input, Focus, And Editing
 - [ ] Milestone 3: Make Accessibility Real
 - [ ] Milestone 4: Finish Web Parity
 - [ ] Milestone 5: Polish Core Widgets
@@ -13,7 +13,7 @@
 - The main package surface is consolidated through `sparsh::prelude`, so application code can stay small and readable.
 - Native and web runtimes both exist, with web supporting retained DOM rendering and a hybrid GPU surface path.
 - The repo ships four runnable example apps that cover the main product shapes: general UI, draw-heavy scenes, hybrid overlays, and a small data-driven app.
-- The widget set is already usable for real apps: `Container`, `Button`, `Checkbox`, `Text`, `TextInput`, `List`, `Scroll`, and `DrawSurface`.
+- The widget set is already usable for real apps: `Container`, `Button`, `Checkbox`, `Text`, `TextInput`, `TextArea`, `List`, `Scroll`, and `DrawSurface`.
 - Module-level tests exist across the core crates, which gives Sparsh a good starting quality baseline rather than a blank slate.
 
 ## What Looks Production-Ready Today
@@ -24,9 +24,9 @@
 - The task runtime is functional on native and web, and the hybrid web surface path is operational.
 
 ## What Still Needs Work Before 1.0
-- [ ] Focus traversal exists in the input model, but it is not wired end to end through the app loops.
+- [x] Focus traversal exists in the input model, and it is now wired end to end through the app loops.
 - [ ] Accessibility has definitions and data structures, but it is not yet integrated into the runtime and widget tree.
-- [ ] `TextInput` is still single-line and does not yet provide the full editing surface that users expect from a 1.0 UI toolkit.
+- [x] `TextInput` now covers the expected editing shortcuts and selection behavior, and multiline editing ships as `TextArea`.
 - [ ] `Scroll` is usable, but `ScrollDirection::Both` is not fully symmetric and the interaction model is still basic.
 - [ ] Router paths are static-only; dynamic route patterns are rejected.
 - [ ] The web runtime still behaves more like a visual retained layer than a fully semantic browser-native surface.
@@ -54,15 +54,15 @@
 
 ## Milestone 2: Finish Input, Focus, And Editing
 ### Tasks
-- [ ] Wire `FocusManager` into the app loops so focusable widgets are registered and tab order actually works.
-- [ ] Route `Tab` and `Shift+Tab` through the semantic action layer instead of leaving them as unused model support.
-- [ ] Complete pointer capture behavior end to end so drag-like interactions behave consistently.
-- [ ] Expand `TextInput` to cover copy, cut, paste, undo, redo, selection extension, and a clearer cursor model.
-- [ ] Add composition and IME handling so text input is correct on web and native.
-- [ ] Decide whether 1.0 includes multiline text input now or whether it is explicitly deferred.
+- [x] Wire `FocusManager` into the app loops so focusable widgets are registered and tab order actually works.
+- [x] Route `Tab` and `Shift+Tab` through the semantic action layer instead of leaving them as unused model support.
+- [x] Complete pointer capture behavior end to end so drag-like interactions behave consistently.
+- [x] Expand `TextInput` to cover copy, cut, paste, undo, redo, selection extension, and a clearer cursor model.
+- [x] Add composition and IME handling so text input is correct on web and native.
+- [x] Decide whether 1.0 includes multiline text input now or whether it is explicitly deferred.
 
 ### Exit Criteria
-- [ ] Buttons, checkboxes, text input, and focus traversal all work in a way that matches user expectations on both platforms.
+- [x] Buttons, checkboxes, text input, and focus traversal all work in a way that matches user expectations on both platforms.
 
 ## Milestone 3: Make Accessibility Real
 ### Tasks

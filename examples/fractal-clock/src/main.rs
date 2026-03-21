@@ -129,7 +129,7 @@ impl FractalClock {
             info_panel.y + 64.0,
         );
         ctx.draw_text(
-            "Scroll adjusts orbit density",
+            "Scroll adjusts orbit intensity",
             &body,
             info_panel.x + 16.0,
             info_panel.y + 84.0,
@@ -207,12 +207,16 @@ impl FractalClockScene {
         let second_angle = (TAU * (secs as f32 / 60.0)) - PI * 0.5;
         let drift = seconds as f32 * 0.08;
         let ambient = 0.55 + 0.45 * (seconds as f32 * 0.33).sin().abs();
+        let chaos = 0.45 + 0.55 * (seconds as f32 * 0.21).sin().abs();
 
         ctx.fill_rect(bounds, palette.bg);
         self.draw_backdrop(ctx, bounds, palette, drift);
         self.draw_stars(ctx, bounds, palette, drift);
+        self.draw_flux_ribbons(ctx, bounds, center, orbit_radius, palette, drift, chaos);
         self.draw_orbit(ctx, center, orbit_radius, palette, drift);
+        self.draw_time_shockwaves(ctx, center, orbit_radius, palette, drift, chaos);
         self.draw_hour_markers(ctx, center, orbit_radius * 1.18, palette, drift);
+        self.draw_prism_spokes(ctx, center, orbit_radius, palette, drift);
 
         self.draw_fractal_hand(
             ctx,
@@ -253,6 +257,26 @@ impl FractalClockScene {
             1.0,
             0.45,
         );
+        for ghost in 0..3 {
+            let g = ghost as f32;
+            let t = g / 2.0;
+            let offset = 0.19 + t * 0.16 + 0.05 * (drift * 1.9 + g * 2.3).sin();
+            let ghost_primary = mix_color(palette.second, palette.minute, t).with_alpha(0.65);
+            let ghost_secondary = mix_color(palette.hour, palette.second, t).with_alpha(0.55);
+            self.draw_fractal_hand(
+                ctx,
+                center,
+                minute_angle + offset,
+                orbit_radius * (1.04 + t * 0.2),
+                5,
+                2.6 - t * 0.7,
+                ghost_primary,
+                ghost_secondary,
+                drift * (1.15 + t * 0.35),
+                ambient,
+                0.72 + t * 0.22,
+            );
+        }
 
         for orbit in 0..3 {
             let orbit_phase = drift * (1.0 + orbit as f32 * 0.23);
@@ -261,6 +285,44 @@ impl FractalClockScene {
         }
 
         self.draw_core(ctx, center, orbit_radius, palette, drift);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn draw_flux_ribbons(
+        &self,
+        ctx: &mut DrawSurfaceContext,
+        bounds: Rect,
+        center: Vec2,
+        orbit_radius: f32,
+        palette: Palette,
+        drift: f32,
+        chaos: f32,
+    ) {
+        let ribbon_count = 8;
+        let sweep = bounds.width.max(bounds.height) * 0.62;
+        for ribbon in 0..ribbon_count {
+            let t = ribbon as f32 / (ribbon_count - 1) as f32;
+            let base_angle = drift * 0.42 + t * TAU * 0.58 + self.pointer.get().x * 0.45;
+            let color = mix_color(palette.minute, palette.hour, t).with_alpha(0.08 + 0.08 * chaos);
+            let glow =
+                mix_color(palette.second, palette.minute, t).with_alpha(0.018 + 0.012 * chaos);
+            let mut prev = None;
+            for step in 0..34 {
+                let s = step as f32 / 33.0;
+                let longitudinal = (s - 0.5) * sweep;
+                let wave = orbit_radius
+                    * (0.32 + 0.09 * chaos)
+                    * (drift * 1.6 + s * TAU * 2.4 + t * 6.0).sin();
+                let torsion =
+                    direction(base_angle + PI * 0.5 + 0.2 * (drift + s * 4.0).sin()) * wave;
+                let pos = center + direction(base_angle) * longitudinal + torsion;
+                if let Some(previous) = prev {
+                    self.draw_segment(ctx, previous, pos, 2.2, glow);
+                    self.draw_segment(ctx, previous, pos, 0.9, color);
+                }
+                prev = Some(pos);
+            }
+        }
     }
 
     fn draw_backdrop(
@@ -296,6 +358,24 @@ impl FractalClockScene {
             ),
             palette.bg.with_alpha(0.42),
         );
+
+        let center = bounds.center();
+        for aura in 0..10 {
+            let t = aura as f32 / 9.0;
+            let radius = bounds.width.min(bounds.height) * (0.12 + t * 0.48);
+            let alpha =
+                (0.02 + 0.03 * (1.0 - t)) * (0.65 + 0.35 * (drift * 1.7 + t * 5.2).sin().abs());
+            let color = mix_color(palette.mist, palette.hour, t).with_alpha(alpha);
+            ctx.fill_rect(
+                Rect::new(
+                    center.x - radius,
+                    center.y - radius,
+                    radius * 2.0,
+                    radius * 2.0,
+                ),
+                color,
+            );
+        }
     }
 
     fn draw_stars(&self, ctx: &mut DrawSurfaceContext, bounds: Rect, palette: Palette, drift: f32) {
@@ -335,6 +415,74 @@ impl FractalClockScene {
             ctx.fill_rect(
                 Rect::new(pos.x - size * 0.5, pos.y - size * 0.5, size, size),
                 color,
+            );
+        }
+
+        for trail in 0..42 {
+            let t = trail as f32 / 42.0;
+            let angle = drift * 1.8 + t * TAU;
+            let tail =
+                center + direction(angle) * (radius * (1.02 + 0.2 * (drift * 1.1 + t * 8.0).sin()));
+            let front =
+                center + direction(angle + 0.08 * (drift * 3.0 + t * 9.0).sin()) * (radius * 1.35);
+            self.draw_segment(
+                ctx,
+                tail,
+                front,
+                0.9,
+                mix_color(palette.second, palette.minute, t).with_alpha(0.085),
+            );
+        }
+    }
+
+    fn draw_time_shockwaves(
+        &self,
+        ctx: &mut DrawSurfaceContext,
+        center: Vec2,
+        orbit_radius: f32,
+        palette: Palette,
+        drift: f32,
+        chaos: f32,
+    ) {
+        for wave in 0..4 {
+            let t = ((drift * (0.34 + wave as f32 * 0.09)) + wave as f32 * 0.27).fract();
+            let radius = orbit_radius * (0.6 + t * 2.2);
+            let alpha = (1.0 - t) * (0.08 + 0.05 * chaos);
+            let color =
+                mix_color(palette.second, palette.hour, wave as f32 / 3.0).with_alpha(alpha);
+            for i in 0..82 {
+                let s = i as f32 / 82.0;
+                let wobble = 1.0 + 0.03 * (drift * 3.2 + s * TAU * 6.0 + wave as f32).sin();
+                let pos = center + direction(s * TAU) * radius * wobble;
+                let size = if i % 7 == 0 { 2.8 } else { 1.6 };
+                ctx.fill_rect(
+                    Rect::new(pos.x - size * 0.5, pos.y - size * 0.5, size, size),
+                    color,
+                );
+            }
+        }
+    }
+
+    fn draw_prism_spokes(
+        &self,
+        ctx: &mut DrawSurfaceContext,
+        center: Vec2,
+        orbit_radius: f32,
+        palette: Palette,
+        drift: f32,
+    ) {
+        for spoke in 0..24 {
+            let t = spoke as f32 / 24.0;
+            let angle = t * TAU + drift * 0.32;
+            let inner = center + direction(angle) * (orbit_radius * 0.3);
+            let outer = center
+                + direction(angle + 0.05 * (drift * 2.7 + t * 8.0).sin()) * (orbit_radius * 2.3);
+            self.draw_segment(
+                ctx,
+                inner,
+                outer,
+                0.8,
+                mix_color(palette.minute, palette.second, t).with_alpha(0.075),
             );
         }
     }
@@ -550,6 +698,21 @@ impl FractalClockScene {
             ),
             palette.second.with_alpha(0.68),
         );
+
+        let spin = drift * 2.1;
+        for beam in 0..6 {
+            let t = beam as f32 / 6.0;
+            let angle = spin + t * TAU;
+            let start = center + direction(angle) * (nucleus * 0.9);
+            let end = center + direction(angle) * (radius * 0.42);
+            self.draw_segment(
+                ctx,
+                start,
+                end,
+                1.0,
+                mix_color(palette.second, palette.hour, t).with_alpha(0.15),
+            );
+        }
     }
 
     fn draw_segment(
@@ -653,7 +816,7 @@ fn hash(seed: f32) -> f32 {
 }
 
 fn palette_count() -> usize {
-    3
+    5
 }
 
 fn palette(index: usize) -> Palette {
@@ -680,7 +843,18 @@ fn palette(index: usize) -> Palette {
             text: Color::from_hex(0xF4F8FF),
             dim: Color::from_hex(0x8EA0B7),
         },
-        _ => Palette {
+        2 => Palette {
+            name: "Prism Vortex",
+            bg: Color::from_hex(0x06030D),
+            veil: Color::from_hex(0x140D1F),
+            mist: Color::from_hex(0x2E1A49),
+            minute: Color::from_hex(0xA77CFF),
+            hour: Color::from_hex(0xFF7E8A),
+            second: Color::from_hex(0xFFEED8),
+            text: Color::from_hex(0xF8F0FF),
+            dim: Color::from_hex(0xBAA7D2),
+        },
+        3 => Palette {
             name: "Aurora Brass",
             bg: Color::from_hex(0x030406),
             veil: Color::from_hex(0x11161C),
@@ -690,6 +864,17 @@ fn palette(index: usize) -> Palette {
             second: Color::from_hex(0xFBFAF6),
             text: Color::from_hex(0xF2F4ED),
             dim: Color::from_hex(0x9DA88C),
+        },
+        _ => Palette {
+            name: "Glacier Static",
+            bg: Color::from_hex(0x02090F),
+            veil: Color::from_hex(0x0D1E2A),
+            mist: Color::from_hex(0x163649),
+            minute: Color::from_hex(0x71E7FF),
+            hour: Color::from_hex(0x5EF4AE),
+            second: Color::from_hex(0xF4FDFF),
+            text: Color::from_hex(0xE8FBFF),
+            dim: Color::from_hex(0x8CB9C7),
         },
     }
 }

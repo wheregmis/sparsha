@@ -11,8 +11,7 @@ use std::{
     collections::HashMap,
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
-        mpsc, Arc, Mutex,
-        MutexGuard,
+        mpsc, Arc, Mutex, MutexGuard,
     },
 };
 
@@ -617,12 +616,11 @@ impl TaskRuntime {
     fn ensure_workers(&self) -> Result<(), String> {
         let worker_count = default_web_workers();
         let Some(web_mutex) = self.inner.web.as_ref() else {
-            return Err(
-                self.inner
-                    .disabled_reason
-                    .clone()
-                    .unwrap_or_else(|| "web task runtime unavailable".to_owned()),
-            );
+            return Err(self
+                .inner
+                .disabled_reason
+                .clone()
+                .unwrap_or_else(|| "web task runtime unavailable".to_owned()));
         };
         let mut web = lock_recover(web_mutex, "web task runtime");
         if !web.workers.is_empty() {

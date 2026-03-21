@@ -342,6 +342,10 @@ impl Widget for Scroll {
         true
     }
 
+    fn child_event_offset(&self) -> glam::Vec2 {
+        glam::vec2(self.offset_x, self.offset_y)
+    }
+
     fn paint(&self, ctx: &mut PaintContext) {
         let bounds = ctx.bounds();
 

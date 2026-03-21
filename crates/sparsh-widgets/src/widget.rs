@@ -1,5 +1,6 @@
 //! Widget trait and response types.
 
+use crate::text_editor::TextEditorState;
 use sparsh_input::InputEvent;
 use sparsh_layout::WidgetId;
 
@@ -60,6 +61,11 @@ pub trait Widget {
     /// Called when the widget loses focus.
     fn on_blur(&mut self) {}
 
+    /// Return a runtime-facing snapshot when the widget is a text editor.
+    fn text_editor_state(&self) -> Option<TextEditorState> {
+        None
+    }
+
     /// Whether this widget can receive keyboard focus.
     fn focusable(&self) -> bool {
         false
@@ -68,6 +74,14 @@ pub trait Widget {
     /// Whether this widget is a scroll container.
     fn is_scroll_container(&self) -> bool {
         false
+    }
+
+    /// Logical offset applied to descendant event hit-testing.
+    ///
+    /// Widgets that visually translate their children without changing layout positions should
+    /// return the inverse of that paint translation so pointer hit-testing stays aligned.
+    fn child_event_offset(&self) -> glam::Vec2 {
+        glam::Vec2::ZERO
     }
 
     /// Measure the widget's preferred size (for intrinsic sizing).

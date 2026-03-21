@@ -3,6 +3,11 @@
 use crate::router::Router;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::router::RouterHost;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::runtime_widget::{
+    add_widget_to_layout, apply_focus_change, dispatch_widget_event, move_focus_path, remap_path,
+    sync_focus_manager, WidgetPath, WidgetRuntimeRegistry,
+};
 use sparsh_core::Color;
 use sparsh_core::WgpuInitError;
 use sparsh_signals::{ReadSignal, Signal};
@@ -15,7 +20,9 @@ use crate::tasks::{TaskRuntime, TaskStatus};
 #[cfg(not(target_arch = "wasm32"))]
 use sparsh_core::{init_wgpu, SurfaceState};
 #[cfg(not(target_arch = "wasm32"))]
-use sparsh_input::{FocusManager, InputEvent, PointerButton};
+use sparsh_input::{
+    Action, ActionMapper, FocusManager, InputEvent, Modifiers, PointerButton, StandardAction,
+};
 #[cfg(not(target_arch = "wasm32"))]
 use sparsh_layout::LayoutTree;
 #[cfg(not(target_arch = "wasm32"))]
@@ -27,18 +34,16 @@ use sparsh_signals::{RuntimeHandle, SubscriberKind};
 #[cfg(not(target_arch = "wasm32"))]
 use sparsh_text::TextSystem;
 #[cfg(not(target_arch = "wasm32"))]
-use sparsh_widgets::{
-    BuildContext, EventCommands, EventContext, LayoutContext, PaintCommands, PaintContext,
-};
+use sparsh_widgets::{BuildContext, PaintCommands, PaintContext};
 #[cfg(not(target_arch = "wasm32"))]
 use wgpu::{Device, Queue};
 #[cfg(not(target_arch = "wasm32"))]
 use winit::event::WindowEvent;
 
 #[cfg(not(target_arch = "wasm32"))]
-use std::time::Instant;
-#[cfg(not(target_arch = "wasm32"))]
 use std::sync::{Arc, Mutex};
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::Instant;
 
 /// Application configuration.
 pub struct AppConfig {
@@ -222,7 +227,9 @@ impl core::fmt::Display for AppRunError {
             Self::TaskRuntimeInit(message) => {
                 write!(f, "failed to initialize background task runtime: {message}")
             }
-            Self::WebEnvironment(message) => write!(f, "missing required web environment: {message}"),
+            Self::WebEnvironment(message) => {
+                write!(f, "missing required web environment: {message}")
+            }
             Self::DomMount(message) => write!(f, "failed to mount DOM renderer: {message}"),
             Self::HybridSurfaceInit(message) => {
                 write!(f, "failed to initialize hybrid web surfaces: {message}")
@@ -366,16 +373,51 @@ struct AppState {
     text_system: TextSystem,
     draw_list: DrawList,
     layout_tree: LayoutTree,
+    widget_registry: WidgetRuntimeRegistry,
     focus_manager: FocusManager,
+    focused_path: Option<WidgetPath>,
+    capture_path: Option<WidgetPath>,
     signal_runtime: RuntimeHandle,
     task_runtime: TaskRuntime,
     theme: AppTheme,
     root_widget: Box<dyn Widget>,
     start_time: Instant,
     mouse_pos: glam::Vec2,
+    modifiers: Modifiers,
     scale_factor: f32,
+    clipboard: Option<arboard::Clipboard>,
+    ime_composing: bool,
     needs_layout: bool,
     needs_repaint: bool,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl AppState {
+    fn focused_text_editor_state(&self) -> Option<&sparsh_widgets::TextEditorState> {
+        self.focused_path
+            .as_ref()
+            .and_then(|path| self.widget_registry.text_editor_state_for_path(path))
+    }
+
+    fn set_clipboard_text(&mut self, text: &str) {
+        let Some(clipboard) = self.clipboard.as_mut() else {
+            return;
+        };
+        if let Err(err) = clipboard.set_text(text.to_owned()) {
+            log::warn!("failed to write clipboard text: {err}");
+        }
+    }
+
+    fn clipboard_text(&mut self) -> Option<String> {
+        let clipboard = self.clipboard.as_mut()?;
+        match clipboard.get_text() {
+            Ok(text) => Some(text),
+            Err(err) => {
+                log::warn!("failed to read clipboard text: {err}");
+                None
+            }
+        }
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -435,69 +477,21 @@ impl AppRunner {
             rebuild_widget(state.root_widget.as_mut(), &mut build_ctx);
         });
 
-        // Build layout tree from widget tree
-        fn add_to_layout(
-            widget: &mut dyn Widget,
-            tree: &mut LayoutTree,
-            text_system: &mut TextSystem,
-            in_scroll: bool,
-        ) -> sparsh_layout::WidgetId {
-            use sparsh_layout::taffy::Dimension;
-
-            let mut style = widget.style();
-            if in_scroll {
-                style.flex_shrink = 0.0;
-            }
-            let is_scroll = widget.is_scroll_container();
-            let children_ids: Vec<_> = widget
-                .children_mut()
-                .iter_mut()
-                .map(|child| {
-                    add_to_layout(child.as_mut(), tree, text_system, in_scroll || is_scroll)
-                })
-                .collect();
-
-            let id = if children_ids.is_empty() {
-                // Apply intrinsic height for leaf widgets that provide measurement.
-                // This prevents text-like widgets from collapsing to zero height.
-                let mut layout_ctx = LayoutContext {
-                    text: text_system,
-                    max_width: None,
-                    max_height: None,
-                };
-                if let Some((_, measured_height)) = widget.measure(&mut layout_ctx) {
-                    let valid_height = measured_height.is_finite() && measured_height > 0.0;
-                    if valid_height {
-                        let current_min_height = style.min_size.height;
-                        let current_min_height_value = if current_min_height.is_auto() {
-                            0.0
-                        } else {
-                            current_min_height.value()
-                        };
-                        if measured_height > current_min_height_value {
-                            style.min_size.height = Dimension::length(measured_height);
-                        }
-                    }
-                }
-                tree.new_leaf(style)
-            } else {
-                tree.new_with_children(style, &children_ids)
-            };
-
-            widget.set_id(id);
-            id
-        }
-
+        let mut widget_registry = WidgetRuntimeRegistry::default();
         let root_id = runtime.with_tracking(SubscriberKind::Layout, || {
             set_current_theme(state.theme.resolve_theme());
-            add_to_layout(
+            let mut path = Vec::new();
+            add_widget_to_layout(
                 state.root_widget.as_mut(),
                 &mut state.layout_tree,
                 &mut state.text_system,
+                &mut widget_registry,
+                &mut path,
                 false,
             )
         });
         state.layout_tree.set_root(root_id);
+        state.widget_registry = widget_registry;
 
         // Compute layout
         // Use surface size - this should be in physical pixels
@@ -508,6 +502,15 @@ impl AppRunner {
         state
             .layout_tree
             .compute_layout(logical_width, logical_height);
+
+        state.focused_path = remap_path(state.focused_path.take(), &state.widget_registry);
+        state.capture_path = remap_path(state.capture_path.take(), &state.widget_registry);
+        sync_focus_manager(
+            &mut state.focus_manager,
+            &state.widget_registry,
+            state.focused_path.as_ref(),
+        );
+        set_native_ime_allowed(state.window, state.focused_text_editor_state().is_some());
 
         state.needs_layout = false;
         state.needs_repaint = true;
@@ -624,77 +627,92 @@ impl AppRunner {
             return;
         };
 
-        fn dispatch_event(
-            widget: &mut dyn Widget,
-            layout_tree: &LayoutTree,
-            focus_id: Option<sparsh_layout::WidgetId>,
-            event: &InputEvent,
-            aggregate: &mut EventCommands,
-        ) -> Option<sparsh_layout::WidgetId> {
-            let id = widget.id();
-            let layout = match layout_tree.get_absolute_layout(id) {
-                Some(l) => l,
-                None => return focus_id,
-            };
+        let runtime = state.signal_runtime.clone();
+        let mapper = ActionMapper::new();
+        let mut dispatch_event = event.clone();
 
-            let mut new_focus = focus_id;
-            for child in widget.children_mut() {
-                new_focus =
-                    dispatch_event(child.as_mut(), layout_tree, new_focus, event, aggregate);
-                if aggregate.stop_propagation {
-                    return new_focus;
+        if let Some(Action::Standard(action)) = mapper.map_event(&event) {
+            match action {
+                StandardAction::FocusNext | StandardAction::FocusPrevious => {
+                    let next_focus = move_focus_path(
+                        state.focused_path.as_ref(),
+                        &state.widget_registry,
+                        matches!(action, StandardAction::FocusNext),
+                    );
+                    let focus_changed = apply_focus_change(
+                        state.root_widget.as_mut(),
+                        &mut state.focus_manager,
+                        &state.widget_registry,
+                        &mut state.focused_path,
+                        next_focus,
+                    );
+                    if focus_changed {
+                        set_native_ime_allowed(
+                            state.window,
+                            state.focused_text_editor_state().is_some(),
+                        );
+                        state.needs_repaint = true;
+                    }
+                    if state.needs_repaint || state.needs_layout {
+                        state.window.request_redraw();
+                    }
+                    return;
                 }
+                StandardAction::Paste if state.focused_text_editor_state().is_some() => {
+                    let Some(text) = state.clipboard_text() else {
+                        return;
+                    };
+                    dispatch_event = InputEvent::Paste { text };
+                }
+                _ => {}
             }
-
-            let mut temp_focus = FocusManager::new();
-            if let Some(fid) = new_focus {
-                temp_focus.set_focus(fid);
-            }
-
-            let mut ctx = EventContext {
-                layout,
-                layout_tree,
-                focus: &mut temp_focus,
-                widget_id: id,
-                has_capture: false,
-                commands: EventCommands::default(),
-            };
-            widget.event(&mut ctx, event);
-
-            if ctx.commands.request_focus {
-                new_focus = Some(id);
-            } else if ctx.commands.clear_focus && new_focus == Some(id) {
-                new_focus = None;
-            }
-
-            aggregate.merge(ctx.commands);
-            new_focus
         }
 
-        let runtime = state.signal_runtime.clone();
-        let current_focus = state.focus_manager.focused();
-        let mut commands = EventCommands::default();
-        let new_focus = runtime.run_with_current(|| {
-            dispatch_event(
+        let current_focus_id = state
+            .focused_path
+            .as_ref()
+            .and_then(|path| state.widget_registry.id_for_path(path));
+        let current_capture_path = state.capture_path.clone();
+        let outcome = runtime.run_with_current(|| {
+            dispatch_widget_event(
                 state.root_widget.as_mut(),
                 &state.layout_tree,
-                current_focus,
-                &event,
-                &mut commands,
+                current_focus_id,
+                current_capture_path.as_ref(),
+                &dispatch_event,
             )
         });
 
-        // Update focus manager
-        if let Some(fid) = new_focus {
-            state.focus_manager.set_focus(fid);
-        } else if current_focus.is_some() && new_focus.is_none() {
-            state.focus_manager.clear_focus();
+        if outcome.commands.request_focus || outcome.commands.clear_focus {
+            let focus_changed = apply_focus_change(
+                state.root_widget.as_mut(),
+                &mut state.focus_manager,
+                &state.widget_registry,
+                &mut state.focused_path,
+                outcome.focus_path.clone(),
+            );
+            if focus_changed {
+                set_native_ime_allowed(state.window, state.focused_text_editor_state().is_some());
+                if state.focused_text_editor_state().is_none() {
+                    state.ime_composing = false;
+                }
+                state.needs_repaint = true;
+            }
         }
 
-        if commands.request_paint {
+        if outcome.commands.capture_pointer || outcome.commands.release_pointer {
+            state.capture_path = outcome.capture_path;
             state.needs_repaint = true;
         }
-        if commands.request_layout {
+
+        if let Some(text) = outcome.commands.clipboard_write.as_deref() {
+            state.set_clipboard_text(text);
+        }
+
+        if outcome.commands.request_paint {
+            state.needs_repaint = true;
+        }
+        if outcome.commands.request_layout {
             state.needs_layout = true;
         }
 
@@ -715,6 +733,64 @@ impl AppRunner {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+fn map_winit_key(key: &winit::keyboard::Key<&str>) -> Option<sparsh_input::Key> {
+    use sparsh_input::{Key, NamedKey};
+
+    Some(match key {
+        winit::keyboard::Key::Character(value) => Key::Character(value.to_string()),
+        winit::keyboard::Key::Named(named) => Key::Named(match named {
+            winit::keyboard::NamedKey::Enter => NamedKey::Enter,
+            winit::keyboard::NamedKey::Tab => NamedKey::Tab,
+            winit::keyboard::NamedKey::Backspace => NamedKey::Backspace,
+            winit::keyboard::NamedKey::Delete => NamedKey::Delete,
+            winit::keyboard::NamedKey::Escape => NamedKey::Escape,
+            winit::keyboard::NamedKey::ArrowUp => NamedKey::ArrowUp,
+            winit::keyboard::NamedKey::ArrowDown => NamedKey::ArrowDown,
+            winit::keyboard::NamedKey::ArrowLeft => NamedKey::ArrowLeft,
+            winit::keyboard::NamedKey::ArrowRight => NamedKey::ArrowRight,
+            winit::keyboard::NamedKey::Home => NamedKey::Home,
+            winit::keyboard::NamedKey::End => NamedKey::End,
+            winit::keyboard::NamedKey::PageUp => NamedKey::PageUp,
+            winit::keyboard::NamedKey::PageDown => NamedKey::PageDown,
+            _ => return None,
+        }),
+        _ => return None,
+    })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn winit_modifiers_to_input(modifiers: winit::keyboard::ModifiersState) -> Modifiers {
+    let mut converted = Modifiers::empty();
+    if modifiers.shift_key() {
+        converted |= Modifiers::SHIFT;
+    }
+    if modifiers.control_key() {
+        converted |= Modifiers::CONTROL;
+    }
+    if modifiers.alt_key() {
+        converted |= Modifiers::ALT;
+    }
+    if modifiers.meta_key() {
+        converted |= Modifiers::META;
+    }
+    converted
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn should_emit_native_text(text: &str, modifiers: Modifiers) -> bool {
+    !text.is_empty()
+        && text.chars().all(|ch| !ch.is_control())
+        && !sparsh_input::shortcuts::primary_modifier(modifiers)
+        && !modifiers.alt()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(deprecated)]
+fn set_native_ime_allowed(window: &dyn winit::window::Window, allowed: bool) {
+    window.set_ime_allowed(allowed);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 impl winit::application::ApplicationHandler for AppRunner {
     fn can_create_surfaces(&mut self, event_loop: &dyn winit::event_loop::ActiveEventLoop) {
         let window_attributes = winit::window::WindowAttributes::default()
@@ -724,8 +800,7 @@ impl winit::application::ApplicationHandler for AppRunner {
                 self.config.height,
             ));
 
-        let window = event_loop
-            .create_window(window_attributes);
+        let window = event_loop.create_window(window_attributes);
         let window = match window {
             Ok(window) => window,
             Err(err) => {
@@ -752,6 +827,7 @@ impl winit::application::ApplicationHandler for AppRunner {
             let text_system = TextSystem::new(&device);
             let draw_list = DrawList::new();
             let layout_tree = LayoutTree::new();
+            let widget_registry = WidgetRuntimeRegistry::default();
             let focus_manager = FocusManager::new();
             let signal_runtime = RuntimeHandle::current_or_default();
             let task_runtime = match TaskRuntime::try_new() {
@@ -773,6 +849,13 @@ impl winit::application::ApplicationHandler for AppRunner {
                 .run_with_current(|| Box::new(RouterHost::new(router.clone())) as Box<dyn Widget>);
 
             let scale_factor = window.scale_factor() as f32;
+            let clipboard = match arboard::Clipboard::new() {
+                Ok(clipboard) => Some(clipboard),
+                Err(err) => {
+                    log::warn!("native clipboard unavailable: {err}");
+                    None
+                }
+            };
 
             self.state = Some(AppState {
                 window,
@@ -783,14 +866,20 @@ impl winit::application::ApplicationHandler for AppRunner {
                 text_system,
                 draw_list,
                 layout_tree,
+                widget_registry,
                 focus_manager,
+                focused_path: None,
+                capture_path: None,
                 signal_runtime,
                 task_runtime,
                 theme: self.theme.clone(),
                 root_widget,
                 start_time: Instant::now(),
                 mouse_pos: glam::Vec2::ZERO,
+                modifiers: Modifiers::default(),
                 scale_factor,
+                clipboard,
+                ime_composing: false,
                 needs_layout: true,
                 needs_repaint: true,
             });
@@ -877,62 +966,90 @@ impl winit::application::ApplicationHandler for AppRunner {
                 };
                 self.handle_event(InputEvent::Scroll { pos, delta });
             }
+            WindowEvent::ModifiersChanged(modifiers) => {
+                if let Some(state) = self.state.as_mut() {
+                    state.modifiers = winit_modifiers_to_input(modifiers.state());
+                }
+            }
             WindowEvent::KeyboardInput { event, .. } => {
-                use sparsh_input::{ui_events::keyboard::Code, Key, KeyboardEvent, NamedKey};
+                use sparsh_input::{ui_events::keyboard::Code, KeyboardEvent};
 
-                let key = match &event.logical_key {
-                    winit::keyboard::Key::Character(c) => Key::Character(c.to_string()),
-                    winit::keyboard::Key::Named(named) => {
-                        use winit::keyboard::NamedKey as WN;
-                        Key::Named(match named {
-                            WN::Enter => NamedKey::Enter,
-                            WN::Tab => NamedKey::Tab,
-                            WN::Backspace => NamedKey::Backspace,
-                            WN::Delete => NamedKey::Delete,
-                            WN::Escape => NamedKey::Escape,
-                            WN::ArrowUp => NamedKey::ArrowUp,
-                            WN::ArrowDown => NamedKey::ArrowDown,
-                            WN::ArrowLeft => NamedKey::ArrowLeft,
-                            WN::ArrowRight => NamedKey::ArrowRight,
-                            WN::Home => NamedKey::Home,
-                            WN::End => NamedKey::End,
-                            WN::PageUp => NamedKey::PageUp,
-                            WN::PageDown => NamedKey::PageDown,
-                            _ => return,
-                        })
-                    }
-                    _ => return,
+                let modifiers = self
+                    .state
+                    .as_ref()
+                    .map(|state| state.modifiers)
+                    .unwrap_or_default();
+                let Some(key) = map_winit_key(&event.key_without_modifiers.as_ref()) else {
+                    return;
                 };
 
-                // Use a generic code since we're translating from logical key
-                let code = Code::Unidentified;
-
-                let kb_event = if event.state.is_pressed() {
-                    KeyboardEvent::key_down(key.clone(), code)
+                let mut kb_event = if event.state.is_pressed() {
+                    KeyboardEvent::key_down(key, Code::Unidentified)
                 } else {
-                    KeyboardEvent::key_up(key, code)
+                    KeyboardEvent::key_up(key, Code::Unidentified)
                 };
+                kb_event.modifiers = modifiers;
+                kb_event.repeat = event.repeat;
 
                 if event.state.is_pressed() {
-                    self.handle_event(InputEvent::KeyDown { event: kb_event });
+                    self.handle_event(InputEvent::KeyDown {
+                        event: kb_event.clone(),
+                    });
                 } else {
                     self.handle_event(InputEvent::KeyUp { event: kb_event });
                 }
 
-                // Handle text input
                 if event.state.is_pressed() && !event.repeat {
                     if let Some(text) = event.text.as_ref() {
                         let text = text.to_string();
-                        if !text.is_empty() && text.chars().all(|c| !c.is_control()) {
+                        if should_emit_native_text(&text, modifiers) {
                             self.handle_event(InputEvent::TextInput { text });
+                        }
+                    }
+                }
+            }
+            WindowEvent::Ime(event) => {
+                let Some(state) = self.state.as_mut() else {
+                    return;
+                };
+                match event {
+                    winit::event::Ime::Enabled => {}
+                    winit::event::Ime::Preedit(text, _) => {
+                        if !state.ime_composing {
+                            state.ime_composing = true;
+                            self.handle_event(InputEvent::CompositionStart);
+                        }
+                        self.handle_event(InputEvent::CompositionUpdate { text });
+                    }
+                    winit::event::Ime::Commit(text) => {
+                        state.ime_composing = false;
+                        self.handle_event(InputEvent::CompositionEnd { text });
+                    }
+                    winit::event::Ime::DeleteSurrounding { .. } => {}
+                    winit::event::Ime::Disabled => {
+                        if state.ime_composing {
+                            state.ime_composing = false;
+                            self.handle_event(InputEvent::CompositionEnd {
+                                text: String::new(),
+                            });
                         }
                     }
                 }
             }
             WindowEvent::Focused(focused) => {
                 if focused {
+                    if let Some(state) = self.state.as_ref() {
+                        set_native_ime_allowed(
+                            state.window,
+                            state.focused_text_editor_state().is_some(),
+                        );
+                    }
                     self.handle_event(InputEvent::FocusGained);
                 } else {
+                    if let Some(state) = self.state.as_mut() {
+                        state.ime_composing = false;
+                        set_native_ime_allowed(state.window, false);
+                    }
                     self.handle_event(InputEvent::FocusLost);
                 }
             }
@@ -1177,7 +1294,10 @@ mod tests {
     #[test]
     fn app_run_error_wraps_graphics_init_errors() {
         let error = AppRunError::from(WgpuInitError::NoSurfaceFormat);
-        assert!(matches!(error, AppRunError::GraphicsInit(WgpuInitError::NoSurfaceFormat)));
+        assert!(matches!(
+            error,
+            AppRunError::GraphicsInit(WgpuInitError::NoSurfaceFormat)
+        ));
     }
 
     #[test]

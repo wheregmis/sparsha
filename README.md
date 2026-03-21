@@ -111,6 +111,7 @@ Run the native examples:
 cargo run -p kitchen-sink
 cargo run -p fractal-clock --release
 cargo run -p hybrid-overlay
+cargo run -p showcase
 cargo run -p todo
 ```
 
@@ -160,9 +161,9 @@ Canonical verification entrypoints:
 
 - `cargo check --workspace`
 - `cargo test --workspace`
-- `cargo check -p kitchen-sink -p fractal-clock -p hybrid-overlay -p todo --target wasm32-unknown-unknown`
+- `cargo check -p kitchen-sink -p fractal-clock -p hybrid-overlay -p showcase -p todo --target wasm32-unknown-unknown`
 
-`web-smoke.sh` builds the checked-in web examples, serves the generated `dist/` output for `kitchen-sink`, `hybrid-overlay`, and `todo`, then runs the Playwright smoke suite against those pages.
+`web-smoke.sh` builds the checked-in web examples, serves the generated `dist/` output for `kitchen-sink`, `hybrid-overlay`, `showcase`, and `todo`, then runs the Playwright smoke suite against those pages.
 
 `web-perf-smoke.sh` builds the checked-in `todo` web example, serves it locally, and stores Lighthouse reports under `artifacts/lighthouse/`.
 
@@ -172,6 +173,9 @@ GitHub Actions is the canonical hosted gate for 1.0:
 
 - `.github/workflows/ci.yml` runs formatting, clippy, workspace verification, wasm example checks, browser smoke, and macOS native verification
 - `.github/workflows/release-readiness.yml` runs the sign-off superset and uploads Playwright/perf artifacts
+- `.github/workflows/showcase-pages.yml` builds `examples/showcase` and publishes its static `dist/` output to GitHub Pages on pushes to `main` and on manual dispatch
+
+For repository Pages hosting, the showcase stays static-host friendly by using hash routes such as `/#/components` and `/#/rendering`.
 
 ## More
 

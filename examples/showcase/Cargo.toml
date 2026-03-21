@@ -1,0 +1,12 @@
+[package]
+name = "showcase"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "showcase"
+path = "src/main.rs"
+
+[dependencies]
+sparsh = { path = "../../crates/sparsh" }
+env_logger = { workspace = true }

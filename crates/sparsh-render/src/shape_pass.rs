@@ -1,10 +1,8 @@
 //! Shape rendering pass for rectangles with rounded corners.
 
 use sparsh_core::{
-    buffer::QuadBuffers,
-    pipeline::{Pipeline, PipelineConfig},
-    vertex::{ShapeInstance, Vertex2D},
-    DynamicBuffer, GlobalUniforms, Rect,
+    DynamicBuffer, GlobalUniforms, Pipeline, PipelineConfig, QuadBuffers, Rect, ShapeInstance,
+    Vertex2D,
 };
 use wgpu::{Device, Queue, RenderPass, TextureFormat};
 

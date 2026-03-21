@@ -368,10 +368,10 @@ impl TextSystem {
             // Create glyph key for caching
             let key = GlyphKey::new(font_hash, glyph_id, font_size);
 
-            let atlas = self
-                .atlas
-                .as_mut()
-                .expect("glyph atlas should be initialized before shaping");
+            let Some(atlas) = self.atlas.as_mut() else {
+                log::warn!("glyph atlas missing during shaping; skipping glyph run");
+                return;
+            };
             let cached = if let Some(cached) = atlas.get(&key) {
                 *cached
             } else {

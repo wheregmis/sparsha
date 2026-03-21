@@ -1,4 +1,6 @@
 //! Sparsh Widgets - UI widget library.
+//!
+//! Stability: the supported 1.0 contract is the crate-root widget/theme/context re-export set.
 
 mod button;
 mod checkbox;

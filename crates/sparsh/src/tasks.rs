@@ -12,6 +12,7 @@ use std::{
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
         mpsc, Arc, Mutex,
+        MutexGuard,
     },
 };
 
@@ -35,6 +36,33 @@ thread_local! {
 }
 
 type ResultHandler = Box<dyn FnMut(TaskResult)>;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TaskRuntimeInitError {
+    NativeRuntime(String),
+}
+
+impl core::fmt::Display for TaskRuntimeInitError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::NativeRuntime(message) => {
+                write!(f, "failed to initialize native task runtime: {message}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for TaskRuntimeInitError {}
+
+fn lock_recover<'a, T>(mutex: &'a Mutex<T>, label: &str) -> MutexGuard<'a, T> {
+    match mutex.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            log::warn!("recovering from poisoned mutex: {label}");
+            poisoned.into_inner()
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TaskKey(pub String);
@@ -117,25 +145,23 @@ impl Default for TaskRuntime {
 
 impl TaskRuntime {
     pub fn new() -> Self {
+        match Self::try_new() {
+            Ok(runtime) => runtime,
+            Err(err) => {
+                log::warn!("task runtime unavailable, using disabled runtime: {err}");
+                let runtime = Self::disabled(err.to_string());
+                CURRENT_TASK_RUNTIME.with(|slot| {
+                    if slot.borrow().is_none() {
+                        *slot.borrow_mut() = Some(runtime.clone());
+                    }
+                });
+                runtime
+            }
+        }
+    }
+
+    pub fn try_new() -> Result<Self, TaskRuntimeInitError> {
         let (completion_tx, completion_rx) = mpsc::channel();
-
-        #[cfg(not(target_arch = "wasm32"))]
-        let native = NativeState {
-            runtime: tokio::runtime::Builder::new_multi_thread()
-                .enable_time()
-                .worker_threads(default_native_workers())
-                .build()
-                .expect("failed to initialize tokio runtime"),
-            handles: Mutex::new(HashMap::new()),
-        };
-
-        #[cfg(target_arch = "wasm32")]
-        let web = Mutex::new(WebState {
-            worker_script_url: "sparsh-worker.js".to_owned(),
-            workers: Vec::new(),
-            next_worker: 0,
-            task_workers: HashMap::new(),
-        });
 
         let runtime = Self {
             id: NEXT_RUNTIME_ID.fetch_add(1, Ordering::Relaxed),
@@ -147,10 +173,16 @@ impl TaskRuntime {
                 task_meta: Mutex::new(HashMap::new()),
                 completion_tx,
                 completion_rx: Mutex::new(completion_rx),
+                disabled_reason: None,
                 #[cfg(not(target_arch = "wasm32"))]
-                native,
+                native: Some(build_native_state()?),
                 #[cfg(target_arch = "wasm32")]
-                web,
+                web: Some(Mutex::new(WebState {
+                    worker_script_url: "sparsh-worker.js".to_owned(),
+                    workers: Vec::new(),
+                    next_worker: 0,
+                    task_workers: HashMap::new(),
+                })),
             }),
         };
 
@@ -160,7 +192,28 @@ impl TaskRuntime {
             }
         });
 
-        runtime
+        Ok(runtime)
+    }
+
+    fn disabled(reason: impl Into<String>) -> Self {
+        let (completion_tx, completion_rx) = mpsc::channel();
+        Self {
+            id: NEXT_RUNTIME_ID.fetch_add(1, Ordering::Relaxed),
+            inner: Arc::new(Inner {
+                policy: Mutex::new(TaskPolicy::LatestWins),
+                next_task_id: AtomicU64::new(1),
+                in_flight: AtomicUsize::new(0),
+                latest_generation: Mutex::new(HashMap::new()),
+                task_meta: Mutex::new(HashMap::new()),
+                completion_tx,
+                completion_rx: Mutex::new(completion_rx),
+                disabled_reason: Some(reason.into()),
+                #[cfg(not(target_arch = "wasm32"))]
+                native: None,
+                #[cfg(target_arch = "wasm32")]
+                web: None,
+            }),
+        }
     }
 
     pub fn current_or_default() -> Self {
@@ -181,11 +234,11 @@ impl TaskRuntime {
     }
 
     pub fn policy(&self) -> TaskPolicy {
-        *self.inner.policy.lock().expect("policy lock")
+        *lock_recover(&self.inner.policy, "task policy")
     }
 
     pub fn set_policy(&self, policy: TaskPolicy) {
-        *self.inner.policy.lock().expect("policy lock") = policy;
+        *lock_recover(&self.inner.policy, "task policy") = policy;
     }
 
     pub fn has_in_flight(&self) -> bool {
@@ -215,7 +268,7 @@ impl TaskRuntime {
     ) -> TaskHandle {
         let task_key = task_key.into();
         {
-            let mut latest = self.inner.latest_generation.lock().expect("latest lock");
+            let mut latest = lock_recover(&self.inner.latest_generation, "task latest_generation");
             latest
                 .entry(task_key.clone())
                 .and_modify(|existing| {
@@ -228,7 +281,7 @@ impl TaskRuntime {
 
     pub fn cancel(&self, task_id: TaskId) -> bool {
         let meta = {
-            let task_meta = self.inner.task_meta.lock().expect("task_meta lock");
+            let task_meta = lock_recover(&self.inner.task_meta, "task metadata");
             task_meta.get(&task_id).cloned()
         };
         let Some(meta) = meta else {
@@ -237,15 +290,11 @@ impl TaskRuntime {
 
         #[cfg(not(target_arch = "wasm32"))]
         {
-            if let Some(handle) = self
-                .inner
-                .native
-                .handles
-                .lock()
-                .expect("handle lock")
-                .remove(&task_id)
-            {
-                handle.abort();
+            if let Some(native) = self.inner.native.as_ref() {
+                if let Some(handle) = lock_recover(&native.handles, "task handles").remove(&task_id)
+                {
+                    handle.abort();
+                }
             }
         }
 
@@ -273,7 +322,7 @@ impl TaskRuntime {
 
         loop {
             let next = {
-                let receiver = self.inner.completion_rx.lock().expect("completion lock");
+                let receiver = lock_recover(&self.inner.completion_rx, "task completion receiver");
                 receiver.try_recv()
             };
 
@@ -301,17 +350,24 @@ impl TaskRuntime {
         generation: Option<Generation>,
     ) -> TaskHandle {
         let task_id = self.inner.next_task_id.fetch_add(1, Ordering::Relaxed);
+        if let Some(reason) = self.inner.disabled_reason.as_deref() {
+            let _ = self.inner.completion_tx.send(TaskResult {
+                task_id,
+                task_kind,
+                task_key,
+                generation,
+                status: TaskStatus::Error(format!("task runtime unavailable: {reason}")),
+            });
+            return TaskHandle { id: task_id };
+        }
+
         let meta = TaskMeta {
             task_kind: task_kind.clone(),
             task_key: task_key.clone(),
             generation,
         };
 
-        self.inner
-            .task_meta
-            .lock()
-            .expect("task_meta lock")
-            .insert(task_id, meta);
+        lock_recover(&self.inner.task_meta, "task metadata").insert(task_id, meta);
         self.inner.in_flight.fetch_add(1, Ordering::Relaxed);
 
         #[cfg(not(target_arch = "wasm32"))]
@@ -330,7 +386,7 @@ impl TaskRuntime {
         let (Some(task_key), Some(generation)) = (&result.task_key, result.generation) else {
             return false;
         };
-        let latest = self.inner.latest_generation.lock().expect("latest lock");
+        let latest = lock_recover(&self.inner.latest_generation, "task latest_generation");
         latest
             .get(task_key)
             .copied()
@@ -349,11 +405,7 @@ impl TaskRuntime {
     }
 
     fn try_finish_task(&self, task_id: TaskId) -> bool {
-        let removed = self
-            .inner
-            .task_meta
-            .lock()
-            .expect("task_meta lock")
+        let removed = lock_recover(&self.inner.task_meta, "task metadata")
             .remove(&task_id)
             .is_some();
 
@@ -365,22 +417,18 @@ impl TaskRuntime {
 
         #[cfg(not(target_arch = "wasm32"))]
         {
-            self.inner
-                .native
-                .handles
-                .lock()
-                .expect("handle lock")
-                .remove(&task_id);
+            if let Some(native) = self.inner.native.as_ref() {
+                lock_recover(&native.handles, "task handles").remove(&task_id);
+            }
         }
 
         #[cfg(target_arch = "wasm32")]
         {
-            self.inner
-                .web
-                .lock()
-                .expect("web lock")
-                .task_workers
-                .remove(&task_id);
+            if let Some(web) = self.inner.web.as_ref() {
+                lock_recover(web, "web task runtime")
+                    .task_workers
+                    .remove(&task_id);
+            }
         }
 
         true
@@ -395,11 +443,26 @@ impl TaskRuntime {
         task_key: Option<TaskKey>,
         generation: Option<Generation>,
     ) {
+        let Some(native) = self.inner.native.as_ref() else {
+            if self.try_finish_task(task_id) {
+                let _ = self.inner.completion_tx.send(TaskResult {
+                    task_id,
+                    task_kind,
+                    task_key,
+                    generation,
+                    status: TaskStatus::Error(
+                        "task runtime unavailable: native runtime missing".to_owned(),
+                    ),
+                });
+            }
+            return;
+        };
+
         let runtime = self.clone();
         let completion_tx = self.inner.completion_tx.clone();
         let task_kind_for_result = task_kind.clone();
 
-        let handle = self.inner.native.runtime.spawn(async move {
+        let handle = native.runtime.spawn(async move {
             let status = execute_native_task(&task_kind, payload).await;
             if !runtime.try_finish_task(task_id) {
                 return;
@@ -418,18 +481,16 @@ impl TaskRuntime {
             let _ = completion_tx.send(result);
         });
 
-        self.inner
-            .native
-            .handles
-            .lock()
-            .expect("handle lock")
-            .insert(task_id, handle);
+        lock_recover(&native.handles, "task handles").insert(task_id, handle);
     }
 
     #[cfg(target_arch = "wasm32")]
     pub fn set_worker_script_url(&self, worker_script_url: impl Into<String>) {
         let worker_script_url = worker_script_url.into();
-        let mut web = self.inner.web.lock().expect("web lock");
+        let Some(web) = self.inner.web.as_ref() else {
+            return;
+        };
+        let mut web = lock_recover(web, "web task runtime");
         if web.worker_script_url == worker_script_url {
             return;
         }
@@ -475,7 +536,21 @@ impl TaskRuntime {
         };
 
         let (worker_index, worker) = {
-            let mut web = self.inner.web.lock().expect("web lock");
+            let Some(web_mutex) = self.inner.web.as_ref() else {
+                if self.try_finish_task(task_id) {
+                    let _ = self.inner.completion_tx.send(TaskResult {
+                        task_id,
+                        task_kind,
+                        task_key,
+                        generation,
+                        status: TaskStatus::Error(
+                            "task runtime unavailable: web worker pool missing".to_owned(),
+                        ),
+                    });
+                }
+                return;
+            };
+            let mut web = lock_recover(web_mutex, "web task runtime");
             if web.workers.is_empty() {
                 if self.try_finish_task(task_id) {
                     let _ = self.inner.completion_tx.send(TaskResult {
@@ -497,12 +572,11 @@ impl TaskRuntime {
         let request_js = match serde_wasm_bindgen::to_value(&request) {
             Ok(value) => value,
             Err(err) => {
-                self.inner
-                    .web
-                    .lock()
-                    .expect("web lock")
-                    .task_workers
-                    .remove(&task_id);
+                if let Some(web) = self.inner.web.as_ref() {
+                    lock_recover(web, "web task runtime")
+                        .task_workers
+                        .remove(&task_id);
+                }
                 if self.try_finish_task(task_id) {
                     let _ = self.inner.completion_tx.send(TaskResult {
                         task_id,
@@ -519,12 +593,11 @@ impl TaskRuntime {
         };
 
         if let Err(err) = worker.post_message(&request_js) {
-            self.inner
-                .web
-                .lock()
-                .expect("web lock")
-                .task_workers
-                .remove(&task_id);
+            if let Some(web) = self.inner.web.as_ref() {
+                lock_recover(web, "web task runtime")
+                    .task_workers
+                    .remove(&task_id);
+            }
             if self.try_finish_task(task_id) {
                 let _ = self.inner.completion_tx.send(TaskResult {
                     task_id,
@@ -543,7 +616,15 @@ impl TaskRuntime {
     #[cfg(target_arch = "wasm32")]
     fn ensure_workers(&self) -> Result<(), String> {
         let worker_count = default_web_workers();
-        let mut web = self.inner.web.lock().expect("web lock");
+        let Some(web_mutex) = self.inner.web.as_ref() else {
+            return Err(
+                self.inner
+                    .disabled_reason
+                    .clone()
+                    .unwrap_or_else(|| "web task runtime unavailable".to_owned()),
+            );
+        };
+        let mut web = lock_recover(web_mutex, "web task runtime");
         if !web.workers.is_empty() {
             return Ok(());
         }
@@ -570,7 +651,10 @@ impl TaskRuntime {
     #[cfg(target_arch = "wasm32")]
     fn send_web_cancel(&self, task_id: TaskId) {
         let maybe_worker = {
-            let web = self.inner.web.lock().expect("web lock");
+            let Some(web_mutex) = self.inner.web.as_ref() else {
+                return;
+            };
+            let web = lock_recover(web_mutex, "web task runtime");
             let Some(worker_index) = web.task_workers.get(&task_id).copied() else {
                 return;
             };
@@ -598,10 +682,11 @@ struct Inner {
     task_meta: Mutex<HashMap<TaskId, TaskMeta>>,
     completion_tx: mpsc::Sender<TaskResult>,
     completion_rx: Mutex<mpsc::Receiver<TaskResult>>,
+    disabled_reason: Option<String>,
     #[cfg(not(target_arch = "wasm32"))]
-    native: NativeState,
+    native: Option<NativeState>,
     #[cfg(target_arch = "wasm32")]
-    web: Mutex<WebState>,
+    web: Option<Mutex<WebState>>,
 }
 
 #[derive(Clone)]
@@ -615,6 +700,31 @@ struct TaskMeta {
 struct NativeState {
     runtime: tokio::runtime::Runtime,
     handles: Mutex<HashMap<TaskId, JoinHandle<()>>>,
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+static FORCE_NATIVE_RUNTIME_INIT_FAILURE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(not(target_arch = "wasm32"))]
+fn build_native_state() -> Result<NativeState, TaskRuntimeInitError> {
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    if FORCE_NATIVE_RUNTIME_INIT_FAILURE.load(Ordering::Relaxed) {
+        return Err(TaskRuntimeInitError::NativeRuntime(
+            "forced runtime initialization failure".to_owned(),
+        ));
+    }
+
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_time()
+        .worker_threads(default_native_workers())
+        .build()
+        .map_err(|err| TaskRuntimeInitError::NativeRuntime(err.to_string()))?;
+
+    Ok(NativeState {
+        runtime,
+        handles: Mutex::new(HashMap::new()),
+    })
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -847,7 +957,9 @@ fn create_worker_slot(
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
-    use std::{thread, time::Duration as StdDuration};
+    use std::{sync::Mutex, thread, time::Duration as StdDuration};
+
+    static TASK_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     fn drain_for(runtime: &TaskRuntime, timeout_ms: u64) -> Vec<TaskResult> {
         let mut results = Vec::new();
@@ -866,6 +978,7 @@ mod tests {
 
     #[test]
     fn latest_wins_drops_stale_generations() {
+        let _guard = TASK_TEST_LOCK.lock().unwrap();
         let runtime = TaskRuntime::new();
         runtime.set_current();
 
@@ -892,6 +1005,7 @@ mod tests {
 
     #[test]
     fn cancel_emits_canceled_result() {
+        let _guard = TASK_TEST_LOCK.lock().unwrap();
         let runtime = TaskRuntime::new();
         runtime.set_current();
 
@@ -907,6 +1021,7 @@ mod tests {
 
     #[test]
     fn task_errors_are_reported() {
+        let _guard = TASK_TEST_LOCK.lock().unwrap();
         let runtime = TaskRuntime::new();
         runtime.set_current();
 
@@ -914,5 +1029,27 @@ mod tests {
         let results = drain_for(&runtime, 300);
         assert_eq!(results.len(), 1);
         assert!(matches!(results[0].status, TaskStatus::Error(_)));
+    }
+
+    #[test]
+    fn current_or_default_stays_non_panicking_when_runtime_init_fails() {
+        let _guard = TASK_TEST_LOCK.lock().unwrap();
+        FORCE_NATIVE_RUNTIME_INIT_FAILURE.store(true, Ordering::Relaxed);
+        CURRENT_TASK_RUNTIME.with(|slot| {
+            *slot.borrow_mut() = None;
+        });
+
+        let runtime = TaskRuntime::current_or_default();
+        runtime.spawn("echo", json!({ "value": 1 }));
+        let results = drain_for(&runtime, 50);
+
+        assert_eq!(results.len(), 1);
+        assert!(matches!(results[0].status, TaskStatus::Error(_)));
+        assert!(!runtime.has_in_flight());
+
+        CURRENT_TASK_RUNTIME.with(|slot| {
+            *slot.borrow_mut() = None;
+        });
+        FORCE_NATIVE_RUNTIME_INIT_FAILURE.store(false, Ordering::Relaxed);
     }
 }

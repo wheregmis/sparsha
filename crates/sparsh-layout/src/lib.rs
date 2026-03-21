@@ -1,4 +1,7 @@
 //! Sparsh Layout - Flexbox layout engine via taffy.
+//!
+//! Stability: the supported 1.0 contract is the crate-root `LayoutTree`, `ComputedLayout`,
+//! `WidgetId`, `styles`, and `taffy` re-exports.
 
 mod tree;
 

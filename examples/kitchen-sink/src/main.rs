@@ -2,9 +2,9 @@
 
 use sparsh::prelude::*;
 
-fn main() {
+fn main() -> Result<(), sparsh::AppRunError> {
     #[cfg(target_arch = "wasm32")]
-    sparsh::init_web();
+    sparsh::init_web()?;
 
     #[cfg(not(target_arch = "wasm32"))]
     env_logger::init();
@@ -15,7 +15,7 @@ fn main() {
         .background(Color::from_hex(0x0F172A))
         .theme(Theme::light())
         .router(Router::new().route("/", build_ui).fallback("/"))
-        .run();
+        .run()
 }
 
 fn build_ui() -> Box<dyn Widget> {

@@ -10,9 +10,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(target_arch = "wasm32")]
 use web_time::{SystemTime, UNIX_EPOCH};
 
-fn main() {
+fn main() -> Result<(), sparsh::AppRunError> {
     #[cfg(target_arch = "wasm32")]
-    sparsh::init_web();
+    sparsh::init_web()?;
 
     #[cfg(not(target_arch = "wasm32"))]
     env_logger::init();
@@ -27,7 +27,7 @@ fn main() {
                 .route("/", || Box::new(FractalClock::new()))
                 .fallback("/"),
         )
-        .run();
+        .run()
 }
 
 struct FractalClock {

@@ -12,4 +12,4 @@ swash = { workspace = true }
 glam = { workspace = true }
 bytemuck = { workspace = true }
 rustc-hash = { workspace = true }
-
+log = { workspace = true }

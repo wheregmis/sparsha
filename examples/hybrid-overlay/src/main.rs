@@ -5,9 +5,9 @@ use sparsh::text::TextStyle;
 use sparsh::widgets::{DrawSurfaceContext, EventContext, PaintContext};
 use std::f32::consts::TAU;
 
-fn main() {
+fn main() -> Result<(), sparsh::AppRunError> {
     #[cfg(target_arch = "wasm32")]
-    sparsh::init_web();
+    sparsh::init_web()?;
 
     #[cfg(not(target_arch = "wasm32"))]
     env_logger::init();
@@ -22,7 +22,7 @@ fn main() {
                 .route("/", || Box::new(HybridOverlayDemo::new()))
                 .fallback("/"),
         )
-        .run();
+        .run()
 }
 
 struct HybridOverlayDemo {

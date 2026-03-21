@@ -13,7 +13,7 @@
 ## Task 1: Add Translation Draw Commands
 
 **Files:**
-- Modify: `crates/spark-render/src/commands.rs:1-152`
+- Modify: `crates/sparsh-render/src/commands.rs:1-152`
 
 **Step 1: Add translation variants to DrawCommand enum**
 
@@ -46,13 +46,13 @@ pub fn pop_translation(&mut self) {
 
 **Step 3: Verify compilation**
 
-Run: `cargo check -p spark-render`
+Run: `cargo check -p sparsh-render`
 Expected: SUCCESS with no errors
 
 **Step 4: Commit**
 
 ```bash
-git add crates/spark-render/src/commands.rs
+git add crates/sparsh-render/src/commands.rs
 git commit -m "feat(render): add PushTranslation and PopTranslation draw commands"
 ```
 
@@ -61,7 +61,7 @@ git commit -m "feat(render): add PushTranslation and PopTranslation draw command
 ## Task 2: Add Translation Support to PaintContext
 
 **Files:**
-- Modify: `crates/spark-widgets/src/context.rs:27-179`
+- Modify: `crates/sparsh-widgets/src/context.rs:27-179`
 
 **Step 1: Add translation methods to PaintContext impl**
 
@@ -82,13 +82,13 @@ pub fn pop_translation(&mut self) {
 
 **Step 2: Verify compilation**
 
-Run: `cargo check -p spark-widgets`
+Run: `cargo check -p sparsh-widgets`
 Expected: SUCCESS with no errors
 
 **Step 3: Commit**
 
 ```bash
-git add crates/spark-widgets/src/context.rs
+git add crates/sparsh-widgets/src/context.rs
 git commit -m "feat(widgets): add translation methods to PaintContext"
 ```
 
@@ -97,7 +97,7 @@ git commit -m "feat(widgets): add translation methods to PaintContext"
 ## Task 3: Add paint_after_children Hook to Widget Trait
 
 **Files:**
-- Modify: `crates/spark-widgets/src/widget.rs:1-154`
+- Modify: `crates/sparsh-widgets/src/widget.rs:1-154`
 
 **Step 1: Add paint_after_children method to Widget trait**
 
@@ -114,13 +114,13 @@ fn paint_after_children(&self, _ctx: &mut PaintContext) {
 
 **Step 2: Verify compilation**
 
-Run: `cargo check -p spark-widgets`
+Run: `cargo check -p sparsh-widgets`
 Expected: SUCCESS with no errors (default impl means no changes needed to existing widgets)
 
 **Step 3: Commit**
 
 ```bash
-git add crates/spark-widgets/src/widget.rs
+git add crates/sparsh-widgets/src/widget.rs
 git commit -m "feat(widgets): add paint_after_children hook to Widget trait"
 ```
 
@@ -129,7 +129,7 @@ git commit -m "feat(widgets): add paint_after_children hook to Widget trait"
 ## Task 4: Update Framework to Call paint_after_children
 
 **Files:**
-- Modify: `crates/spark/src/app.rs:278-370`
+- Modify: `crates/sparsh/src/app.rs:278-370`
 
 **Step 1: Call paint_after_children after painting children**
 
@@ -164,7 +164,7 @@ widget.paint_after_children(&mut ctx);
 
 **Step 2: Verify compilation**
 
-Run: `cargo check -p spark`
+Run: `cargo check -p sparsh`
 Expected: SUCCESS with no errors
 
 **Step 3: Test with existing examples**
@@ -175,7 +175,7 @@ Expected: Runs without errors, displays counter UI correctly
 **Step 4: Commit**
 
 ```bash
-git add crates/spark/src/app.rs
+git add crates/sparsh/src/app.rs
 git commit -m "feat(app): call paint_after_children hook after painting children"
 ```
 
@@ -184,11 +184,11 @@ git commit -m "feat(app): call paint_after_children hook after painting children
 ## Task 5: Implement Translation Rendering in Shape Pass
 
 **Files:**
-- Modify: `crates/spark-render/src/shape_pass.rs:1-end`
+- Modify: `crates/sparsh-render/src/shape_pass.rs:1-end`
 
 **Step 1: Read current shape_pass implementation**
 
-Run: `cat crates/spark-render/src/shape_pass.rs | head -100`
+Run: `cat crates/sparsh-render/src/shape_pass.rs | head -100`
 Expected: Understand how draw commands are processed
 
 **Step 2: Add translation stack to ShapePass struct**
@@ -247,13 +247,13 @@ DrawCommand::Rect { bounds, color, corner_radius, border_width, border_color } =
 
 **Step 6: Verify compilation**
 
-Run: `cargo check -p spark-render`
+Run: `cargo check -p sparsh-render`
 Expected: SUCCESS with no errors
 
 **Step 7: Commit**
 
 ```bash
-git add crates/spark-render/src/shape_pass.rs
+git add crates/sparsh-render/src/shape_pass.rs
 git commit -m "feat(render): implement translation stack in shape pass"
 ```
 
@@ -262,11 +262,11 @@ git commit -m "feat(render): implement translation stack in shape pass"
 ## Task 6: Implement Translation Rendering in Text Pass
 
 **Files:**
-- Modify: `crates/spark-render/src/text_pass.rs:1-end`
+- Modify: `crates/sparsh-render/src/text_pass.rs:1-end`
 
 **Step 1: Read current text_pass implementation**
 
-Run: `cat crates/spark-render/src/text_pass.rs | head -100`
+Run: `cat crates/sparsh-render/src/text_pass.rs | head -100`
 Expected: Understand how text draw commands are processed
 
 **Step 2: Add translation stack to TextPass struct**
@@ -323,13 +323,13 @@ DrawCommand::Text { glyphs } => {
 
 **Step 6: Verify compilation**
 
-Run: `cargo check -p spark-render`
+Run: `cargo check -p sparsh-render`
 Expected: SUCCESS with no errors
 
 **Step 7: Commit**
 
 ```bash
-git add crates/spark-render/src/text_pass.rs
+git add crates/sparsh-render/src/text_pass.rs
 git commit -m "feat(render): implement translation stack in text pass"
 ```
 
@@ -338,7 +338,7 @@ git commit -m "feat(render): implement translation stack in text pass"
 ## Task 7: Update Scroll Widget to Use Translation
 
 **Files:**
-- Modify: `crates/spark-widgets/src/scroll.rs:150-250`
+- Modify: `crates/sparsh-widgets/src/scroll.rs:150-250`
 
 **Step 1: Update Scroll::paint() to push translation**
 
@@ -416,13 +416,13 @@ fn paint_after_children(&self, ctx: &mut PaintContext) {
 
 **Step 3: Verify compilation**
 
-Run: `cargo check -p spark-widgets`
+Run: `cargo check -p sparsh-widgets`
 Expected: SUCCESS with no errors
 
 **Step 4: Commit**
 
 ```bash
-git add crates/spark-widgets/src/scroll.rs
+git add crates/sparsh-widgets/src/scroll.rs
 git commit -m "feat(scroll): implement content translation using paint hooks"
 ```
 

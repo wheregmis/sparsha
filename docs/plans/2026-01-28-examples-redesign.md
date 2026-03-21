@@ -2,7 +2,7 @@
 
 ## Goal
 
-Create comprehensive, focused examples for testing layout, rendering, and hit testing in Spark. Remove web-specific code and focus on desktop functionality in alpha stage.
+Create comprehensive, focused examples for testing layout, rendering, and hit testing in Sparsh. Remove web-specific code and focus on desktop functionality in alpha stage.
 
 ## Overview
 
@@ -17,7 +17,7 @@ Remove `run-wasm` and simplify example structure.
 **Purpose**: Visual regression testing for layout engine features
 
 ### Window Configuration
-- Title: "Layout Gallery - Spark"
+- Title: "Layout Gallery - Sparsh"
 - Size: 1000x800
 - Background: Dark gray (#1F2937)
 
@@ -60,7 +60,7 @@ Remove `run-wasm` and simplify example structure.
 **Purpose**: Interactive testing for widgets, events, and hit detection
 
 ### Window Configuration
-- Title: "Kitchen Sink - Spark"
+- Title: "Kitchen Sink - Sparsh"
 - Size: 1200x900
 - Background: Dark theme (#0F172A)
 

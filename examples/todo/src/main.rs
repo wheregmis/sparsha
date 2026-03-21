@@ -1,18 +1,18 @@
-//! Todo example app for Spark (native + web) using signal-based state.
+//! Todo example app for Sparsh (native + web) using signal-based state.
 
 use serde_json::json;
-use spark::prelude::*;
-use spark::widgets::{BuildContext, EventContext, PaintContext, WidgetId};
+use sparsh::prelude::*;
+use sparsh::widgets::{BuildContext, EventContext, PaintContext, WidgetId};
 
 fn main() {
     #[cfg(target_arch = "wasm32")]
-    spark::init_web();
+    sparsh::init_web();
 
     #[cfg(not(target_arch = "wasm32"))]
     env_logger::init();
 
     App::new()
-        .with_title("Spark Todo")
+        .with_title("Sparsh Todo")
         .with_size(960, 720)
         .with_background(Color::from_hex(0x0F172A))
         .run(|| Box::new(TodoApp::new()));
@@ -208,7 +208,7 @@ impl TodoApp {
             .corner_radius(14.0)
             .child(Text::new("Todo").size(28.0).bold().color(Color::WHITE))
             .child(
-                Text::new("Spark native + web example using signal-driven state.")
+                Text::new("Sparsh native + web example using signal-driven state.")
                     .size(13.0)
                     .color(Color::from_hex(0x9CA3AF)),
             )
@@ -437,7 +437,7 @@ mod tests {
 
     #[test]
     fn todo_app_signal_actions_update_state() {
-        let runtime = spark::signals::RuntimeHandle::new();
+        let runtime = sparsh::signals::RuntimeHandle::new();
         runtime.run_with_current(|| {
             let app = TodoApp::new();
             apply_action(app.model, TodoAction::SetDraft("Alpha".to_owned()));

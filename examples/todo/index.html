@@ -5,24 +5,24 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="Spark todo app example running in WebAssembly with DOM rendering."
+      content="Sparsh todo app example running in WebAssembly with DOM rendering."
     />
     <meta name="robots" content="index,follow" />
     <meta name="theme-color" content="#0f172a" />
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="Todo - Spark" />
+    <meta property="og:title" content="Todo - Sparsh" />
     <meta
       property="og:description"
-      content="Spark todo app example running in WebAssembly with DOM rendering."
+      content="Sparsh todo app example running in WebAssembly with DOM rendering."
     />
     <meta name="twitter:card" content="summary" />
-    <meta name="twitter:title" content="Todo - Spark" />
+    <meta name="twitter:title" content="Todo - Sparsh" />
     <meta
       name="twitter:description"
-      content="Spark todo app example running in WebAssembly with DOM rendering."
+      content="Sparsh todo app example running in WebAssembly with DOM rendering."
     />
-    <title>Todo - Spark</title>
-    <link data-trunk rel="copy-file" href="spark-worker.js" />
+    <title>Todo - Sparsh</title>
+    <link data-trunk rel="copy-file" href="sparsh-worker.js" />
     <style>
       html, body {
         margin: 0;
@@ -37,7 +37,7 @@
         font-family: "Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       }
 
-      #spark-loading-shell {
+      #sparsh-loading-shell {
         position: fixed;
         inset: 0 auto auto 0;
         width: 100%;
@@ -48,14 +48,14 @@
         z-index: 9999;
       }
 
-      #spark-loading-shell .bar {
+      #sparsh-loading-shell .bar {
         width: 40%;
         height: 100%;
         background: linear-gradient(90deg, #2563eb 0%, #60a5fa 45%, #2563eb 100%);
-        animation: spark-progress 0.9s linear infinite;
+        animation: sparsh-progress 0.9s linear infinite;
       }
 
-      @keyframes spark-progress {
+      @keyframes sparsh-progress {
         0% {
           transform: translateX(-120%);
         }
@@ -64,7 +64,7 @@
         }
       }
 
-      #spark-loading-shell.is-hidden {
+      #sparsh-loading-shell.is-hidden {
         opacity: 0;
         pointer-events: none;
         visibility: hidden;
@@ -72,18 +72,18 @@
     </style>
   </head>
   <body>
-    <main id="spark-loading-shell" aria-label="Loading">
+    <main id="sparsh-loading-shell" aria-label="Loading">
       <div class="bar" aria-hidden="true"></div>
     </main>
     <noscript>
       <main>
-        <h1>Spark Todo</h1>
+        <h1>Sparsh Todo</h1>
         <p>This app needs JavaScript enabled to run.</p>
       </main>
     </noscript>
     <script>
       (() => {
-        const shell = document.getElementById("spark-loading-shell");
+        const shell = document.getElementById("sparsh-loading-shell");
         if (!shell) return;
 
         let hidden = false;
@@ -96,7 +96,7 @@
           });
         };
 
-        window.addEventListener("SparkFirstPaint", hideShell, { once: true });
+        window.addEventListener("SparshFirstPaint", hideShell, { once: true });
 
         setTimeout(hideShell, 12_000);
       })();

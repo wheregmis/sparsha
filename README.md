@@ -1,4 +1,4 @@
-# Spark
+# Sparsh
 
 A GPU-first cross-platform UI framework in Rust, built on `wgpu` and `winit`.
 
@@ -19,16 +19,16 @@ A GPU-first cross-platform UI framework in Rust, built on `wgpu` and `winit`.
 │                    Application Layer                         │
 │              (User code: components, state)                  │
 ├─────────────────────────────────────────────────────────────┤
-│                    spark (facade)                           │
+│                    sparsh (facade)                           │
 │              App runner, context, hooks                      │
 ├─────────────────────────────────────────────────────────────┤
-│ spark-signals │ spark-widgets │ spark-input │ spark-layout  │
+│ sparsh-signals │ sparsh-widgets │ sparsh-input │ sparsh-layout  │
 │ (Signal/Memo) │ (Button, Input)│ (Events, Focus)│ (Flexbox) │
 ├─────────────────────────────────────────────────────────────┤
-│                    spark-render                             │
+│                    sparsh-render                             │
 │     DrawList, ShapePass, TextPass, batching, sorting         │
 ├─────────────────────────────────────────────────────────────┤
-│                    spark-core                               │
+│                    sparsh-core                               │
 │     Pipeline<U>, wgpu init, uniform buffers, shaders         │
 ├─────────────────────────────────────────────────────────────┤
 │                    Platform                                   │
@@ -45,19 +45,19 @@ A GPU-first cross-platform UI framework in Rust, built on `wgpu` and `winit`.
 
 | Crate | Description |
 |-------|-------------|
-| `spark` | Main facade crate with App runner |
-| `spark-core` | GPU primitives, pipelines, vertex buffers |
-| `spark-render` | DrawList, shape/text rendering passes |
-| `spark-layout` | Flexbox layout via taffy |
-| `spark-text` | Font loading, text shaping, glyph atlas |
-| `spark-input` | Event types, focus management, hit testing |
-| `spark-signals` | Reactive signal runtime (`Signal`, `Memo`, `Effect`) |
-| `spark-widgets` | Widget trait and basic widgets |
+| `sparsh` | Main facade crate with App runner |
+| `sparsh-core` | GPU primitives, pipelines, vertex buffers |
+| `sparsh-render` | DrawList, shape/text rendering passes |
+| `sparsh-layout` | Flexbox layout via taffy |
+| `sparsh-text` | Font loading, text shaping, glyph atlas |
+| `sparsh-input` | Event types, focus management, hit testing |
+| `sparsh-signals` | Reactive signal runtime (`Signal`, `Memo`, `Effect`) |
+| `sparsh-widgets` | Widget trait and basic widgets |
 
 ## Quick Start
 
 ```rust
-use spark::prelude::*;
+use sparsh::prelude::*;
 
 fn main() {
     App::new()

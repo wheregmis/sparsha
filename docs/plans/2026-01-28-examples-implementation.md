@@ -6,7 +6,7 @@
 
 **Architecture:** Create two new focused examples: Layout Gallery (visual layout testing) and Kitchen Sink (interactive widget testing). Remove run-wasm directory and update workspace configuration. Keep existing examples for reference.
 
-**Tech Stack:** Rust, Spark UI framework, cargo workspace
+**Tech Stack:** Rust, Sparsh UI framework, cargo workspace
 
 ---
 
@@ -30,14 +30,14 @@ Expected: Directory removed
 Edit `Cargo.toml`:
 ```toml
 members = [
-    "crates/spark-core",
-    "crates/spark-render",
-    "crates/spark-layout",
-    "crates/spark-text",
-    "crates/spark-input",
-    "crates/spark-widgets",
-    "crates/spark-native-apple",
-    "crates/spark",
+    "crates/sparsh-core",
+    "crates/sparsh-render",
+    "crates/sparsh-layout",
+    "crates/sparsh-text",
+    "crates/sparsh-input",
+    "crates/sparsh-widgets",
+    "crates/sparsh-native-apple",
+    "crates/sparsh",
     "examples/triangle",
     "examples/demo",
     "examples/counter",
@@ -90,7 +90,7 @@ name = "layout"
 path = "src/main.rs"
 
 [dependencies]
-spark = { workspace = true }
+sparsh = { workspace = true }
 env_logger = "0.11"
 log = "0.4"
 ```
@@ -101,13 +101,13 @@ Create `examples/layout/src/main.rs`:
 ```rust
 //! Layout Gallery - Visual testing for layout features
 
-use spark::prelude::*;
+use sparsh::prelude::*;
 
 fn main() {
     env_logger::init();
 
     App::new()
-        .with_title("Layout Gallery - Spark")
+        .with_title("Layout Gallery - Sparsh")
         .with_size(1000, 800)
         .with_background(Color::from_hex(0x1F2937))
         .run(build_ui);
@@ -463,7 +463,7 @@ name = "kitchen-sink"
 path = "src/main.rs"
 
 [dependencies]
-spark = { workspace = true }
+sparsh = { workspace = true }
 env_logger = "0.11"
 log = "0.4"
 ```
@@ -474,8 +474,8 @@ Create `examples/kitchen-sink/src/main.rs`:
 ```rust
 //! Kitchen Sink - Interactive widget testing
 
-use spark::prelude::*;
-use spark::widgets::{LayoutContext, PaintContext, Widget, WidgetId};
+use sparsh::prelude::*;
+use sparsh::widgets::{LayoutContext, PaintContext, Widget, WidgetId};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
@@ -483,7 +483,7 @@ fn main() {
     env_logger::init();
 
     App::new()
-        .with_title("Kitchen Sink - Spark")
+        .with_title("Kitchen Sink - Sparsh")
         .with_size(1200, 900)
         .with_background(Color::from_hex(0x0F172A))
         .run(|| Box::new(KitchenSinkApp::new()));
@@ -529,8 +529,8 @@ impl Widget for KitchenSinkApp {
         self.id = id;
     }
 
-    fn style(&self) -> spark::layout::taffy::Style {
-        use spark::layout::taffy::prelude::*;
+    fn style(&self) -> sparsh::layout::taffy::Style {
+        use sparsh::layout::taffy::prelude::*;
         Style {
             display: Display::Flex,
             flex_direction: FlexDirection::Row,
@@ -668,8 +668,8 @@ impl Widget for Sidebar {
         self.id = id;
     }
 
-    fn style(&self) -> spark::layout::taffy::Style {
-        use spark::layout::taffy::prelude::*;
+    fn style(&self) -> sparsh::layout::taffy::Style {
+        use sparsh::layout::taffy::prelude::*;
         Style {
             display: Display::Flex,
             flex_direction: FlexDirection::Column,
@@ -768,8 +768,8 @@ impl Widget for MainArea {
         self.id = id;
     }
 
-    fn style(&self) -> spark::layout::taffy::Style {
-        use spark::layout::taffy::prelude::*;
+    fn style(&self) -> sparsh::layout::taffy::Style {
+        use sparsh::layout::taffy::prelude::*;
         Style {
             display: Display::Flex,
             flex_direction: FlexDirection::Column,
@@ -869,8 +869,8 @@ impl Widget for InputSection {
         self.id = id;
     }
 
-    fn style(&self) -> spark::layout::taffy::Style {
-        use spark::layout::taffy::prelude::*;
+    fn style(&self) -> sparsh::layout::taffy::Style {
+        use sparsh::layout::taffy::prelude::*;
         Style {
             display: Display::Flex,
             flex_direction: FlexDirection::Column,
@@ -983,8 +983,8 @@ impl Widget for ContainerSection {
         self.id = id;
     }
 
-    fn style(&self) -> spark::layout::taffy::Style {
-        use spark::layout::taffy::prelude::*;
+    fn style(&self) -> sparsh::layout::taffy::Style {
+        use sparsh::layout::taffy::prelude::*;
         Style {
             display: Display::Flex,
             flex_direction: FlexDirection::Column,
@@ -1074,8 +1074,8 @@ impl Widget for ScrollSection {
         self.id = id;
     }
 
-    fn style(&self) -> spark::layout::taffy::Style {
-        use spark::layout::taffy::prelude::*;
+    fn style(&self) -> sparsh::layout::taffy::Style {
+        use sparsh::layout::taffy::prelude::*;
         Style {
             display: Display::Flex,
             flex_direction: FlexDirection::Column,
@@ -1145,9 +1145,9 @@ git commit -m "feat: implement kitchen-sink main area with sections"
 
 Edit `examples/README.md`:
 ```markdown
-# Spark Examples
+# Sparsh Examples
 
-A collection of examples demonstrating the Spark UI framework.
+A collection of examples demonstrating the Sparsh UI framework.
 
 ## Examples
 
@@ -1277,7 +1277,7 @@ git commit -m "feat: complete examples redesign with layout and kitchen-sink"
 
 ## Notes
 
-- The examples use the existing Spark widget API
+- The examples use the existing Sparsh widget API
 - Layout Gallery focuses on visual layout testing
 - Kitchen Sink tests interactive features and hit detection
 - Both examples use dark themes for consistency

@@ -1,9 +1,9 @@
-use spark::core::glam::Vec2;
-use spark::input::PointerButton;
-use spark::layout::{taffy, WidgetId};
-use spark::prelude::*;
-use spark::text::TextStyle;
-use spark::widgets::{DrawSurfaceContext, EventContext, PaintContext};
+use sparsh::core::glam::Vec2;
+use sparsh::input::PointerButton;
+use sparsh::layout::{taffy, WidgetId};
+use sparsh::prelude::*;
+use sparsh::text::TextStyle;
+use sparsh::widgets::{DrawSurfaceContext, EventContext, PaintContext};
 use std::f32::consts::{PI, TAU};
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -12,13 +12,13 @@ use web_time::{SystemTime, UNIX_EPOCH};
 
 fn main() {
     #[cfg(target_arch = "wasm32")]
-    spark::init_web();
+    sparsh::init_web();
 
     #[cfg(not(target_arch = "wasm32"))]
     env_logger::init();
 
     App::new()
-        .with_title("Fractal Clock - Spark")
+        .with_title("Fractal Clock - Sparsh")
         .with_size(1440, 960)
         .with_background(Color::from_hex(0x04060A))
         .run(|| Box::new(FractalClock::new()));

@@ -1,19 +1,19 @@
-use spark::core::glam::Vec2;
-use spark::layout::{taffy, WidgetId};
-use spark::prelude::*;
-use spark::text::TextStyle;
-use spark::widgets::{DrawSurfaceContext, EventContext, PaintContext};
+use sparsh::core::glam::Vec2;
+use sparsh::layout::{taffy, WidgetId};
+use sparsh::prelude::*;
+use sparsh::text::TextStyle;
+use sparsh::widgets::{DrawSurfaceContext, EventContext, PaintContext};
 use std::f32::consts::TAU;
 
 fn main() {
     #[cfg(target_arch = "wasm32")]
-    spark::init_web();
+    sparsh::init_web();
 
     #[cfg(not(target_arch = "wasm32"))]
     env_logger::init();
 
     App::new()
-        .with_title("Hybrid Overlay - Spark")
+        .with_title("Hybrid Overlay - Sparsh")
         .with_size(1280, 800)
         .with_background(Color::from_hex(0x07111D))
         .run(|| Box::new(HybridOverlayDemo::new()));

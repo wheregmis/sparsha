@@ -8,7 +8,7 @@ name = "todo"
 path = "src/main.rs"
 
 [dependencies]
-spark = { path = "../../crates/spark" }
+sparsh = { path = "../../crates/sparsh" }
 env_logger = { workspace = true }
 log = { workspace = true }
 serde_json = { workspace = true }

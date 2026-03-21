@@ -22,7 +22,7 @@ echo "[1/4] Building release bundle"
 NO_COLOR=true trunk build --release
 
 echo "[2/4] Starting static server on ${URL}"
-python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$DIST_DIR" >/tmp/spark-todo-lighthouse-server.log 2>&1 &
+python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$DIST_DIR" >/tmp/sparsh-todo-lighthouse-server.log 2>&1 &
 SERVER_PID=$!
 
 for _ in {1..20}; do

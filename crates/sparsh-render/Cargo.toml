@@ -1,0 +1,14 @@
+[package]
+name = "sparsh-render"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+sparsh-core = { workspace = true }
+sparsh-text = { workspace = true }
+wgpu = { workspace = true }
+bytemuck = { workspace = true }
+glam = { workspace = true }
+log = { workspace = true }
+

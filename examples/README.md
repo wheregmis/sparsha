@@ -1,12 +1,12 @@
-# Spark Examples
+# Sparsh Examples
 
-This directory contains runnable Spark example applications.
+This directory contains runnable Sparsh example applications.
 
 ## Kitchen Sink
 
 **Path:** `examples/kitchen-sink`
 
-A single example application demonstrating Spark's major features: widgets, layout, styling, navigation, and event handling.
+A single example application demonstrating Sparsh's major features: widgets, layout, styling, navigation, and event handling.
 
 **Run:**
 ```bash

@@ -1,0 +1,17 @@
+[package]
+name = "sparsh-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[lib]
+name = "sparsh_core"
+path = "src/lib.rs"
+
+[dependencies]
+winit = { workspace = true }
+wgpu = { workspace = true }
+pollster = { workspace = true }
+bytemuck = { workspace = true }
+log = { workspace = true }
+glam = { workspace = true }

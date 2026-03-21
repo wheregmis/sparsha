@@ -1,16 +1,16 @@
 //! Kitchen Sink - Interactive widget testing
 
-use spark::prelude::*;
+use sparsh::prelude::*;
 
 fn main() {
     #[cfg(target_arch = "wasm32")]
-    spark::init_web();
+    sparsh::init_web();
 
     #[cfg(not(target_arch = "wasm32"))]
     env_logger::init();
 
     App::new()
-        .with_title("Kitchen Sink - Spark")
+        .with_title("Kitchen Sink - Sparsh")
         .with_size(1200, 900)
         .with_background(Color::from_hex(0x0F172A))
         .run(build_ui);

@@ -1,13 +1,13 @@
 [workspace]
 members = [
-    "crates/spark-core",
-    "crates/spark-render",
-    "crates/spark-layout",
-    "crates/spark-text",
-    "crates/spark-input",
-    "crates/spark-signals",
-    "crates/spark-widgets",
-    "crates/spark",
+    "crates/sparsh-core",
+    "crates/sparsh-render",
+    "crates/sparsh-layout",
+    "crates/sparsh-text",
+    "crates/sparsh-input",
+    "crates/sparsh-signals",
+    "crates/sparsh-widgets",
+    "crates/sparsh",
     "examples/fractal-clock",
     "examples/hybrid-overlay",
     "examples/kitchen-sink",
@@ -52,13 +52,13 @@ accesskit = "0.24.0"
 accesskit_winit = "0.32.2"
 
 # Internal crates
-spark-core = { path = "crates/spark-core" }
-spark-render = { path = "crates/spark-render" }
-spark-layout = { path = "crates/spark-layout" }
-spark-text = { path = "crates/spark-text" }
-spark-input = { path = "crates/spark-input" }
-spark-signals = { path = "crates/spark-signals" }
-spark-widgets = { path = "crates/spark-widgets" }
+sparsh-core = { path = "crates/sparsh-core" }
+sparsh-render = { path = "crates/sparsh-render" }
+sparsh-layout = { path = "crates/sparsh-layout" }
+sparsh-text = { path = "crates/sparsh-text" }
+sparsh-input = { path = "crates/sparsh-input" }
+sparsh-signals = { path = "crates/sparsh-signals" }
+sparsh-widgets = { path = "crates/sparsh-widgets" }
 
 # Web dependencies (add to workspace.dependencies for individual crates)
 wasm-bindgen = "0.2.114"

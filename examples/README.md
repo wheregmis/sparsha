@@ -1,123 +1,77 @@
 # Sparsh Examples
 
-This directory contains runnable Sparsh example applications.
+> Small apps that show how Sparsh behaves in practice.
 
-## Kitchen Sink
+Each example is a normal Cargo binary. Run them natively, or serve the web builds with Trunk.
 
-**Path:** `examples/kitchen-sink`
+## At A Glance
 
-A single example application demonstrating Sparsh's major features: widgets, layout, styling, navigation, and event handling.
+| Example | What it shows |
+|---|---|
+| `kitchen-sink` | Full widget showcase, layout patterns, navigation, form handling |
+| `fractal-clock` | Full-screen GPU-heavy scene with time-based animation and controls |
+| `hybrid-overlay` | `DrawSurface` plus retained overlays in a hybrid web layout |
+| `todo` | Reactive state, list rendering, filters, and reusable widgets |
 
-**Run:**
-```bash
-cargo run -p kitchen-sink --release
-```
+## Run Them
 
-For development (faster compile, slower runtime):
+Native:
+
 ```bash
 cargo run -p kitchen-sink
-```
-
-**Features:**
-- Tab-based navigation
-- Widget showcase, layout patterns, form handling, data visualization
-- Production-oriented patterns and accessibility
-
-## Building
-
-```bash
-cargo build -p kitchen-sink --release
-```
-
-To check the entire workspace:
-```bash
-cargo check --workspace
-```
-
-## Platform notes
-
-- **macOS:** Metal backend
-- **Windows:** DirectX 12 (fallback to DX11)
-- **Linux:** Vulkan
-
-Ensure graphics drivers and system libraries (e.g. Vulkan on Linux) are installed as needed.
-
-
-## Web (WASM) with Trunk
-
-Kitchen Sink supports WebAssembly via `wasm-bindgen` and can be served with Trunk.
-
-From `examples/kitchen-sink`:
-```bash
-rustup target add wasm32-unknown-unknown
-trunk serve
-```
-
-Then open `http://127.0.0.1:8080`.
-
-## Fractal Clock
-
-**Path:** `examples/fractal-clock`
-
-A full-screen generative clock demo that turns the current UTC time into an animated fractal field with layered glow, orbit markers, and interactive palette/zoom controls.
-
-**Run:**
-```bash
 cargo run -p fractal-clock --release
-```
-
-For development:
-```bash
-cargo run -p fractal-clock
-```
-
-For web (WASM + Trunk):
-```bash
-cd examples/fractal-clock
-rustup target add wasm32-unknown-unknown
-trunk serve
-```
-
-Then open `http://127.0.0.1:8082`.
-
-## Hybrid Overlay
-
-**Path:** `examples/hybrid-overlay`
-
-A smaller hybrid-rendering example that uses `DrawSurface` for the animated GPU background while
-keeping the info panels and status text on the normal retained widget path.
-
-**Run:**
-```bash
 cargo run -p hybrid-overlay
-```
-
-For web (WASM + Trunk):
-```bash
-cd examples/hybrid-overlay
-rustup target add wasm32-unknown-unknown
-trunk serve
-```
-
-Then open `http://127.0.0.1:8083`.
-
-## Todo
-
-**Path:** `examples/todo`
-
-A cross-platform todo app demonstrating dynamic list rendering with reusable `Checkbox` and `List`
-widgets, filter controls, and signal-driven state updates (no `Arc/Mutex` action queue).
-
-**Run:**
-```bash
 cargo run -p todo
 ```
 
-For web (WASM + Trunk):
+Web:
+
 ```bash
-cd examples/todo
+cd examples/kitchen-sink
 rustup target add wasm32-unknown-unknown
 trunk serve
 ```
 
-Then open `http://127.0.0.1:8081`.
+The other examples follow the same pattern from their own directories.
+
+## Kitchen Sink
+
+Path: `examples/kitchen-sink`
+
+The most complete example in the repo. It demonstrates widget composition, tab navigation, layout structure, and production-style UI patterns.
+
+- Use it when you want to see the public widget API in one place.
+- Good starting point for learning `Container`, `Button`, `Text`, `TextInput`, `List`, and `Scroll`.
+
+## Fractal Clock
+
+Path: `examples/fractal-clock`
+
+A full-screen generative demo that turns UTC time into an animated fractal field with layered glow and interactive controls.
+
+- Use it to see Sparsh handle draw-heavy scenes.
+- Good reference for animation, composition, and responsive overlays.
+
+## Hybrid Overlay
+
+Path: `examples/hybrid-overlay`
+
+A compact hybrid rendering sample that paints a GPU scene inside `DrawSurface` while keeping panels and text in the retained widget tree.
+
+- Use it to see the web hybrid path in isolation.
+- Good reference for embedding custom GPU content into Sparsh UI.
+
+## Todo
+
+Path: `examples/todo`
+
+A cross-platform todo app built around signal-driven state, reusable list items, and simple filtering interactions.
+
+- Use it to see how state, events, and widgets fit together in a realistic app.
+- Good reference for a small but complete app structure.
+
+## Notes
+
+- Desktop targets use the native `winit` and `wgpu` stack.
+- Web targets use the same app model with retained DOM rendering by default.
+- Example code and docs live beside the framework, so the examples stay aligned with the public API.

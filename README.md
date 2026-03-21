@@ -1,149 +1,151 @@
 # Sparsh
 
-A GPU-first cross-platform UI framework in Rust, built on `wgpu` and `winit`.
+> GPU-first, cross-platform UI for Rust.
+>
+> Native on desktop. Retained DOM on web. A hybrid `DrawSurface` path when you want GPU-heavy scenes without giving up the widget tree.
 
-## Features
+Sparsh is a UI framework built around a small set of focused crates:
+`wgpu` for rendering, `winit` for windowing, `taffy` for flexbox layout,
+`parley` + `swash` for text, `ui-events` for input, and `accesskit` for accessibility.
 
-- **GPU-Accelerated Rendering** - All rendering uses wgpu with instanced drawing for shapes and text
-- **Flexbox Layout** - Powered by [taffy](https://github.com/DioxusLabs/taffy) for familiar CSS-like layouts
-- **Cross-Platform** - Desktop (Windows, macOS, Linux) and Web (via DOM rendering)
-- **Modern Text Rendering** - Using [parley](https://github.com/linebender/parley) + [swash](https://github.com/dfrg/swash) for shaping and rasterization
-- **W3C-Compliant Events** - Using [ui-events](https://github.com/endoli/ui-events) for input handling
-- **Accessibility** - Using [accesskit](https://github.com/AccessKit/accesskit) for native assistive tech
-- **Reactive Signals** - Signal-driven state with automatic frame invalidation
+## Why Sparsh
 
-## Architecture
+- **One API across desktop and web** - Write against the same widget tree and run it on native platforms or in the browser.
+- **GPU-first rendering** - Shape and text passes are designed around batched GPU work.
+- **Flexible web story** - Retained DOM rendering is the default, with `DrawSurface` for hybrid GPU scenes.
+- **Practical widget set** - `Container`, `Button`, `Checkbox`, `Text`, `TextInput`, `List`, and `Scroll` are ready to compose.
+- **Reactive by design** - `Signal`, `Memo`, and `Effect` make app state easy to wire into rendering.
+- **Accessible from the start** - Widgets can describe roles, labels, values, and actions for assistive tech.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Application Layer                         │
-│              (User code: components, state)                  │
-├─────────────────────────────────────────────────────────────┤
-│                    sparsh (facade)                           │
-│              App runner, context, hooks                      │
-├─────────────────────────────────────────────────────────────┤
-│ sparsh-signals │ sparsh-widgets │ sparsh-input │ sparsh-layout  │
-│ (Signal/Memo) │ (Button, Input)│ (Events, Focus)│ (Flexbox) │
-├─────────────────────────────────────────────────────────────┤
-│                    sparsh-render                             │
-│     DrawList, ShapePass, TextPass, batching, sorting         │
-├─────────────────────────────────────────────────────────────┤
-│                    sparsh-core                               │
-│     Pipeline<U>, wgpu init, uniform buffers, shaders         │
-├─────────────────────────────────────────────────────────────┤
-│                    Platform                                   │
-│      Desktop (wgpu + winit) | Web (DOM + requestAnimationFrame) │
-└─────────────────────────────────────────────────────────────┘
-```
-
-## Platform Support
-
-- **Desktop**: Windows, macOS, Linux (Vulkan/Metal/DX12)
-- **Web**: WebAssembly + DOM rendering
-
-## Crates
-
-| Crate | Description |
-|-------|-------------|
-| `sparsh` | Main facade crate with App runner |
-| `sparsh-core` | GPU primitives, pipelines, vertex buffers |
-| `sparsh-render` | DrawList, shape/text rendering passes |
-| `sparsh-layout` | Flexbox layout via taffy |
-| `sparsh-text` | Font loading, text shaping, glyph atlas |
-| `sparsh-input` | Event types, focus management, hit testing |
-| `sparsh-signals` | Reactive signal runtime (`Signal`, `Memo`, `Effect`) |
-| `sparsh-widgets` | Widget trait and basic widgets |
-
-## Quick Start
+## What It Looks Like
 
 ```rust
 use sparsh::prelude::*;
 
 fn main() {
+    #[cfg(target_arch = "wasm32")]
+    sparsh::init_web();
+
     App::new()
-        .with_title("My App")
-        .with_size(800, 600)
+        .with_title("Hello Sparsh")
+        .with_size(960, 640)
         .run(|| {
             Box::new(
                 Container::new()
                     .fill()
                     .center()
                     .gap(16.0)
-                    .child(Button::new("Click me!"))
-                    .child(TextInput::new().placeholder("Enter text..."))
+                    .child(Text::new("Build UI with a GPU-first stack."))
+                    .child(Button::new("Click me"))
+                    .child(TextInput::new().placeholder("Type here...")),
             )
         });
 }
 ```
 
+## Stack
+
+```text
+Application code
+  ↳ sparsh
+      ↳ sparsh-widgets   Widget tree, layout hooks, draw surfaces
+      ↳ sparsh-signals   Signal runtime and reactivity
+      ↳ sparsh-input     Events, focus, hit testing, shortcuts
+      ↳ sparsh-layout    Flexbox layout via taffy
+      ↳ sparsh-render    Shape and text draw passes
+      ↳ sparsh-text      Font loading, shaping, glyph atlas
+      ↳ sparsh-core      GPU primitives and wgpu init
+```
+
+## Crates
+
+| Crate | Role |
+|---|---|
+| `sparsh` | App runner and public facade |
+| `sparsh-core` | Low-level GPU primitives and platform setup |
+| `sparsh-render` | Draw list, shape pass, text pass, batching |
+| `sparsh-layout` | Widget layout tree and flexbox integration |
+| `sparsh-text` | Font loading, shaping, glyph atlas management |
+| `sparsh-input` | Input events, focus management, hit testing |
+| `sparsh-signals` | Reactive signal runtime |
+| `sparsh-widgets` | Reusable widgets and painting/build contexts |
+
 ## Widgets
 
-- **Container** - Flexbox container for layout
-- **Button** - Clickable button with hover/press states
-- **Text** - Rich text rendering with alignment and styling
-- **TextInput** - Single-line text input with cursor
-- **Scroll** - Scrollable container
+The public widget layer currently includes:
 
-## Try It
+- `Container`
+- `Button`
+- `Checkbox`
+- `Text`
+- `TextInput`
+- `List`
+- `Scroll`
+- `DrawSurface`
+
+## Runtime Model
+
+Sparsh follows a straightforward frame pipeline:
+
+1. Collect input events.
+2. Rebuild widget state when signals invalidate.
+3. Compute layout with `taffy`.
+4. Paint widgets into draw commands.
+5. Render shapes and text through the GPU.
+
+On web, the app runner keeps the DOM responsive and uses a worker-backed task runtime. For draw-heavy scenes, `DrawSurface` lets you embed GPU content inside otherwise retained DOM UI.
+
+## Examples
+
+Each example is a separate Cargo binary:
 
 ```bash
 cargo run -p kitchen-sink --release
+cargo run -p fractal-clock --release
+cargo run -p hybrid-overlay --release
+cargo run -p todo --release
 ```
 
-For web (WASM + Trunk):
+For web examples with Trunk:
+
 ```bash
 cd examples/kitchen-sink
 rustup target add wasm32-unknown-unknown
 trunk serve
 ```
 
-## Frame Loop
+Other example directories follow the same pattern.
 
-```
-1. EVENT PHASE
-   - Collect winit events → InputEvent
-   - Dispatch to focused widget / hit-test target
-   - Update widget state if needed
+## Platform Support
 
-2. LAYOUT PHASE
-   - Traverse widget tree, collect taffy::Style
-   - Call taffy.compute_layout()
-   - Produce ComputedLayout tree
-
-3. PAINT PHASE
-   - Traverse widget tree with ComputedLayout
-   - Each widget emits DrawCommands to DrawList
-
-4. RENDER PHASE
-   - Sort DrawList by pipeline (shapes, then text)
-   - Batch vertices into GPU buffers
-   - Encode render passes
-   - Submit to queue, present frame
-```
+- **Desktop**: Windows, macOS, Linux
+- **Web**: WebAssembly with DOM rendering and optional hybrid GPU surfaces
 
 ## Dependencies
 
+Sparsh is built on:
+
 | Crate | Purpose |
-|-------|---------|
+|---|---|
 | `wgpu` | GPU abstraction |
-| `winit` | Windowing (desktop + web) |
+| `winit` | Native and web windowing/events |
 | `taffy` | Flexbox layout engine |
-| `parley` | Text layout + shaping |
+| `parley` | Text layout and shaping |
 | `swash` | Font rasterization |
-| `ui-events` | W3C-compliant input events |
-| `ui-events-winit` | Winit integration for input events |
-| `accesskit` | Accessibility tree + actions |
-| `accesskit_winit` | Winit accessibility adapter |
+| `ui-events` | W3C-compliant input event types |
+| `ui-events-winit` | Input bridge for winit |
+| `accesskit` | Accessibility tree and actions |
+| `accesskit_winit` | Accessibility integration for winit |
+| `glam` | Math types |
 | `bytemuck` | Safe GPU buffer casts |
-| `glam` | Math types (Vec2, Mat4) |
 | `slotmap` | Handle-based collections |
-| `rustc-hash` | Fast hash maps/sets |
+| `rustc-hash` | Fast hash maps |
 
-## References
+## More
 
-- [Makepad](https://github.com/makepad/makepad) - GPU-first UI in Rust
-- [gpui](https://github.com/zed-industries/zed) - Zed's UI framework
-- [wgpu](https://github.com/gfx-rs/wgpu) - Cross-platform GPU abstraction
+- [examples/README.md](/Users/wheregmis/Documents/GitHub/spark/examples/README.md)
+- [crates/sparsh/src/lib.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsh/src/lib.rs)
+- [crates/sparsh-widgets/src/lib.rs](/Users/wheregmis/Documents/GitHub/spark/crates/sparsh-widgets/src/lib.rs)
 
 ## License
 

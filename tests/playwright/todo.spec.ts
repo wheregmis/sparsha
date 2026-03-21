@@ -16,6 +16,22 @@ test("todo route hash changes rebuild the correct screen", async ({ page }) => {
   ).toBeVisible();
 });
 
+test("todo click navigation leaves only the active route interactive", async ({
+  page,
+}) => {
+  await page.goto(baseURL);
+
+  const todoInput = page.getByRole("textbox", { name: "Add a task..." });
+  await expect(todoInput).toBeVisible();
+
+  await page.getByRole("button", { name: "About" }).click({ force: true });
+  await expect(page.getByLabel("About Todo")).toBeVisible();
+  await expect(todoInput).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Back to Todo" }).click({ force: true });
+  await expect(todoInput).toBeVisible();
+});
+
 test("todo web worker results surface back into the UI", async ({ page }) => {
   await page.goto(baseURL);
 

@@ -62,12 +62,12 @@ mod web_text_metrics;
 
 pub use app::{App, AppRunError, ThemeInput, ThemeMode, ThemeModeInput};
 pub use component::{component, Component, ComponentContext, TaskHook};
-pub use router::{hash_to_path, path_to_hash, Navigator, Route, Router};
+pub use router::{hash_to_path, path_to_hash, Navigator, Route, Router, RouterTransition};
 pub use sparsha_widgets::{
     current_theme, lerp_color, AccessibilityAction, AccessibilityInfo, AccessibilityRole,
     AnimationEasing, ForEach, ImplicitAnimation, IntoWidget, Semantics, TextArea, TextAreaStyle,
     TextEditorState, TextInput, TextInputStyle, Theme, ThemeColors, ThemeControls, ThemeRadii,
-    ThemeSpacing, ThemeTypography, Tween,
+    ThemeSpacing, ThemeTypography, Tween, WidgetChildMode,
 };
 pub use tasks::{
     Generation, TaskHandle, TaskId, TaskKey, TaskPayload, TaskPolicy, TaskResult,
@@ -85,7 +85,7 @@ pub mod prelude {
     };
     pub use crate::{
         component, App, AppRunError, Component, ComponentContext, Navigator, Route, Router,
-        TaskHook, ThemeInput, ThemeMode, ThemeModeInput,
+        RouterTransition, TaskHook, ThemeInput, ThemeMode, ThemeModeInput,
     };
     pub use sparsha_core::{Color, Rect};
     pub use sparsha_input::{InputEvent, Key, Modifiers, PointerButton};
@@ -97,7 +97,7 @@ pub mod prelude {
         DrawSurface, EventCommands, ForEach, ImplicitAnimation, IntoWidget, List, ListDirection,
         Scroll, ScrollDirection, Semantics, Text, TextAlign, TextArea, TextAreaStyle,
         TextEditorState, TextInput, TextInputStyle, Theme, ThemeColors, ThemeControls, ThemeRadii,
-        ThemeSpacing, ThemeTypography, Tween, Widget,
+        ThemeSpacing, ThemeTypography, Tween, Widget, WidgetChildMode,
     };
 }
 

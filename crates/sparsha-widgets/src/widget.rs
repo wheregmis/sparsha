@@ -7,6 +7,13 @@ use crate::{
 use sparsha_input::InputEvent;
 use sparsha_layout::WidgetId;
 
+/// Runtime traversal mode for a widget child subtree.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WidgetChildMode {
+    Active,
+    PaintOnly,
+}
+
 /// The core widget trait that all UI components implement.
 pub trait Widget {
     /// Get the widget's unique ID.
@@ -56,6 +63,14 @@ pub trait Widget {
     /// Get mutable child widgets.
     fn children_mut(&mut self) -> &mut [Box<dyn Widget>] {
         &mut []
+    }
+
+    /// Select how the runtime should treat a child subtree.
+    ///
+    /// `PaintOnly` children still rebuild, lay out, and paint, but they do not participate in
+    /// event dispatch, focus traversal, text-editor registration, or accessibility collection.
+    fn child_mode(&self, _child_position: usize) -> WidgetChildMode {
+        WidgetChildMode::Active
     }
 
     /// Called when the widget receives focus.

@@ -46,7 +46,7 @@ pub use theme::{
     current_theme, set_current_theme, Theme, ThemeColors, ThemeControls, ThemeRadii, ThemeSpacing,
     ThemeTypography,
 };
-pub use widget::Widget;
+pub use widget::{Widget, WidgetChildMode};
 
 // Re-export layout types for convenience
 pub use sparsha_layout::{styles, taffy, WidgetId};

@@ -11,11 +11,55 @@ fn main() {
     #[cfg(not(target_arch = "wasm32"))]
     env_logger::init();
 
+    let theme_mode = Signal::new(ThemeMode::Light);
+    let theme_signal = Signal::new(todo_theme(ThemeMode::Light));
+
     App::new()
-        .with_title("Sparsh Todo")
-        .with_size(960, 720)
-        .with_background(Color::from_hex(0x0F172A))
-        .run(|| Box::new(TodoApp::new()));
+        .title("Sparsh Todo")
+        .size(960, 720)
+        .background(Color::from_hex(0xF3F4F6))
+        .theme(theme_signal)
+        .router(
+            Router::new()
+                .route("/", move || {
+                    Box::new(TodoApp::new(theme_signal, theme_mode))
+                })
+                .fallback("/"),
+        )
+        .run();
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ThemeMode {
+    Light,
+    Dark,
+}
+
+impl ThemeMode {
+    fn toggle(self) -> Self {
+        match self {
+            Self::Light => Self::Dark,
+            Self::Dark => Self::Light,
+        }
+    }
+
+    fn switch_label(self) -> &'static str {
+        match self {
+            Self::Light => "Switch to Dark",
+            Self::Dark => "Switch to Light",
+        }
+    }
+}
+
+fn todo_theme(mode: ThemeMode) -> Theme {
+    let mut theme = match mode {
+        ThemeMode::Light => Theme::light(),
+        ThemeMode::Dark => Theme::dark(),
+    };
+    theme.colors.primary = Color::from_hex(0x2563EB);
+    theme.colors.primary_hovered = Color::from_hex(0x1D4ED8);
+    theme.colors.primary_pressed = Color::from_hex(0x1E40AF);
+    theme
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -106,6 +150,8 @@ fn apply_action(model: Signal<TodoModel>, action: TodoAction) {
 struct TodoApp {
     id: WidgetId,
     model: Signal<TodoModel>,
+    theme_signal: Signal<Theme>,
+    theme_mode: Signal<ThemeMode>,
     analysis_text: Signal<String>,
     analysis_generation: Signal<u64>,
     task_runtime: TaskRuntime,
@@ -131,7 +177,7 @@ fn value_to_u64(value: Option<&serde_json::Value>) -> u64 {
 }
 
 impl TodoApp {
-    fn new() -> Self {
+    fn new(theme_signal: Signal<Theme>, theme_mode: Signal<ThemeMode>) -> Self {
         let task_runtime = TaskRuntime::current_or_default();
         let analysis_text = Signal::new(String::from("Background analyzer is idle."));
         let analysis_for_results = analysis_text;
@@ -159,6 +205,8 @@ impl TodoApp {
         let mut app = Self {
             id: WidgetId::default(),
             model: Signal::new(TodoModel::default()),
+            theme_signal,
+            theme_mode,
             analysis_text,
             analysis_generation: Signal::new(0),
             task_runtime,
@@ -168,6 +216,20 @@ impl TodoApp {
         app
     }
 
+    fn toggle_theme_button(&self) -> Button {
+        let theme_mode = self.theme_mode;
+        let theme_signal = self.theme_signal;
+        let label = theme_mode.get().switch_label();
+
+        Button::new(label).on_click(move || {
+            let next_mode = theme_mode.with_mut(|mode| {
+                *mode = mode.toggle();
+                *mode
+            });
+            theme_signal.set(todo_theme(next_mode));
+        })
+    }
+
     #[cfg(test)]
     fn snapshot_model(&self) -> TodoModel {
         self.model.get()
@@ -175,9 +237,25 @@ impl TodoApp {
 
     fn rebuild_children(&mut self) {
         let model = self.model.get();
+        let theme = self.theme_signal.get();
+        let is_dark = self.theme_mode.get() == ThemeMode::Dark;
         let analysis_text = self.analysis_text.get();
         let active_count = model.todos.iter().filter(|todo| !todo.done).count();
         let done_count = model.todos.iter().filter(|todo| todo.done).count();
+
+        let shell_bg = theme.colors.background;
+        let panel_bg = theme.colors.surface;
+        let card_bg = if is_dark {
+            theme.colors.input_background
+        } else {
+            Color::from_hex(0xF8FAFC)
+        };
+        let subdued_text = theme.colors.text_muted;
+        let analysis_color = if is_dark {
+            theme.colors.border_focus
+        } else {
+            theme.colors.primary_hovered
+        };
 
         let mut list = List::new().vertical().gap(10.0).fill_width();
         let visible: Vec<TodoItem> = model.filtered_todos().cloned().collect();
@@ -185,12 +263,12 @@ impl TodoApp {
             list.push_item(
                 Container::new()
                     .padding(14.0)
-                    .background(Color::from_hex(0x0B1220))
+                    .background(card_bg)
                     .corner_radius(8.0)
                     .child(
                         Text::new("No tasks for this filter yet.")
                             .size(14.0)
-                            .color(Color::from_hex(0x94A3B8)),
+                            .color(subdued_text),
                     ),
             );
         } else {
@@ -204,19 +282,28 @@ impl TodoApp {
             .gap(14.0)
             .padding(26.0)
             .width(720.0)
-            .background(Color::from_hex(0x111827))
+            .background(panel_bg)
             .corner_radius(14.0)
-            .child(Text::new("Todo").size(28.0).bold().color(Color::WHITE))
+            .child(
+                Container::new()
+                    .row()
+                    .fill_width()
+                    .space_between()
+                    .align_items(taffy::prelude::AlignItems::Center)
+                    .child(
+                        Text::new("Todo")
+                            .size(28.0)
+                            .bold()
+                            .color(theme.colors.text_primary),
+                    )
+                    .child(self.toggle_theme_button()),
+            )
             .child(
                 Text::new("Sparsh native + web example using signal-driven state.")
                     .size(13.0)
-                    .color(Color::from_hex(0x9CA3AF)),
+                    .color(subdued_text),
             )
-            .child(
-                Text::new(analysis_text)
-                    .size(12.0)
-                    .color(Color::from_hex(0x93C5FD)),
-            )
+            .child(Text::new(analysis_text).size(12.0).color(analysis_color))
             .child(self.input_row(&model))
             .child(self.filter_row(model.filter))
             .child(
@@ -240,7 +327,7 @@ impl TodoApp {
                             model.todos.len()
                         ))
                         .size(13.0)
-                        .color(Color::from_hex(0x9CA3AF)),
+                        .color(subdued_text),
                     )
                     .child(self.clear_completed_button()),
             );
@@ -249,12 +336,13 @@ impl TodoApp {
             Container::new()
                 .fill()
                 .center()
-                .background(Color::from_hex(0x0F172A))
+                .background(shell_bg)
                 .child(content),
         )];
     }
 
     fn input_row(&self, model: &TodoModel) -> Container {
+        let theme = self.theme_signal.get();
         let model_for_change = self.model;
         let model_for_submit = self.model;
         let model_for_add = self.model;
@@ -290,7 +378,7 @@ impl TodoApp {
             )
             .child(
                 Button::new("Add")
-                    .background(Color::from_hex(0x2563EB))
+                    .background(theme.colors.primary)
                     .text_color(Color::WHITE)
                     .on_click(move || {
                         apply_action(model_for_add, TodoAction::AddDraft);
@@ -309,41 +397,66 @@ impl TodoApp {
     }
 
     fn filter_button(&self, label: &str, filter: Filter, current_filter: Filter) -> Button {
+        let theme = self.theme_signal.get();
+        let is_dark = self.theme_mode.get() == ThemeMode::Dark;
         let selected = current_filter == filter;
         let background = if selected {
-            Color::from_hex(0x2563EB)
+            theme.colors.primary
+        } else if is_dark {
+            theme.colors.input_background
         } else {
-            Color::from_hex(0x334155)
+            Color::from_hex(0xF1F5F9)
+        };
+        let text_color = if selected {
+            Color::WHITE
+        } else {
+            theme.colors.text_primary
         };
         let model = self.model;
         Button::new(label)
             .background(background)
-            .text_color(Color::WHITE)
+            .text_color(text_color)
             .on_click(move || {
                 apply_action(model, TodoAction::SetFilter(filter));
             })
     }
 
     fn clear_completed_button(&self) -> Button {
+        let theme = self.theme_signal.get();
+        let is_dark = self.theme_mode.get() == ThemeMode::Dark;
         let model = self.model;
         Button::new("Clear Completed")
-            .background(Color::from_hex(0x475569))
-            .text_color(Color::WHITE)
+            .background(if is_dark {
+                theme.colors.input_background
+            } else {
+                Color::from_hex(0xF1F5F9)
+            })
+            .text_color(theme.colors.text_primary)
             .on_click(move || {
                 apply_action(model, TodoAction::ClearCompleted);
             })
     }
 
     fn todo_row(&self, todo: TodoItem) -> Container {
+        let theme = self.theme_signal.get();
+        let is_dark = self.theme_mode.get() == ThemeMode::Dark;
         let text_color = if todo.done {
-            Color::from_hex(0x64748B)
+            theme.colors.text_muted
         } else {
-            Color::from_hex(0xE2E8F0)
+            theme.colors.text_primary
         };
         let row_bg = if todo.done {
-            Color::from_hex(0x0F172A)
+            if is_dark {
+                Color::from_hex(0x0B1220)
+            } else {
+                Color::from_hex(0xE2E8F0)
+            }
         } else {
-            Color::from_hex(0x1E293B)
+            if is_dark {
+                theme.colors.input_background
+            } else {
+                Color::from_hex(0xF1F5F9)
+            }
         };
 
         let id = todo.id;
@@ -368,7 +481,11 @@ impl TodoApp {
             )
             .child(
                 Button::new("Delete")
-                    .background(Color::from_hex(0x7F1D1D))
+                    .background(if is_dark {
+                        Color::from_hex(0x7F1D1D)
+                    } else {
+                        Color::from_hex(0xDC2626)
+                    })
                     .text_color(Color::WHITE)
                     .on_click(move || {
                         apply_action(model_for_delete, TodoAction::Delete(id));
@@ -439,7 +556,10 @@ mod tests {
     fn todo_app_signal_actions_update_state() {
         let runtime = sparsh::signals::RuntimeHandle::new();
         runtime.run_with_current(|| {
-            let app = TodoApp::new();
+            let app = TodoApp::new(
+                Signal::new(todo_theme(ThemeMode::Light)),
+                Signal::new(ThemeMode::Light),
+            );
             apply_action(app.model, TodoAction::SetDraft("Alpha".to_owned()));
             apply_action(app.model, TodoAction::AddDraft);
 

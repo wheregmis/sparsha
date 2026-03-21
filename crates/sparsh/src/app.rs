@@ -1,7 +1,13 @@
 //! Application runner and main event loop.
 
+use crate::router::Router;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::router::RouterHost;
 use sparsh_core::Color;
-use sparsh_widgets::Widget;
+use sparsh_signals::{ReadSignal, Signal};
+use sparsh_widgets::Theme;
+#[cfg(not(target_arch = "wasm32"))]
+use sparsh_widgets::{set_current_theme, Widget};
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::tasks::{TaskRuntime, TaskStatus};
@@ -41,8 +47,6 @@ pub struct AppConfig {
     pub height: u32,
     /// Background color.
     pub background: Color,
-    /// Enable VSync.
-    pub vsync: bool,
 }
 
 impl Default for AppConfig {
@@ -52,14 +56,62 @@ impl Default for AppConfig {
             width: 800,
             height: 600,
             background: Color::from_hex(0xF3F4F6),
-            vsync: true,
         }
+    }
+}
+
+#[derive(Clone)]
+pub(crate) enum ThemeSource {
+    Static(Theme),
+    Dynamic(ReadSignal<Theme>),
+}
+
+impl ThemeSource {
+    pub(crate) fn resolve(&self) -> Theme {
+        match self {
+            Self::Static(theme) => theme.clone(),
+            Self::Dynamic(theme) => theme.get(),
+        }
+    }
+}
+
+pub enum ThemeInput {
+    Static(Theme),
+    Dynamic(ReadSignal<Theme>),
+}
+
+impl ThemeInput {
+    fn into_source(self) -> ThemeSource {
+        match self {
+            Self::Static(theme) => ThemeSource::Static(theme),
+            Self::Dynamic(theme) => ThemeSource::Dynamic(theme),
+        }
+    }
+}
+
+impl From<Theme> for ThemeInput {
+    fn from(value: Theme) -> Self {
+        Self::Static(value)
+    }
+}
+
+impl From<Signal<Theme>> for ThemeInput {
+    fn from(value: Signal<Theme>) -> Self {
+        Self::Dynamic(value.read_only())
+    }
+}
+
+impl From<ReadSignal<Theme>> for ThemeInput {
+    fn from(value: ReadSignal<Theme>) -> Self {
+        Self::Dynamic(value)
     }
 }
 
 /// The main application struct.
 pub struct App {
     config: AppConfig,
+    theme: ThemeSource,
+    router: Router,
 }
 
 impl App {
@@ -67,50 +119,60 @@ impl App {
     pub fn new() -> Self {
         Self {
             config: AppConfig::default(),
+            theme: ThemeSource::Static(Theme::default()),
+            router: Router::new()
+                .route("/", || Box::new(sparsh_widgets::Container::new().fill()))
+                .fallback("/"),
         }
     }
 
     /// Set the window title.
-    pub fn with_title(mut self, title: impl Into<String>) -> Self {
+    pub fn title(mut self, title: impl Into<String>) -> Self {
         self.config.title = title.into();
         self
     }
 
     /// Set the initial window size.
-    pub fn with_size(mut self, width: u32, height: u32) -> Self {
+    pub fn size(mut self, width: u32, height: u32) -> Self {
         self.config.width = width;
         self.config.height = height;
         self
     }
 
     /// Set the background color.
-    pub fn with_background(mut self, color: Color) -> Self {
+    pub fn background(mut self, color: Color) -> Self {
         self.config.background = color;
         self
     }
 
-    /// Run the application with the given root widget.
+    /// Set application theme source.
+    pub fn theme<T: Into<ThemeInput>>(mut self, theme: T) -> Self {
+        self.theme = theme.into().into_source();
+        self
+    }
+
+    /// Set the app router.
+    pub fn router(mut self, router: Router) -> Self {
+        self.router = router;
+        self
+    }
+
+    /// Run the application.
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn run<F>(self, build_ui: F) -> !
-    where
-        F: FnOnce() -> Box<dyn Widget> + 'static,
-    {
+    pub fn run(self) -> ! {
         let event_loop = winit::event_loop::EventLoop::new().unwrap();
-        let runner = AppRunner::new(self.config, build_ui);
-        let runner_leaked: &'static mut AppRunner<F> = Box::leak(Box::new(runner));
+        let runner = AppRunner::new(self.config, self.theme, self.router);
+        let runner_leaked: &'static mut AppRunner = Box::leak(Box::new(runner));
         event_loop.run_app(runner_leaked).unwrap();
         std::process::exit(0);
     }
 
-    /// Run the application with the given root widget.
+    /// Run the application.
     ///
     /// On web targets this returns after registering the app with the browser event loop.
     #[cfg(target_arch = "wasm32")]
-    pub fn run<F>(self, build_ui: F)
-    where
-        F: FnOnce() -> Box<dyn Widget> + 'static,
-    {
-        crate::web_app::run_dom_app(self.config, build_ui);
+    pub fn run(self) {
+        crate::web_app::run_dom_app(self.config, self.theme, self.router);
     }
 }
 
@@ -122,9 +184,10 @@ impl Default for App {
 
 /// Internal application runner that handles the event loop.
 #[cfg(not(target_arch = "wasm32"))]
-struct AppRunner<F: FnOnce() -> Box<dyn Widget>> {
+struct AppRunner {
     config: AppConfig,
-    build_ui: Option<F>,
+    theme: ThemeSource,
+    router: Router,
     state: Option<AppState>,
 }
 
@@ -141,6 +204,7 @@ struct AppState {
     focus_manager: FocusManager,
     signal_runtime: RuntimeHandle,
     task_runtime: TaskRuntime,
+    theme: ThemeSource,
     root_widget: Box<dyn Widget>,
     start_time: Instant,
     mouse_pos: glam::Vec2,
@@ -150,11 +214,12 @@ struct AppState {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-impl<F: FnOnce() -> Box<dyn Widget>> AppRunner<F> {
-    fn new(config: AppConfig, build_ui: F) -> Self {
+impl AppRunner {
+    fn new(config: AppConfig, theme: ThemeSource, router: Router) -> Self {
         Self {
             config,
-            build_ui: Some(build_ui),
+            theme,
+            router,
             state: None,
         }
     }
@@ -167,6 +232,8 @@ impl<F: FnOnce() -> Box<dyn Widget>> AppRunner<F> {
         state.layout_tree = LayoutTree::new();
 
         runtime.with_tracking(SubscriberKind::Rebuild, || {
+            set_current_theme(state.theme.resolve());
+
             fn rebuild_widget(widget: &mut dyn Widget, build_ctx: &mut BuildContext) {
                 widget.rebuild(build_ctx);
                 for child in widget.children_mut() {
@@ -232,6 +299,7 @@ impl<F: FnOnce() -> Box<dyn Widget>> AppRunner<F> {
         }
 
         let root_id = runtime.with_tracking(SubscriberKind::Layout, || {
+            set_current_theme(state.theme.resolve());
             add_to_layout(
                 state.root_widget.as_mut(),
                 &mut state.layout_tree,
@@ -343,6 +411,7 @@ impl<F: FnOnce() -> Box<dyn Widget>> AppRunner<F> {
         }
 
         runtime.with_tracking(SubscriberKind::Paint, || {
+            set_current_theme(state.theme.resolve());
             paint_widget(
                 state.root_widget.as_ref(),
                 &state.layout_tree,
@@ -454,7 +523,7 @@ impl<F: FnOnce() -> Box<dyn Widget>> AppRunner<F> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-impl<F: FnOnce() -> Box<dyn Widget>> winit::application::ApplicationHandler for AppRunner<F> {
+impl winit::application::ApplicationHandler for AppRunner {
     fn can_create_surfaces(&mut self, event_loop: &dyn winit::event_loop::ActiveEventLoop) {
         let window_attributes = winit::window::WindowAttributes::default()
             .with_title(&self.config.title)
@@ -462,15 +531,6 @@ impl<F: FnOnce() -> Box<dyn Widget>> winit::application::ApplicationHandler for 
                 self.config.width,
                 self.config.height,
             ));
-
-        #[cfg(target_arch = "wasm32")]
-        {
-            use winit::platform::web::WindowAttributesWeb;
-            // Ensure the web canvas is attached to the document body automatically.
-            window_attributes = window_attributes.with_platform_attributes(Box::new(
-                WindowAttributesWeb::default().with_append(true),
-            ));
-        }
 
         let window = event_loop
             .create_window(window_attributes)
@@ -490,7 +550,7 @@ impl<F: FnOnce() -> Box<dyn Widget>> winit::application::ApplicationHandler for 
             let draw_list = DrawList::new();
             let layout_tree = LayoutTree::new();
             let focus_manager = FocusManager::new();
-            let signal_runtime = RuntimeHandle::new();
+            let signal_runtime = RuntimeHandle::current_or_default();
             let task_runtime = TaskRuntime::new();
             task_runtime.set_current();
             let window_for_scheduler = window;
@@ -498,9 +558,10 @@ impl<F: FnOnce() -> Box<dyn Widget>> winit::application::ApplicationHandler for 
                 window_for_scheduler.request_redraw();
             });
 
-            // Build the UI
-            let build_ui = self.build_ui.take().expect("build_ui already called");
-            let root_widget = signal_runtime.run_with_current(build_ui);
+            self.router.initialize(None);
+            let router = self.router.clone();
+            let root_widget = signal_runtime
+                .run_with_current(|| Box::new(RouterHost::new(router.clone())) as Box<dyn Widget>);
 
             let scale_factor = window.scale_factor() as f32;
 
@@ -516,6 +577,7 @@ impl<F: FnOnce() -> Box<dyn Widget>> winit::application::ApplicationHandler for 
                 focus_manager,
                 signal_runtime,
                 task_runtime,
+                theme: self.theme.clone(),
                 root_widget,
                 start_time: Instant::now(),
                 mouse_pos: glam::Vec2::ZERO,
@@ -530,59 +592,6 @@ impl<F: FnOnce() -> Box<dyn Widget>> winit::application::ApplicationHandler for 
             if let Some(state) = self.state.as_ref() {
                 state.window.request_redraw();
             }
-        }
-
-        #[cfg(target_arch = "wasm32")]
-        {
-            let build_ui = self.build_ui.take().expect("build_ui already called");
-            let root_widget = build_ui();
-            let scale_factor = window.scale_factor() as f32;
-            let pending = Rc::new(RefCell::new(None));
-            let pending_for_task = Rc::clone(&pending);
-
-            wasm_bindgen_futures::spawn_local(async move {
-                match init_wgpu(window).await {
-                    Ok((device, queue, surface_state)) => {
-                        let renderer = Renderer::new(&device, surface_state.config.format);
-                        let text_system = TextSystem::new(&device);
-                        let draw_list = DrawList::new();
-                        let layout_tree = LayoutTree::new();
-                        let focus_manager = FocusManager::new();
-
-                        *pending_for_task.borrow_mut() = Some(AppState {
-                            window,
-                            device,
-                            queue,
-                            surface_state,
-                            renderer,
-                            text_system,
-                            draw_list,
-                            layout_tree,
-                            focus_manager,
-                            root_widget,
-                            start_time: Instant::now(),
-                            mouse_pos: glam::Vec2::ZERO,
-                            scale_factor,
-                            needs_layout: true,
-                            needs_repaint: true,
-                        });
-
-                        window.request_redraw();
-                    }
-                    Err(err) => {
-                        log::error!("failed to initialize wgpu on web: {err}");
-                        if let Some(window) = web_sys::window() {
-                            if let Some(document) = window.document() {
-                                if let Some(body) = document.body() {
-                                    body.set_inner_html(Self::GPU_ADAPTER_ERROR_HTML);
-                                }
-                            }
-                        }
-                    }
-                }
-            });
-
-            self.pending_init = Some(pending);
         }
     }
 
@@ -804,18 +813,6 @@ impl<F: FnOnce() -> Box<dyn Widget>> winit::application::ApplicationHandler for 
     }
 
     fn about_to_wait(&mut self, _event_loop: &dyn winit::event_loop::ActiveEventLoop) {
-        #[cfg(target_arch = "wasm32")]
-        if self.state.is_none() {
-            let ready_state = self
-                .pending_init
-                .as_ref()
-                .and_then(|pending| pending.borrow_mut().take());
-            if let Some(state) = ready_state {
-                self.state = Some(state);
-                self.build_layout();
-            }
-        }
-
         if let Some(state) = self.state.as_mut() {
             let mut had_task_results = false;
             state.task_runtime.drain_completed(|result| {
@@ -848,5 +845,33 @@ impl<F: FnOnce() -> Box<dyn Widget>> winit::application::ApplicationHandler for 
                 state.window.request_redraw();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sparsh_signals::{RuntimeHandle, SubscriberKind};
+
+    #[test]
+    fn dynamic_theme_source_marks_rebuild_dirty() {
+        let runtime = RuntimeHandle::new();
+        runtime.run_with_current(|| {
+            let theme_signal = Signal::new(Theme::default());
+            let source = ThemeInput::from(theme_signal).into_source();
+
+            runtime.with_tracking(SubscriberKind::Rebuild, || {
+                let _ = source.resolve();
+            });
+
+            let mut updated = Theme::default();
+            updated.typography.body_size = 20.0;
+            theme_signal.set(updated);
+
+            let dirty = runtime.take_dirty_flags();
+            assert!(dirty.rebuild);
+            assert!(dirty.layout);
+            assert!(dirty.paint);
+        });
     }
 }

@@ -10,10 +10,12 @@ fn main() {
     env_logger::init();
 
     App::new()
-        .with_title("Kitchen Sink - Sparsh")
-        .with_size(1200, 900)
-        .with_background(Color::from_hex(0x0F172A))
-        .run(build_ui);
+        .title("Kitchen Sink - Sparsh")
+        .size(1200, 900)
+        .background(Color::from_hex(0x0F172A))
+        .theme(Theme::light())
+        .router(Router::new().route("/", build_ui).fallback("/"))
+        .run();
 }
 
 fn build_ui() -> Box<dyn Widget> {

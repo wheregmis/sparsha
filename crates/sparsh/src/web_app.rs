@@ -4,8 +4,9 @@
 
 use crate::tasks::{TaskRuntime, TaskStatus};
 use crate::{
-    app::AppConfig,
+    app::{AppConfig, ThemeSource},
     dom_renderer::DomRenderer,
+    router::{hash_to_path, path_to_hash, Navigator, Router, RouterHost},
     web_surface_manager::{HybridSurfaceManager, SurfaceFrame},
 };
 use sparsh_core::Color;
@@ -15,7 +16,8 @@ use sparsh_render::DrawList;
 use sparsh_signals::{RuntimeHandle, SubscriberKind};
 use sparsh_text::TextSystem;
 use sparsh_widgets::{
-    BuildContext, EventCommands, EventContext, LayoutContext, PaintCommands, PaintContext, Widget,
+    set_current_theme, BuildContext, EventCommands, EventContext, LayoutContext, PaintCommands,
+    PaintContext, Widget,
 };
 use std::{
     cell::{Cell, RefCell},
@@ -24,23 +26,32 @@ use std::{
 use wasm_bindgen::{closure::Closure, JsCast};
 use web_sys::{CustomEvent, KeyboardEvent as WebKeyboardEvent, MouseEvent, WheelEvent, Window};
 
-pub(crate) fn run_dom_app<F>(config: AppConfig, build_ui: F)
-where
-    F: FnOnce() -> Box<dyn Widget> + 'static,
-{
+pub(crate) fn run_dom_app(config: AppConfig, theme: ThemeSource, router: Router) {
     let window = web_sys::window().expect("window should be available");
     let document = window.document().expect("document should be available");
     let dom_renderer = DomRenderer::mount_to_body(&document).expect("failed to mount DOM renderer");
-    let surface_manager =
-        HybridSurfaceManager::new(dom_renderer.root()).expect("failed to initialize hybrid surface manager");
-    let signal_runtime = RuntimeHandle::new();
+    let surface_manager = HybridSurfaceManager::new(dom_renderer.root())
+        .expect("failed to initialize hybrid surface manager");
+    let signal_runtime = RuntimeHandle::current_or_default();
     let task_runtime = TaskRuntime::new();
     task_runtime.set_worker_script_url("sparsh-worker.js?v=2");
     task_runtime.set_current();
-    let root_widget = signal_runtime.run_with_current(build_ui);
+    let navigator = router.navigator();
+    let initial_path = window
+        .location()
+        .hash()
+        .ok()
+        .map(|hash| hash_to_path(&hash));
+    router.initialize(initial_path.as_deref());
+    let router_for_build = router.clone();
+    let root_widget = signal_runtime.run_with_current(|| {
+        Box::new(RouterHost::new(router_for_build.clone())) as Box<dyn Widget>
+    });
 
     let mut state = WebAppState {
         config,
+        theme,
+        router_navigator: navigator,
         dom_renderer,
         text_system: TextSystem::new_headless(),
         draw_list: DrawList::new(),
@@ -81,6 +92,8 @@ where
 
 struct WebAppState {
     config: AppConfig,
+    theme: ThemeSource,
+    router_navigator: Navigator,
     dom_renderer: DomRenderer,
     text_system: TextSystem,
     draw_list: DrawList,
@@ -218,11 +231,28 @@ impl WebAppState {
         }
     }
 
+    fn sync_route_hash(&self) {
+        let Some(window) = web_sys::window() else {
+            return;
+        };
+
+        let desired_hash = path_to_hash(&self.router_navigator.current_path());
+        let current_hash = window.location().hash().ok().unwrap_or_default();
+        if current_hash == desired_hash {
+            return;
+        }
+
+        let next_hash = desired_hash.trim_start_matches('#');
+        let _ = window.location().set_hash(next_hash);
+    }
+
     fn build_layout(&mut self) {
         let runtime = self.signal_runtime.clone();
         self.layout_tree = LayoutTree::new();
 
         runtime.with_tracking(SubscriberKind::Rebuild, || {
+            set_current_theme(self.theme.resolve());
+
             fn rebuild_widget(widget: &mut dyn Widget, build_ctx: &mut BuildContext) {
                 widget.rebuild(build_ctx);
                 for child in widget.children_mut() {
@@ -285,6 +315,7 @@ impl WebAppState {
         }
 
         let root_id = runtime.with_tracking(SubscriberKind::Layout, || {
+            set_current_theme(self.theme.resolve());
             add_to_layout(
                 self.root_widget.as_mut(),
                 &mut self.layout_tree,
@@ -308,6 +339,7 @@ impl WebAppState {
         let mut paint_commands = PaintCommands::default();
 
         runtime.with_tracking(SubscriberKind::Paint, || {
+            set_current_theme(self.theme.resolve());
             paint_widget_subtree(
                 self.root_widget.as_ref(),
                 &self.layout_tree,
@@ -407,6 +439,8 @@ impl WebAppState {
     }
 
     fn frame(&mut self) {
+        self.sync_route_hash();
+
         let mut had_task_results = false;
         self.task_runtime.drain_completed(|result| {
             had_task_results = true;
@@ -713,16 +747,37 @@ fn install_event_listeners(
             let should_schedule = state_ref.should_schedule_frame();
             drop(state_ref);
             if should_schedule {
-                schedule_animation_frame(
-                    &window_for_resize,
-                    &pending_animation_frame,
-                    &frame_cb,
-                );
+                schedule_animation_frame(&window_for_resize, &pending_animation_frame, &frame_cb);
             }
         }) as Box<dyn FnMut()>);
         let _ =
             window.add_event_listener_with_callback("resize", on_resize.as_ref().unchecked_ref());
         on_resize.forget();
+    }
+
+    {
+        let state = Rc::clone(state);
+        let pending_animation_frame = Rc::clone(pending_animation_frame);
+        let frame_cb = Rc::clone(frame_cb);
+        let window_for_hash = window.clone();
+        let navigator = state.borrow().router_navigator.clone();
+        let on_hash_change = Closure::wrap(Box::new(move || {
+            let hash = window_for_hash.location().hash().ok().unwrap_or_default();
+            let path = hash_to_path(&hash);
+            navigator.sync_external_path(&path);
+            let mut state_ref = state.borrow_mut();
+            state_ref.needs_layout = true;
+            let should_schedule = state_ref.should_schedule_frame();
+            drop(state_ref);
+            if should_schedule {
+                schedule_animation_frame(&window_for_hash, &pending_animation_frame, &frame_cb);
+            }
+        }) as Box<dyn FnMut()>);
+        let _ = window.add_event_listener_with_callback(
+            "hashchange",
+            on_hash_change.as_ref().unchecked_ref(),
+        );
+        on_hash_change.forget();
     }
 }
 

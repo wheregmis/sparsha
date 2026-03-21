@@ -1,6 +1,6 @@
 //! Checkbox widget.
 
-use crate::{EventContext, PaintContext, Widget};
+use crate::{current_theme, EventContext, PaintContext, Widget};
 use sparsh_core::Color;
 use sparsh_input::InputEvent;
 use sparsh_layout::WidgetId;
@@ -50,6 +50,8 @@ pub struct Checkbox {
     hovered: bool,
     pressed: bool,
     style: CheckboxStyle,
+    use_theme_defaults: bool,
+    size_override: Option<f32>,
     on_toggle: Option<Box<dyn FnMut(bool)>>,
 }
 
@@ -63,6 +65,8 @@ impl Checkbox {
             hovered: false,
             pressed: false,
             style: CheckboxStyle::default(),
+            use_theme_defaults: true,
+            size_override: None,
             on_toggle: None,
         }
     }
@@ -87,12 +91,13 @@ impl Checkbox {
     /// Set style.
     pub fn with_style(mut self, style: CheckboxStyle) -> Self {
         self.style = style;
+        self.use_theme_defaults = false;
         self
     }
 
     /// Set checkbox square size in logical pixels.
     pub fn size(mut self, size: f32) -> Self {
-        self.style.size = size.max(1.0);
+        self.size_override = Some(size.max(1.0));
         self
     }
 
@@ -113,6 +118,36 @@ impl Checkbox {
             handler(self.checked);
         }
     }
+
+    fn themed_default_style() -> CheckboxStyle {
+        let theme = current_theme();
+        CheckboxStyle {
+            size: 18.0,
+            corner_radius: theme.radii.sm,
+            border_width: 1.0,
+            background: theme.colors.surface,
+            background_hovered: theme.colors.background,
+            background_checked: theme.colors.primary,
+            background_disabled: theme.colors.disabled,
+            border_color: theme.colors.border,
+            border_color_checked: theme.colors.primary_hovered,
+            border_color_disabled: theme.colors.border,
+            mark_color: Color::WHITE,
+            focus_color: theme.colors.border_focus,
+        }
+    }
+
+    fn resolved_style(&self) -> CheckboxStyle {
+        let mut style = if self.use_theme_defaults {
+            Self::themed_default_style()
+        } else {
+            self.style.clone()
+        };
+        if let Some(size) = self.size_override {
+            style.size = size;
+        }
+        style
+    }
 }
 
 impl Default for Checkbox {
@@ -131,7 +166,8 @@ impl Widget for Checkbox {
     }
 
     fn style(&self) -> Style {
-        let size = length(self.style.size);
+        let style = self.resolved_style();
+        let size = length(style.size);
         Style {
             size: Size {
                 width: size,
@@ -146,30 +182,25 @@ impl Widget for Checkbox {
     }
 
     fn paint(&self, ctx: &mut PaintContext) {
+        let style = self.resolved_style();
         let bounds = ctx.bounds();
         let scale = ctx.scale_factor;
 
         let (background, border_color) = if self.disabled {
-            (
-                self.style.background_disabled,
-                self.style.border_color_disabled,
-            )
+            (style.background_disabled, style.border_color_disabled)
         } else if self.checked {
-            (
-                self.style.background_checked,
-                self.style.border_color_checked,
-            )
+            (style.background_checked, style.border_color_checked)
         } else if self.hovered || self.pressed {
-            (self.style.background_hovered, self.style.border_color)
+            (style.background_hovered, style.border_color)
         } else {
-            (self.style.background, self.style.border_color)
+            (style.background, style.border_color)
         };
 
         ctx.fill_bordered_rect(
             bounds,
             background,
-            self.style.corner_radius,
-            self.style.border_width,
+            style.corner_radius,
+            style.border_width,
             border_color,
         );
 
@@ -182,7 +213,7 @@ impl Widget for Checkbox {
                 (bounds.width - mark_inset * 2.0).max(1.0),
                 (bounds.height - mark_inset * 2.0).max(1.0),
             );
-            ctx.fill_rounded_rect(mark_bounds, self.style.mark_color, 2.0);
+            ctx.fill_rounded_rect(mark_bounds, style.mark_color, 2.0);
         }
 
         if ctx.has_focus() && !self.disabled {
@@ -196,9 +227,9 @@ impl Widget for Checkbox {
             ctx.fill_bordered_rect(
                 focus_bounds,
                 Color::TRANSPARENT,
-                self.style.corner_radius + 2.0,
+                style.corner_radius + 2.0,
                 2.0,
-                self.style.focus_color,
+                style.focus_color,
             );
         }
     }
@@ -253,7 +284,8 @@ impl Widget for Checkbox {
     }
 
     fn measure(&self, _ctx: &mut crate::LayoutContext) -> Option<(f32, f32)> {
-        Some((self.style.size, self.style.size))
+        let style = self.resolved_style();
+        Some((style.size, style.size))
     }
 }
 

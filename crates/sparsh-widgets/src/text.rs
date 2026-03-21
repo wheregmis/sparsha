@@ -1,6 +1,6 @@
 //! Text widget for displaying static text.
 
-use crate::{EventContext, PaintContext, Widget};
+use crate::{current_theme, EventContext, PaintContext, Widget};
 use sparsh_core::Color;
 use sparsh_input::InputEvent;
 use sparsh_layout::WidgetId;
@@ -20,8 +20,8 @@ pub enum TextAlign {
 pub struct Text {
     id: WidgetId,
     content: String,
-    color: Color,
-    font_size: f32,
+    color: Option<Color>,
+    font_size: Option<f32>,
     bold: bool,
     italic: bool,
     align: TextAlign,
@@ -33,8 +33,8 @@ impl Text {
         Self {
             id: WidgetId::default(),
             content: content.into(),
-            color: Color::from_hex(0x1F2937), // Default dark gray text
-            font_size: 16.0,
+            color: None,
+            font_size: None,
             bold: false,
             italic: false,
             align: TextAlign::Left,
@@ -43,13 +43,13 @@ impl Text {
 
     /// Set the text color.
     pub fn color(mut self, color: Color) -> Self {
-        self.color = color;
+        self.color = Some(color);
         self
     }
 
     /// Set the font size.
     pub fn size(mut self, size: f32) -> Self {
-        self.font_size = size;
+        self.font_size = Some(size);
         self
     }
 
@@ -95,15 +95,18 @@ impl Text {
 
     /// Create a small/caption-style text.
     pub fn caption(content: impl Into<String>) -> Self {
+        let theme = current_theme();
         Self::new(content)
-            .size(12.0)
-            .color(Color::from_hex(0x6B7280))
+            .size(theme.typography.small_size)
+            .color(theme.colors.text_muted)
     }
 
     fn text_style(&self) -> TextStyle {
+        let theme = current_theme();
         let mut style = TextStyle::default()
-            .with_size(self.font_size)
-            .with_color(self.color);
+            .with_family(theme.typography.font_family.clone())
+            .with_size(self.font_size.unwrap_or(theme.typography.body_size))
+            .with_color(self.color.unwrap_or(theme.colors.text_primary));
 
         if self.bold {
             style = style.bold();
@@ -163,5 +166,38 @@ impl Widget for Text {
         let style = self.text_style();
         let (w, h) = ctx.text.measure(&self.content, &style, None);
         Some((w, h))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{set_current_theme, Theme};
+
+    #[test]
+    fn text_defaults_follow_current_theme() {
+        let mut theme = Theme::default();
+        theme.typography.body_size = 19.0;
+        theme.colors.text_primary = Color::from_hex(0x334155);
+        set_current_theme(theme.clone());
+
+        let text = Text::new("Theme text");
+        let style = text.text_style();
+        assert_eq!(style.font_size, 19.0);
+        assert_eq!(style.color, theme.colors.text_primary);
+    }
+
+    #[test]
+    fn explicit_overrides_beat_theme_defaults() {
+        let mut theme = Theme::default();
+        theme.typography.body_size = 21.0;
+        set_current_theme(theme);
+
+        let text = Text::new("Override")
+            .size(14.0)
+            .color(Color::from_hex(0x22C55E));
+        let style = text.text_style();
+        assert_eq!(style.font_size, 14.0);
+        assert_eq!(style.color, Color::from_hex(0x22C55E));
     }
 }

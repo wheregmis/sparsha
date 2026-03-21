@@ -11,11 +11,16 @@
 //!     sparsh::init_web();
 //!
 //!     App::new()
-//!         .with_title("My App")
-//!         .run(|| {
-//!             Box::new(Container::new()
-//!                 .child(Button::new("Click me!")))
-//!         });
+//!         .title("My App")
+//!         .theme(Theme::light())
+//!         .router(
+//!             Router::new()
+//!                 .route("/", || {
+//!                     Box::new(Container::new().child(Button::new("Click me!")))
+//!                 })
+//!                 .fallback("/"),
+//!         )
+//!         .run();
 //! }
 //! ```
 //!
@@ -28,6 +33,7 @@
 
 pub mod accessibility;
 mod app;
+mod router;
 mod tasks;
 
 #[cfg(target_arch = "wasm32")]
@@ -41,7 +47,9 @@ mod web_surface_manager;
 #[cfg(target_arch = "wasm32")]
 mod web_text_metrics;
 
-pub use app::{App, AppConfig};
+pub use app::{App, ThemeInput};
+pub use router::{hash_to_path, path_to_hash, Navigator, Route, Router};
+pub use sparsh_widgets::{Theme, ThemeColors, ThemeRadii, ThemeSpacing, ThemeTypography};
 pub use tasks::{
     Generation, TaskHandle, TaskId, TaskKey, TaskPayload, TaskPolicy, TaskResult, TaskRuntime,
     TaskStatus,
@@ -56,7 +64,7 @@ pub mod prelude {
         Generation, TaskHandle, TaskId, TaskKey, TaskPayload, TaskPolicy, TaskResult, TaskRuntime,
         TaskStatus,
     };
-    pub use crate::{App, AppConfig};
+    pub use crate::{App, Navigator, Route, Router, ThemeInput};
     pub use sparsh_core::{Color, Rect};
     pub use sparsh_input::{InputEvent, Key, Modifiers, PointerButton};
     pub use sparsh_layout::taffy;
@@ -64,7 +72,7 @@ pub mod prelude {
     pub use sparsh_widgets::{
         BuildContext, Button, ButtonStyle, Checkbox, CheckboxStyle, Container, DrawSurface,
         EventCommands, List, ListDirection, Scroll, ScrollDirection, Text, TextAlign, TextInput,
-        Widget,
+        Theme, ThemeColors, ThemeRadii, ThemeSpacing, ThemeTypography, Widget,
     };
 }
 

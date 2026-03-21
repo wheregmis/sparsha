@@ -542,7 +542,12 @@ impl TextSystem {
     }
 }
 
-fn cache_insert<V: Clone>(cache: &mut HashMap<TextCacheKey, V>, key: TextCacheKey, value: V, max: usize) {
+fn cache_insert<V: Clone>(
+    cache: &mut HashMap<TextCacheKey, V>,
+    key: TextCacheKey,
+    value: V,
+    max: usize,
+) {
     if cache.len() >= max {
         cache.clear();
     }

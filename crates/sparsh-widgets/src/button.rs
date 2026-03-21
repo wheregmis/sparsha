@@ -1,6 +1,6 @@
 //! Button widget.
 
-use crate::{EventContext, PaintContext, Widget};
+use crate::{current_theme, EventContext, PaintContext, Widget};
 use sparsh_core::Color;
 use sparsh_input::InputEvent;
 use sparsh_layout::WidgetId;
@@ -63,7 +63,10 @@ impl Default for ButtonStyle {
 pub struct Button {
     id: WidgetId,
     label: String,
-    style: ButtonStyle,
+    style_override: Option<ButtonStyle>,
+    background_override: Option<Color>,
+    text_color_override: Option<Color>,
+    corner_radius_override: Option<f32>,
     state: ButtonState,
     on_click: Option<Box<dyn FnMut()>>,
 }
@@ -71,26 +74,13 @@ pub struct Button {
 impl Button {
     /// Create a new button with the given label.
     pub fn new(label: impl Into<String>) -> Self {
-        let label = label.into();
-        let style = ButtonStyle::default();
-
-        // Estimate minimum size based on label and style
-        // Rough estimate: ~8px per character for 14px font, plus padding
-        let char_width = style.font_size * 0.6;
-        let estimated_text_width = label.len() as f32 * char_width;
-        let min_width = estimated_text_width + style.padding_h * 2.0;
-
-        // Height: font size * line height (~1.4) + vertical padding
-        let min_height = style.font_size * 1.4 + style.padding_v * 2.0;
-
         Self {
             id: WidgetId::default(),
-            label,
-            style: ButtonStyle {
-                min_width,
-                min_height,
-                ..style
-            },
+            label: label.into(),
+            style_override: None,
+            background_override: None,
+            text_color_override: None,
+            corner_radius_override: None,
             state: ButtonState::Normal,
             on_click: None,
         }
@@ -104,25 +94,25 @@ impl Button {
 
     /// Set the button style.
     pub fn with_style(mut self, style: ButtonStyle) -> Self {
-        self.style = style;
+        self.style_override = Some(style);
         self
     }
 
     /// Set the background color.
     pub fn background(mut self, color: Color) -> Self {
-        self.style.background = color;
+        self.background_override = Some(color);
         self
     }
 
     /// Set the text color.
     pub fn text_color(mut self, color: Color) -> Self {
-        self.style.text_color = color;
+        self.text_color_override = Some(color);
         self
     }
 
     /// Set corner radius.
     pub fn corner_radius(mut self, radius: f32) -> Self {
-        self.style.corner_radius = radius;
+        self.corner_radius_override = Some(radius);
         self
     }
 
@@ -139,19 +129,67 @@ impl Button {
         self.state
     }
 
-    fn current_background(&self) -> Color {
-        match self.state {
-            ButtonState::Normal => self.style.background,
-            ButtonState::Hovered => self.style.background_hovered,
-            ButtonState::Pressed => self.style.background_pressed,
-            ButtonState::Disabled => self.style.background_disabled,
+    fn themed_default_style() -> ButtonStyle {
+        let theme = current_theme();
+        ButtonStyle {
+            background: theme.colors.primary,
+            background_hovered: theme.colors.primary_hovered,
+            background_pressed: theme.colors.primary_pressed,
+            background_disabled: theme.colors.disabled,
+            text_color: Color::WHITE,
+            text_color_disabled: theme.colors.text_muted,
+            border_color: Color::TRANSPARENT,
+            border_width: 0.0,
+            corner_radius: theme.radii.md,
+            padding_h: theme.spacing.lg,
+            padding_v: theme.spacing.sm,
+            font_size: theme.typography.button_size,
+            min_width: 0.0,
+            min_height: 0.0,
         }
     }
 
-    fn current_text_color(&self) -> Color {
+    fn resolved_style(&self) -> ButtonStyle {
+        let mut style = self
+            .style_override
+            .clone()
+            .unwrap_or_else(Self::themed_default_style);
+
+        if let Some(background) = self.background_override {
+            style.background = background;
+        }
+        if let Some(text_color) = self.text_color_override {
+            style.text_color = text_color;
+        }
+        if let Some(corner_radius) = self.corner_radius_override {
+            style.corner_radius = corner_radius;
+        }
+
+        if style.min_width <= 0.0 {
+            let char_width = style.font_size * 0.6;
+            let estimated_text_width = self.label.len() as f32 * char_width;
+            style.min_width = estimated_text_width + style.padding_h * 2.0;
+        }
+        if style.min_height <= 0.0 {
+            style.min_height = style.font_size * 1.4 + style.padding_v * 2.0;
+        }
+
+        style
+    }
+
+    fn current_background(&self, style: &ButtonStyle) -> Color {
         match self.state {
-            ButtonState::Disabled => self.style.text_color_disabled,
-            _ => self.style.text_color,
+            ButtonState::Normal => style.background,
+            ButtonState::Hovered => style.background_hovered,
+            ButtonState::Pressed => style.background_pressed,
+            ButtonState::Disabled => style.background_disabled,
+        }
+    }
+
+    fn current_text_color(&self, style: &ButtonStyle) -> Color {
+        match self.state {
+            ButtonState::Disabled => style.text_color_disabled,
+            _ => style.text_color,
         }
     }
 }
@@ -166,16 +204,17 @@ impl Widget for Button {
     }
 
     fn style(&self) -> Style {
+        let style = self.resolved_style();
         Style {
             min_size: Size {
-                width: length(self.style.min_width),
-                height: length(self.style.min_height),
+                width: length(style.min_width),
+                height: length(style.min_height),
             },
             padding: Rect {
-                left: length(self.style.padding_h),
-                right: length(self.style.padding_h),
-                top: length(self.style.padding_v),
-                bottom: length(self.style.padding_v),
+                left: length(style.padding_h),
+                right: length(style.padding_h),
+                top: length(style.padding_v),
+                bottom: length(style.padding_v),
             },
             align_items: Some(AlignItems::Center),
             justify_content: Some(JustifyContent::Center),
@@ -184,22 +223,23 @@ impl Widget for Button {
     }
 
     fn paint(&self, ctx: &mut PaintContext) {
+        let style = self.resolved_style();
         let bounds = ctx.bounds();
-        let bg = self.current_background();
-        let text_color = self.current_text_color();
+        let bg = self.current_background(&style);
+        let text_color = self.current_text_color(&style);
         let scale = ctx.scale_factor;
 
         // Draw button background
-        if self.style.border_width > 0.0 {
+        if style.border_width > 0.0 {
             ctx.fill_bordered_rect(
                 bounds,
                 bg,
-                self.style.corner_radius,
-                self.style.border_width,
-                self.style.border_color,
+                style.corner_radius,
+                style.border_width,
+                style.border_color,
             );
         } else {
-            ctx.fill_rounded_rect(bounds, bg, self.style.corner_radius);
+            ctx.fill_rounded_rect(bounds, bg, style.corner_radius);
         }
 
         // Focus ring (scale offset for HiDPI)
@@ -214,15 +254,16 @@ impl Widget for Button {
             ctx.fill_bordered_rect(
                 focus_bounds,
                 Color::TRANSPARENT,
-                self.style.corner_radius + 2.0,
+                style.corner_radius + 2.0,
                 2.0,
-                Color::from_hex(0x60A5FA),
+                current_theme().colors.border_focus,
             );
         }
 
         // Draw the button label text, centered
         let text_style = TextStyle::default()
-            .with_size(self.style.font_size)
+            .with_family(current_theme().typography.font_family)
+            .with_size(style.font_size)
             .with_color(text_color);
         ctx.draw_text_centered(&self.label, &text_style, bounds);
     }
@@ -288,12 +329,12 @@ impl Widget for Button {
     }
 
     fn measure(&self, ctx: &mut crate::LayoutContext) -> Option<(f32, f32)> {
-        let style = TextStyle::default().with_size(self.style.font_size);
+        let resolved = self.resolved_style();
+        let style = TextStyle::default()
+            .with_family(current_theme().typography.font_family)
+            .with_size(resolved.font_size);
         let (w, h) = ctx.text.measure(&self.label, &style, None);
-        Some((
-            w + self.style.padding_h * 2.0,
-            h + self.style.padding_v * 2.0,
-        ))
+        Some((w + resolved.padding_h * 2.0, h + resolved.padding_v * 2.0))
     }
 }
 
@@ -306,6 +347,7 @@ mod tests {
     use crate::test_helpers::{
         layout_bounds, mock_event_context, pointer_down_at, pointer_move_at, pointer_up_at,
     };
+    use crate::{set_current_theme, Theme};
     use sparsh_input::{FocusManager, InputEvent, Key, KeyboardEvent, NamedKey};
     use sparsh_layout::LayoutTree;
 
@@ -416,5 +458,29 @@ mod tests {
         button.event(&mut ctx, &event);
         assert!(clicked.load(Ordering::SeqCst));
         assert!(ctx.commands.stop_propagation);
+    }
+
+    #[test]
+    fn button_defaults_follow_theme() {
+        let mut theme = Theme::default();
+        theme.colors.primary = Color::from_hex(0x10B981);
+        theme.typography.button_size = 18.0;
+        set_current_theme(theme.clone());
+
+        let button = Button::new("Theme");
+        let style = button.resolved_style();
+        assert_eq!(style.background, theme.colors.primary);
+        assert_eq!(style.font_size, 18.0);
+    }
+
+    #[test]
+    fn button_explicit_background_wins_over_theme() {
+        let mut theme = Theme::default();
+        theme.colors.primary = Color::from_hex(0x3B82F6);
+        set_current_theme(theme);
+
+        let button = Button::new("Override").background(Color::from_hex(0xEF4444));
+        let style = button.resolved_style();
+        assert_eq!(style.background, Color::from_hex(0xEF4444));
     }
 }

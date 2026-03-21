@@ -26,20 +26,26 @@ fn main() {
     #[cfg(target_arch = "wasm32")]
     sparsh::init_web();
 
-    App::new()
-        .with_title("Hello Sparsh")
-        .with_size(960, 640)
-        .run(|| {
-            Box::new(
-                Container::new()
-                    .fill()
-                    .center()
-                    .gap(16.0)
-                    .child(Text::new("Build UI with a GPU-first stack."))
-                    .child(Button::new("Click me"))
-                    .child(TextInput::new().placeholder("Type here...")),
-            )
-        });
+App::new()
+    .title("Hello Sparsh")
+    .size(960, 640)
+    .theme(Theme::light())
+    .router(
+        Router::new()
+            .route("/", || {
+                Box::new(
+                    Container::new()
+                        .fill()
+                        .center()
+                        .gap(16.0)
+                        .child(Text::new("Build UI with a GPU-first stack."))
+                        .child(Button::new("Click me"))
+                        .child(TextInput::new().placeholder("Type here...")),
+                )
+            })
+            .fallback("/"),
+    )
+    .run();
 }
 ```
 

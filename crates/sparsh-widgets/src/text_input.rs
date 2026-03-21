@@ -1,6 +1,6 @@
 //! Text input widget.
 
-use crate::{EventContext, PaintContext, Widget};
+use crate::{current_theme, EventContext, PaintContext, Widget};
 use sparsh_core::Color;
 use sparsh_input::{shortcuts, InputEvent, Key};
 use sparsh_layout::WidgetId;
@@ -65,6 +65,7 @@ pub struct TextInput {
     on_change: Option<TextInputCallback>,
     on_submit: Option<TextInputCallback>,
     fill_width: bool,
+    use_theme_defaults: bool,
     prefix_widths: RefCell<Vec<(usize, f32)>>,
 }
 
@@ -81,6 +82,7 @@ impl TextInput {
             on_change: None,
             on_submit: None,
             fill_width: false,
+            use_theme_defaults: true,
             prefix_widths: RefCell::new(vec![(0, 0.0)]),
         }
     }
@@ -113,6 +115,7 @@ impl TextInput {
     /// Set the style.
     pub fn with_style(mut self, style: TextInputStyle) -> Self {
         self.style = style;
+        self.use_theme_defaults = false;
         self
     }
 
@@ -320,6 +323,33 @@ impl TextInput {
         }
         ctx.measure_text(text, style).0
     }
+
+    fn themed_default_style() -> TextInputStyle {
+        let theme = current_theme();
+        TextInputStyle {
+            background: theme.colors.input_background,
+            background_focused: theme.colors.surface,
+            text_color: theme.colors.text_primary,
+            placeholder_color: theme.colors.input_placeholder,
+            border_color: theme.colors.border,
+            border_color_focused: theme.colors.primary,
+            border_width: 1.0,
+            corner_radius: theme.radii.md,
+            padding_h: theme.spacing.md,
+            padding_v: theme.spacing.sm,
+            font_size: theme.typography.body_size,
+            min_width: 180.0,
+            min_height: 36.0,
+        }
+    }
+
+    fn resolved_style(&self) -> TextInputStyle {
+        if self.use_theme_defaults {
+            Self::themed_default_style()
+        } else {
+            self.style.clone()
+        }
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -374,6 +404,7 @@ impl Widget for TextInput {
     }
 
     fn style(&self) -> Style {
+        let style = self.resolved_style();
         Style {
             size: Size {
                 width: if self.fill_width {
@@ -384,44 +415,39 @@ impl Widget for TextInput {
                 height: auto(),
             },
             padding: Rect {
-                left: length(self.style.padding_h),
-                right: length(self.style.padding_h),
-                top: length(self.style.padding_v),
-                bottom: length(self.style.padding_v),
+                left: length(style.padding_h),
+                right: length(style.padding_h),
+                top: length(style.padding_v),
+                bottom: length(style.padding_v),
             },
             min_size: Size {
-                width: length(self.style.min_width),
-                height: length(self.style.min_height),
+                width: length(style.min_width),
+                height: length(style.min_height),
             },
             ..Default::default()
         }
     }
 
     fn paint(&self, ctx: &mut PaintContext) {
+        let style = self.resolved_style();
         let bounds = ctx.bounds();
         let focused = ctx.has_focus();
         let scale = ctx.scale_factor;
 
         let bg = if focused {
-            self.style.background_focused
+            style.background_focused
         } else {
-            self.style.background
+            style.background
         };
 
         let border = if focused {
-            self.style.border_color_focused
+            style.border_color_focused
         } else {
-            self.style.border_color
+            style.border_color
         };
 
         // Draw background
-        ctx.fill_bordered_rect(
-            bounds,
-            bg,
-            self.style.corner_radius,
-            self.style.border_width,
-            border,
-        );
+        ctx.fill_bordered_rect(bounds, bg, style.corner_radius, style.border_width, border);
 
         // Focus ring (scale the offset values)
         if focused {
@@ -435,25 +461,27 @@ impl Widget for TextInput {
             ctx.fill_bordered_rect(
                 focus_bounds,
                 Color::TRANSPARENT,
-                self.style.corner_radius + 2.0,
+                style.corner_radius + 2.0,
                 2.0,
-                Color::from_hex(0x60A5FA).with_alpha(0.5),
+                current_theme().colors.border_focus.with_alpha(0.5),
             );
         }
 
         // Calculate text area (inside padding) - scale padding for physical pixels
-        let padding_h = self.style.padding_h * scale;
+        let padding_h = style.padding_h * scale;
         let text_x = bounds.x + padding_h;
         let text_width = bounds.width - padding_h * 2.0;
 
         // Create text style (font size is in logical pixels, will be scaled by draw_text)
         let text_style = TextStyle::default()
-            .with_size(self.style.font_size)
-            .with_color(self.style.text_color);
+            .with_family(current_theme().typography.font_family.clone())
+            .with_size(style.font_size)
+            .with_color(style.text_color);
 
         let placeholder_style = TextStyle::default()
-            .with_size(self.style.font_size)
-            .with_color(self.style.placeholder_color);
+            .with_family(current_theme().typography.font_family)
+            .with_size(style.font_size)
+            .with_color(style.placeholder_color);
 
         self.update_prefix_width_cache_with_paint_ctx(ctx, &text_style);
 
@@ -516,7 +544,7 @@ impl Widget for TextInput {
                 let cursor_width = 2.0 * scale;
                 let cursor_rect =
                     sparsh_core::Rect::new(cursor_x, text_y, cursor_width, cursor_height);
-                ctx.fill_rect(cursor_rect, self.style.text_color);
+                ctx.fill_rect(cursor_rect, style.text_color);
             }
         }
     }
@@ -525,9 +553,10 @@ impl Widget for TextInput {
         match event {
             InputEvent::PointerDown { pos, .. } => {
                 if ctx.contains(*pos) {
+                    let style = self.resolved_style();
                     ctx.request_focus();
                     let local = ctx.to_local(*pos);
-                    let click_x = (local.x - self.style.padding_h).max(0.0);
+                    let click_x = (local.x - style.padding_h).max(0.0);
                     self.cursor_pos = self.cursor_index_for_x(click_x);
                     self.selection_start = None;
                     ctx.stop_propagation();
@@ -637,7 +666,10 @@ impl Widget for TextInput {
     }
 
     fn measure(&self, ctx: &mut crate::LayoutContext) -> Option<(f32, f32)> {
-        let text_style = TextStyle::default().with_size(self.style.font_size);
+        let style = self.resolved_style();
+        let text_style = TextStyle::default()
+            .with_family(current_theme().typography.font_family)
+            .with_size(style.font_size);
         self.update_prefix_width_cache_with_layout_ctx(ctx, &text_style);
         let sample = if self.value.is_empty() {
             if self.placeholder.is_empty() {
@@ -650,10 +682,10 @@ impl Widget for TextInput {
         };
         let (text_width, text_height) = ctx.measure_text(sample, &text_style);
 
-        let width = (text_width + self.style.padding_h * 2.0 + self.style.border_width * 2.0)
-            .max(self.style.min_width);
-        let height = (text_height + self.style.padding_v * 2.0 + self.style.border_width * 2.0)
-            .max(self.style.min_height);
+        let width =
+            (text_width + style.padding_h * 2.0 + style.border_width * 2.0).max(style.min_width);
+        let height =
+            (text_height + style.padding_v * 2.0 + style.border_width * 2.0).max(style.min_height);
         Some((width, height))
     }
 

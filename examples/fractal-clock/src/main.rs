@@ -18,10 +18,16 @@ fn main() {
     env_logger::init();
 
     App::new()
-        .with_title("Fractal Clock - Sparsh")
-        .with_size(1440, 960)
-        .with_background(Color::from_hex(0x04060A))
-        .run(|| Box::new(FractalClock::new()));
+        .title("Fractal Clock - Sparsh")
+        .size(1440, 960)
+        .background(Color::from_hex(0x04060A))
+        .theme(Theme::light())
+        .router(
+            Router::new()
+                .route("/", || Box::new(FractalClock::new()))
+                .fallback("/"),
+        )
+        .run();
 }
 
 struct FractalClock {
@@ -104,7 +110,12 @@ impl FractalClock {
             1.0,
             palette.second.with_alpha(0.08),
         );
-        ctx.draw_text("FRACTAL CLOCK", &title, info_panel.x + 16.0, info_panel.y + 16.0);
+        ctx.draw_text(
+            "FRACTAL CLOCK",
+            &title,
+            info_panel.x + 16.0,
+            info_panel.y + 16.0,
+        );
         ctx.draw_text(
             palette.name,
             &body.clone().with_color(palette.minute),
@@ -124,7 +135,12 @@ impl FractalClock {
             info_panel.y + 84.0,
         );
 
-        let time_panel = Rect::new(bounds.x + 26.0, bounds.y + bounds.height - 110.0, 320.0, 72.0);
+        let time_panel = Rect::new(
+            bounds.x + 26.0,
+            bounds.y + bounds.height - 110.0,
+            320.0,
+            72.0,
+        );
         ctx.fill_bordered_rect(
             time_panel,
             palette.veil.with_alpha(0.66),
@@ -184,10 +200,9 @@ impl FractalClockScene {
         let minutes = ((total / 60.0).floor() as u32) % 60;
         let secs = total % 60.0;
 
-        let hour_angle =
-            (TAU * ((((hours_24 % 12) as f32) + minutes as f32 / 60.0 + secs as f32 / 3_600.0)
-                / 12.0))
-                - PI * 0.5;
+        let hour_angle = (TAU
+            * ((((hours_24 % 12) as f32) + minutes as f32 / 60.0 + secs as f32 / 3_600.0) / 12.0))
+            - PI * 0.5;
         let minute_angle = (TAU * ((minutes as f32 + secs as f32 / 60.0) / 60.0)) - PI * 0.5;
         let second_angle = (TAU * (secs as f32 / 60.0)) - PI * 0.5;
         let drift = seconds as f32 * 0.08;
@@ -248,7 +263,13 @@ impl FractalClockScene {
         self.draw_core(ctx, center, orbit_radius, palette, drift);
     }
 
-    fn draw_backdrop(&self, ctx: &mut DrawSurfaceContext, bounds: Rect, palette: Palette, drift: f32) {
+    fn draw_backdrop(
+        &self,
+        ctx: &mut DrawSurfaceContext,
+        bounds: Rect,
+        palette: Palette,
+        drift: f32,
+    ) {
         let w = bounds.width;
         let h = bounds.height;
         for i in 0..18 {
@@ -256,7 +277,8 @@ impl FractalClockScene {
             let phase = drift * 0.55 + band * 3.8;
             let x = bounds.x + w * (0.5 + 0.4 * (phase.sin() * 0.65 + (phase * 1.7).cos() * 0.2));
             let width = w * (0.04 + 0.028 * hash(i as f32 + 10.0));
-            let color = mix_color(palette.veil, palette.mist, band).with_alpha(0.026 + band * 0.018);
+            let color =
+                mix_color(palette.veil, palette.mist, band).with_alpha(0.026 + band * 0.018);
             ctx.fill_rect(Rect::new(x - width * 0.5, bounds.y, width, h), color);
         }
 
@@ -266,7 +288,12 @@ impl FractalClockScene {
             palette.bg.with_alpha(0.34),
         );
         ctx.fill_rect(
-            Rect::new(bounds.x, bounds.y + bounds.height - vignette, bounds.width, vignette),
+            Rect::new(
+                bounds.x,
+                bounds.y + bounds.height - vignette,
+                bounds.width,
+                vignette,
+            ),
             palette.bg.with_alpha(0.42),
         );
     }
@@ -587,7 +614,8 @@ impl Widget for FractalClock {
                 }
             }
             InputEvent::PointerDown { button, .. } if *button == PointerButton::Primary => {
-                self.palette_index.set((self.palette_index.get() + 1) % palette_count());
+                self.palette_index
+                    .set((self.palette_index.get() + 1) % palette_count());
                 ctx.request_paint();
             }
             InputEvent::Scroll { delta, .. } => {

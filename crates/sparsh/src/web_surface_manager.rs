@@ -101,7 +101,8 @@ impl HybridSurfaceManager {
             let canvas = self.ensure_canvas(index)?;
             self.update_canvas_node(index, frame)?;
 
-            let physical_width = ((frame.css_bounds.width * frame.scale_factor).round() as u32).max(1);
+            let physical_width =
+                ((frame.css_bounds.width * frame.scale_factor).round() as u32).max(1);
             let physical_height =
                 ((frame.css_bounds.height * frame.scale_factor).round() as u32).max(1);
             let state = &mut self.canvas_states[index];
@@ -304,8 +305,12 @@ impl HybridGpuState {
         slot.renderer
             .set_viewport(width as f32, height as f32, frame.scale_factor);
         slot.renderer.set_time(frame.elapsed_time);
-        slot.renderer
-            .prepare(&self.device, &self.queue, &frame.draw_list, &mut slot.text_system);
+        slot.renderer.prepare(
+            &self.device,
+            &self.queue,
+            &frame.draw_list,
+            &mut slot.text_system,
+        );
 
         let surface_texture = match slot.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame) => frame,
@@ -348,7 +353,11 @@ impl HybridGpuState {
     }
 }
 
-fn set_style(node: &HtmlCanvasElement, key: &str, value: &str) -> Result<(), wasm_bindgen::JsValue> {
+fn set_style(
+    node: &HtmlCanvasElement,
+    key: &str,
+    value: &str,
+) -> Result<(), wasm_bindgen::JsValue> {
     node.style().set_property(key, value)
 }
 

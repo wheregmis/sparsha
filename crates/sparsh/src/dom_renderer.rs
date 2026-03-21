@@ -117,7 +117,11 @@ impl DomRenderer {
                     if *border_width > 0.0 {
                         self.set_style_cached(active - 1, "border-style", "solid")?;
                         self.set_style_cached(active - 1, "border-width", px(*border_width))?;
-                        self.set_style_cached(active - 1, "border-color", color_to_css(*border_color))?;
+                        self.set_style_cached(
+                            active - 1,
+                            "border-color",
+                            color_to_css(*border_color),
+                        )?;
                     } else {
                         self.set_style_cached(active - 1, "border-width", "0px")?;
                         self.set_style_cached(active - 1, "border-style", "none")?;
@@ -199,7 +203,11 @@ impl DomRenderer {
                         "font-weight",
                         if run.style.bold { "700" } else { "400" },
                     )?;
-                    self.set_style_cached(active - 1, "line-height", run.style.line_height.to_string())?;
+                    self.set_style_cached(
+                        active - 1,
+                        "line-height",
+                        run.style.line_height.to_string(),
+                    )?;
                     self.set_style_cached(active - 1, "white-space", "pre")?;
                     self.set_style_cached(active - 1, "background-color", "transparent")?;
                     self.set_style_cached(active - 1, "border", "none")?;

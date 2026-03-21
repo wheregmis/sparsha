@@ -13,10 +13,16 @@ fn main() {
     env_logger::init();
 
     App::new()
-        .with_title("Hybrid Overlay - Sparsh")
-        .with_size(1280, 800)
-        .with_background(Color::from_hex(0x07111D))
-        .run(|| Box::new(HybridOverlayDemo::new()));
+        .title("Hybrid Overlay - Sparsh")
+        .size(1280, 800)
+        .background(Color::from_hex(0x07111D))
+        .theme(Theme::light())
+        .router(
+            Router::new()
+                .route("/", || Box::new(HybridOverlayDemo::new()))
+                .fallback("/"),
+        )
+        .run();
 }
 
 struct HybridOverlayDemo {
@@ -103,7 +109,12 @@ impl HybridOverlayDemo {
             info.y + 104.0,
         );
 
-        let badge = Rect::new(bounds.x + 28.0, bounds.y + bounds.height - 116.0, 364.0, 72.0);
+        let badge = Rect::new(
+            bounds.x + 28.0,
+            bounds.y + bounds.height - 116.0,
+            364.0,
+            72.0,
+        );
         ctx.fill_bordered_rect(badge, palette.panel, 22.0, 1.0, palette.panel_border);
         ctx.draw_text("DOM + GPU", &metric, badge.x + 20.0, badge.y + 16.0);
         ctx.draw_text(
@@ -260,7 +271,12 @@ fn draw_branch(
     }
 
     ctx.stroke_line(start, end, 2.4 + depth as f32 * 0.5, color.with_alpha(0.04));
-    ctx.stroke_line(start, end, 1.1 + depth as f32 * 0.24, color.with_alpha(0.28));
+    ctx.stroke_line(
+        start,
+        end,
+        1.1 + depth as f32 * 0.24,
+        color.with_alpha(0.28),
+    );
 
     let angle = delta.y.atan2(delta.x);
     let next_length = length * 0.68;

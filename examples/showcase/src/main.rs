@@ -697,48 +697,50 @@ fn build_controls_card(layout: ShowcaseLayout) -> Container {
     section_card(
         "Controls",
         "Primary, secondary, and disabled actions using the shipped theme tokens,\nplus a single checkbox that stays in the normal focus order.",
-        component(move |cx| {
-            let checked = cx.signal(true);
-            let is_checked = checked.get();
-            Container::new()
-                .column()
-                .gap(16.0)
-                .child(
-                    Container::new()
-                        .row()
-                        .gap(12.0)
-                        .wrap()
-                        .child(Button::new("Primary Action").on_click(|| {}))
-                        .child(
-                            Button::new("Secondary Action")
-                                .with_style(secondary_style.clone())
-                                .on_click(|| {}),
-                        )
-                        .child(Button::new("Disabled State").disabled(true)),
-                )
-                .child(
-                    Container::new()
-                        .row()
-                        .gap(12.0)
-                        .align_items(AlignItems::Center)
-                        .child(
-                            Semantics::new(
-                                Checkbox::with_checked(is_checked).on_toggle(move |next| {
-                                    checked.set(next);
-                                }),
+        component_builder()
+            .render(move |cx| {
+                let checked = cx.signal(true);
+                let is_checked = checked.get();
+                Container::new()
+                    .column()
+                    .gap(16.0)
+                    .child(
+                        Container::new()
+                            .row()
+                            .gap(12.0)
+                            .wrap()
+                            .child(Button::new("Primary Action").on_click(|| {}))
+                            .child(
+                                Button::new("Secondary Action")
+                                    .with_style(secondary_style.clone())
+                                    .on_click(|| {}),
                             )
-                            .label("Showcase interactive checkbox"),
-                        )
-                        .child(Text::new("Interactive checkbox").size(14.0)),
-                )
-                .child(
-                    Text::new(
-                        "The goal is to show the default feel quickly.\nDeeper interaction coverage still lives in the other examples.",
+                            .child(Button::new("Disabled State").disabled(true)),
                     )
-                    .size(13.0)
-                    .color(theme.colors.text_muted),
-                )
-        }),
+                    .child(
+                        Container::new()
+                            .row()
+                            .gap(12.0)
+                            .align_items(AlignItems::Center)
+                            .child(
+                                Semantics::new(
+                                    Checkbox::with_checked(is_checked).on_toggle(move |next| {
+                                        checked.set(next);
+                                    }),
+                                )
+                                .label("Showcase interactive checkbox"),
+                            )
+                            .child(Text::new("Interactive checkbox").size(14.0)),
+                    )
+                    .child(
+                        Text::new(
+                            "The goal is to show the default feel quickly.\nDeeper interaction coverage still lives in the other examples.",
+                        )
+                        .size(13.0)
+                        .color(theme.colors.text_muted),
+                    )
+            })
+            .call(),
         layout,
     )
 }
@@ -854,50 +856,52 @@ fn build_inputs_card(layout: ShowcaseLayout) -> Container {
     section_card(
         "Inputs",
         "Single-line and multiline editors should feel coherent with the same theme.\nLabels are explicit so browser smoke tests can target them directly.",
-        component(move |cx| {
-            let email = cx.signal("sparsh@example.dev".to_owned());
-            let notes = cx.signal(
-                "Static scenes make rendering bugs easier to spot.\nSmoke tests still probe the route and DOM surface."
-                    .to_owned(),
-            );
-            let email_value = email.get();
-            let notes_value = notes.get();
+        component_builder()
+            .render(move |cx| {
+                let email = cx.signal("sparsh@example.dev".to_owned());
+                let notes = cx.signal(
+                    "Static scenes make rendering bugs easier to spot.\nSmoke tests still probe the route and DOM surface."
+                        .to_owned(),
+                );
+                let email_value = email.get();
+                let notes_value = notes.get();
 
-            Container::new()
-                .column()
-                .gap(16.0)
-                .child(
-                    Semantics::new(
-                        TextInput::new()
-                            .fill_width()
-                            .value(email_value.clone())
-                            .placeholder("Email address")
-                            .on_change(move |value| {
-                                email.set(value.to_owned());
-                            }),
+                Container::new()
+                    .column()
+                    .gap(16.0)
+                    .child(
+                        Semantics::new(
+                            TextInput::new()
+                                .fill_width()
+                                .value(email_value.clone())
+                                .placeholder("Email address")
+                                .on_change(move |value| {
+                                    email.set(value.to_owned());
+                                }),
+                        )
+                        .label("Showcase single-line input"),
                     )
-                    .label("Showcase single-line input"),
-                )
-                .child(
-                    Semantics::new(
-                        TextArea::new()
-                            .fill_width()
-                            .value(notes_value.clone())
-                            .placeholder("Notes")
-                            .on_change(move |value| {
-                                notes.set(value.to_owned());
-                            }),
+                    .child(
+                        Semantics::new(
+                            TextArea::new()
+                                .fill_width()
+                                .value(notes_value.clone())
+                                .placeholder("Notes")
+                                .on_change(move |value| {
+                                    notes.set(value.to_owned());
+                                }),
+                        )
+                        .label("Showcase multiline input"),
                     )
-                    .label("Showcase multiline input"),
-                )
-                .child(
-                    Text::new(
-                        "These fields use the same interaction model as the broader examples,\njust in a smaller, more curated setting.",
+                    .child(
+                        Text::new(
+                            "These fields use the same interaction model as the broader examples,\njust in a smaller, more curated setting.",
+                        )
+                        .size(13.0)
+                        .color(theme.colors.text_muted),
                     )
-                    .size(13.0)
-                    .color(theme.colors.text_muted),
-                )
-        }),
+            })
+            .call(),
         layout,
     )
 }

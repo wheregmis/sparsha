@@ -18,7 +18,7 @@ use sparsha_core::WgpuInitError;
 use sparsha_signals::{ReadSignal, Signal};
 use sparsha_widgets::Theme;
 #[cfg(not(target_arch = "wasm32"))]
-use sparsha_widgets::{set_current_theme, Widget};
+use sparsha_widgets::{set_current_theme, set_current_viewport, ViewportInfo, Widget};
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::tasks::{TaskRuntime, TaskStatus};
@@ -424,6 +424,10 @@ struct AppState {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl AppState {
+    fn logical_viewport(&self) -> ViewportInfo {
+        native_viewport_info(self.surface_state.size, self.scale_factor)
+    }
+
     fn focused_text_editor_state(&self) -> Option<&sparsha_widgets::TextEditorState> {
         self.focused_path
             .as_ref()
@@ -636,7 +640,9 @@ impl AppRunner {
             runtime.with_tracking(SubscriberKind::Rebuild, || {
                 let resolved_theme = state.theme.resolve_theme();
                 let navigator = self.router.navigator();
+                let viewport = state.logical_viewport();
                 set_current_theme(resolved_theme.clone());
+                set_current_viewport(viewport);
 
                 fn rebuild_widget(
                     widget: &mut dyn Widget,
@@ -655,15 +661,36 @@ impl AppRunner {
                     }
                 }
 
+                fn persist_widget_state(
+                    widget: &dyn Widget,
+                    build_ctx: &mut BuildContext,
+                    path: &mut Vec<usize>,
+                ) {
+                    build_ctx.set_path(path);
+                    widget.persist_build_state(build_ctx);
+                    let child_keys: Vec<_> = (0..widget.children().len())
+                        .map(|index| widget.child_path_key(index))
+                        .collect();
+                    for (index, child) in widget.children().iter().enumerate() {
+                        path.push(child_keys[index]);
+                        persist_widget_state(child.as_ref(), build_ctx, path);
+                        path.pop();
+                    }
+                }
+
                 let mut build_ctx = BuildContext::default();
                 build_ctx.set_theme(resolved_theme);
                 build_ctx.insert_resource(navigator);
                 build_ctx.insert_resource(state.task_runtime.clone());
                 build_ctx.insert_resource(state.signal_runtime.clone());
+                build_ctx.insert_resource(viewport);
                 // SAFETY: the build pass owns `component_states` for the entire
                 // lifetime of `build_ctx` and nothing aliases it during rebuild.
                 unsafe { build_ctx.set_state_store(&mut state.component_states) };
                 let mut path = Vec::new();
+                persist_widget_state(state.root_widget.as_ref(), &mut build_ctx, &mut path);
+                state.component_states.begin_rebuild();
+                path.clear();
                 rebuild_widget(state.root_widget.as_mut(), &mut build_ctx, &mut path);
             });
             state.component_states.finish_rebuild();
@@ -671,6 +698,7 @@ impl AppRunner {
             let mut widget_registry = WidgetRuntimeRegistry::default();
             let root_id = runtime.with_tracking(SubscriberKind::Layout, || {
                 set_current_theme(state.theme.resolve_theme());
+                set_current_viewport(state.logical_viewport());
                 let mut path = Vec::new();
                 add_widget_to_layout(
                     state.root_widget.as_mut(),
@@ -798,6 +826,7 @@ impl AppRunner {
 
         runtime.with_tracking(SubscriberKind::Paint, || {
             set_current_theme(state.theme.resolve_theme());
+            set_current_viewport(state.logical_viewport());
             paint_widget(
                 state.root_widget.as_ref(),
                 &state.layout_tree,
@@ -1008,6 +1037,15 @@ fn should_sync_native_scale_factor(current: f32, actual: f32) -> bool {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+fn native_viewport_info(size: winit::dpi::PhysicalSize<u32>, scale_factor: f32) -> ViewportInfo {
+    let scale_factor = scale_factor.max(1.0);
+    ViewportInfo::new(
+        size.width as f32 / scale_factor,
+        size.height as f32 / scale_factor,
+    )
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 #[allow(deprecated)]
 fn set_native_ime_allowed(window: &winit::window::Window, allowed: bool) {
     window.set_ime_allowed(allowed);
@@ -1070,6 +1108,10 @@ impl winit::application::ApplicationHandler<NativeUserEvent> for AppRunner {
             });
 
             set_current_theme(self.theme.resolve_theme());
+            set_current_viewport(native_viewport_info(
+                surface_state.size,
+                window.scale_factor() as f32,
+            ));
             self.router.initialize(None);
             let router = self.router.clone();
             let root_widget = signal_runtime
@@ -1656,5 +1698,16 @@ mod tests {
         assert!(!should_sync_native_scale_factor(2.0, 0.0));
         assert!(!should_sync_native_scale_factor(2.0, f32::NAN));
         assert!(should_sync_native_scale_factor(2.0, 1.5));
+    }
+
+    #[test]
+    fn native_viewport_info_uses_logical_window_size() {
+        use sparsha_widgets::ViewportClass;
+        use winit::dpi::PhysicalSize;
+
+        let viewport = native_viewport_info(PhysicalSize::new(1600, 2400), 2.0);
+        assert_eq!(viewport.width, 800.0);
+        assert_eq!(viewport.height, 1200.0);
+        assert_eq!(viewport.class, ViewportClass::Tablet);
     }
 }

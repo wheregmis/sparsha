@@ -64,10 +64,11 @@ pub use app::{App, AppRunError, ThemeInput, ThemeMode, ThemeModeInput};
 pub use component::{component, Component, ComponentContext, TaskHook};
 pub use router::{hash_to_path, path_to_hash, Navigator, Route, Router, RouterTransition};
 pub use sparsha_widgets::{
-    current_theme, lerp_color, AccessibilityAction, AccessibilityInfo, AccessibilityRole,
-    AnimationEasing, ForEach, ImplicitAnimation, IntoWidget, Semantics, TextArea, TextAreaStyle,
-    TextEditorState, TextInput, TextInputStyle, Theme, ThemeColors, ThemeControls, ThemeRadii,
-    ThemeSpacing, ThemeTypography, Tween, WidgetChildMode,
+    current_theme, current_viewport, lerp_color, AccessibilityAction, AccessibilityInfo,
+    AccessibilityRole, AnimationEasing, ForEach, ImplicitAnimation, IntoWidget, Semantics,
+    TextArea, TextAreaStyle, TextEditorState, TextInput, TextInputStyle, Theme, ThemeColors,
+    ThemeControls, ThemeRadii, ThemeSpacing, ThemeTypography, Tween, ViewportClass, ViewportInfo,
+    ViewportOrientation, WidgetChildMode,
 };
 pub use tasks::{
     Generation, TaskHandle, TaskId, TaskKey, TaskPayload, TaskPolicy, TaskResult,
@@ -92,12 +93,13 @@ pub mod prelude {
     pub use sparsha_layout::taffy;
     pub use sparsha_signals::{Effect, Memo, ReadSignal, Signal, WriteSignal};
     pub use sparsha_widgets::{
-        current_theme, lerp_color, AccessibilityAction, AccessibilityInfo, AccessibilityRole,
-        AnimationEasing, BuildContext, Button, ButtonStyle, Checkbox, CheckboxStyle, Container,
-        DrawSurface, EventCommands, ForEach, ImplicitAnimation, IntoWidget, List, ListDirection,
-        Scroll, ScrollDirection, Semantics, Text, TextAlign, TextArea, TextAreaStyle,
-        TextEditorState, TextInput, TextInputStyle, Theme, ThemeColors, ThemeControls, ThemeRadii,
-        ThemeSpacing, ThemeTypography, Tween, Widget, WidgetChildMode,
+        current_theme, current_viewport, lerp_color, AccessibilityAction, AccessibilityInfo,
+        AccessibilityRole, AnimationEasing, BuildContext, Button, ButtonStyle, Checkbox,
+        CheckboxStyle, Container, DrawSurface, EventCommands, ForEach, ImplicitAnimation,
+        IntoWidget, List, ListDirection, Scroll, ScrollDirection, Semantics, Text, TextAlign,
+        TextArea, TextAreaStyle, TextEditorState, TextInput, TextInputStyle, Theme, ThemeColors,
+        ThemeControls, ThemeRadii, ThemeSpacing, ThemeTypography, Tween, ViewportClass,
+        ViewportInfo, ViewportOrientation, Widget, WidgetChildMode,
     };
 }
 

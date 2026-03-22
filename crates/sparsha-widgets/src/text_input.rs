@@ -3,8 +3,8 @@
 use crate::text_editor::{EditorCore, TextEditorState};
 use crate::{
     control_state::{focus_ring_border_width, focus_ring_bounds, focus_ring_color},
-    current_theme, AccessibilityAction, AccessibilityInfo, AccessibilityRole, EventContext,
-    PaintContext, Widget,
+    current_theme, responsive_theme_controls, responsive_typography, AccessibilityAction,
+    AccessibilityInfo, AccessibilityRole, EventContext, PaintContext, Widget,
 };
 use sparsha_core::Color;
 use sparsha_input::{Action, ActionMapper, InputEvent, Key, NamedKey, StandardAction};
@@ -63,6 +63,7 @@ impl Default for TextInputStyle {
 pub struct TextInput {
     id: WidgetId,
     editor: EditorCore,
+    declared_value: Option<String>,
     placeholder: String,
     style: TextInputStyle,
     on_change: Option<TextInputCallback>,
@@ -72,12 +73,19 @@ pub struct TextInput {
     prefix_widths: RefCell<Vec<(usize, f32)>>,
 }
 
+#[derive(Clone)]
+struct TextInputBuildState {
+    editor: EditorCore,
+    declared_value: Option<String>,
+}
+
 impl TextInput {
     /// Create a new text input.
     pub fn new() -> Self {
         Self {
             id: WidgetId::default(),
             editor: EditorCore::new(String::new()),
+            declared_value: None,
             placeholder: String::new(),
             style: TextInputStyle::default(),
             on_change: None,
@@ -90,7 +98,9 @@ impl TextInput {
 
     /// Set the initial value.
     pub fn value(mut self, value: impl Into<String>) -> Self {
-        self.editor.set_text(value.into());
+        let value = value.into();
+        self.editor.set_text(value.clone());
+        self.declared_value = Some(value);
         self
     }
 
@@ -230,6 +240,8 @@ impl TextInput {
 
     fn themed_default_style() -> TextInputStyle {
         let theme = current_theme();
+        let controls = responsive_theme_controls(&theme);
+        let typography = responsive_typography(&theme);
         TextInputStyle {
             background: theme.colors.input_background,
             background_focused: theme.colors.surface,
@@ -239,11 +251,11 @@ impl TextInput {
             border_color_focused: theme.colors.primary,
             border_width: 1.0,
             corner_radius: theme.radii.md,
-            padding_h: theme.controls.control_padding_x,
-            padding_v: theme.controls.control_padding_y,
-            font_size: theme.typography.body_size,
+            padding_h: controls.control_padding_x,
+            padding_v: controls.control_padding_y,
+            font_size: typography.body_size,
             min_width: 180.0,
-            min_height: theme.controls.control_height,
+            min_height: controls.control_height,
         }
     }
 
@@ -428,6 +440,30 @@ impl Widget for TextInput {
 
     fn set_id(&mut self, id: WidgetId) {
         self.id = id;
+    }
+
+    fn rebuild(&mut self, ctx: &mut crate::BuildContext) {
+        if let Some(state) = ctx
+            .take_boxed_state()
+            .and_then(|state| state.downcast::<TextInputBuildState>().ok())
+            .map(|state| *state)
+        {
+            if state.declared_value == self.declared_value {
+                self.editor = state.editor;
+            }
+        }
+
+        ctx.store_boxed_state(Box::new(TextInputBuildState {
+            editor: self.editor.clone(),
+            declared_value: self.declared_value.clone(),
+        }));
+    }
+
+    fn persist_build_state(&self, ctx: &mut crate::BuildContext) {
+        ctx.store_boxed_state(Box::new(TextInputBuildState {
+            editor: self.editor.clone(),
+            declared_value: self.declared_value.clone(),
+        }));
     }
 
     fn style(&self) -> Style {
@@ -713,7 +749,9 @@ mod tests {
     use crate::test_helpers::{
         layout_bounds, mock_event_context, pointer_down_at, pointer_move_at, pointer_up_at,
     };
-    use crate::{PaintCommands, PaintContext};
+    use crate::{
+        set_current_theme, set_current_viewport, PaintCommands, PaintContext, Theme, ViewportInfo,
+    };
     use sparsha_input::{FocusManager, InputEvent, KeyboardEvent, Modifiers};
     use sparsha_layout::LayoutTree;
     use sparsha_render::DrawList;
@@ -730,6 +768,10 @@ mod tests {
         let _ = input.measure(&mut ctx);
     }
 
+    fn reset_viewport() {
+        set_current_viewport(ViewportInfo::default());
+    }
+
     fn primary_modifiers() -> Modifiers {
         #[cfg(any(target_os = "macos", target_arch = "wasm32"))]
         {
@@ -744,6 +786,7 @@ mod tests {
 
     #[test]
     fn pointer_click_places_cursor_at_start_middle_end() {
+        reset_viewport();
         let mut input = TextInput::new().value("hello");
         input.set_id(Default::default());
         prepare_input_with_cache(&input);
@@ -776,6 +819,7 @@ mod tests {
 
     #[test]
     fn drag_selection_uses_pointer_capture() {
+        reset_viewport();
         let mut input = TextInput::new().value("hello world");
         input.set_id(Default::default());
         prepare_input_with_cache(&input);
@@ -810,6 +854,7 @@ mod tests {
 
     #[test]
     fn copy_cut_paste_and_undo_roundtrip() {
+        reset_viewport();
         let changes = Arc::new(Mutex::new(Vec::new()));
         let changes_for_cb = Arc::clone(&changes);
         let mut input = TextInput::new()
@@ -889,6 +934,7 @@ mod tests {
 
     #[test]
     fn text_editor_state_matches_cursor_and_selection() {
+        reset_viewport();
         let mut input = TextInput::new().value("hello");
         input.editor.select_all();
         let state = input.text_editor_state().expect("text editor state");
@@ -899,6 +945,7 @@ mod tests {
 
     #[test]
     fn pointer_hit_testing_stays_correct_after_scaled_paint() {
+        reset_viewport();
         let mut input = TextInput::new().value("hello world");
         input.set_id(Default::default());
 
@@ -931,6 +978,7 @@ mod tests {
 
     #[test]
     fn space_text_input_advances_cursor_and_updates_value() {
+        reset_viewport();
         let mut input = TextInput::new().value("hey");
         input.set_id(Default::default());
         let layout = layout_bounds(0.0, 0.0, 240.0, 36.0);
@@ -963,6 +1011,7 @@ mod tests {
 
     #[test]
     fn prefix_cache_tracks_trailing_space_width() {
+        reset_viewport();
         let input = TextInput::new().value("a ");
         prepare_input_with_cache(&input);
 
@@ -977,5 +1026,22 @@ mod tests {
             .expect("width after trailing space");
 
         assert!(width_after_space > width_after_a);
+    }
+
+    #[test]
+    fn themed_defaults_scale_down_for_mobile_viewport() {
+        let mut theme = Theme::default();
+        theme.typography.body_size = 16.0;
+        theme.controls.control_height = 38.0;
+        theme.controls.control_padding_x = 12.0;
+        set_current_theme(theme);
+        set_current_viewport(ViewportInfo::new(390.0, 844.0));
+
+        let input = TextInput::new();
+        let style = input.resolved_style();
+        let epsilon = f32::EPSILON;
+        assert!((style.font_size - 14.0).abs() <= epsilon);
+        assert!((style.min_height - 34.0).abs() <= epsilon);
+        assert!((style.padding_h - 10.0).abs() <= epsilon);
     }
 }

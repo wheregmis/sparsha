@@ -1,7 +1,7 @@
 //! Scrollable container widget.
 
 use crate::{
-    current_theme,
+    current_theme, responsive_theme_controls,
     scroll_model::{ScrollAxes, ScrollModel, Scrollbars},
     AccessibilityAction, AccessibilityInfo, AccessibilityRole, EventContext, IntoWidget,
     PaintContext, Widget,
@@ -57,6 +57,11 @@ pub struct Scroll {
     scrollbar_style_override: Option<ScrollbarStyle>,
     layout_style: Style,
     debug_overlay: bool,
+}
+
+#[derive(Clone, Copy)]
+struct ScrollBuildState {
+    model: ScrollModel,
 }
 
 impl Default for Scroll {
@@ -226,11 +231,12 @@ impl Scroll {
     fn resolved_scrollbar_style(&self) -> ScrollbarStyle {
         self.scrollbar_style_override.clone().unwrap_or_else(|| {
             let theme = current_theme();
+            let controls = responsive_theme_controls(&theme);
             ScrollbarStyle {
                 track_color: theme.colors.surface_variant,
                 thumb_color: theme.colors.border,
                 thumb_hover_color: theme.colors.primary_hovered,
-                width: theme.controls.scrollbar_thickness,
+                width: controls.scrollbar_thickness,
                 corner_radius: theme.radii.md,
             }
         })
@@ -380,6 +386,22 @@ impl Widget for Scroll {
 
     fn set_id(&mut self, id: WidgetId) {
         self.id = id;
+    }
+
+    fn rebuild(&mut self, ctx: &mut crate::BuildContext) {
+        if let Some(state) = ctx
+            .take_boxed_state()
+            .and_then(|state| state.downcast::<ScrollBuildState>().ok())
+            .map(|state| *state)
+        {
+            self.model = state.model;
+        }
+
+        ctx.store_boxed_state(Box::new(ScrollBuildState { model: self.model }));
+    }
+
+    fn persist_build_state(&self, ctx: &mut crate::BuildContext) {
+        ctx.store_boxed_state(Box::new(ScrollBuildState { model: self.model }));
     }
 
     fn style(&self) -> Style {

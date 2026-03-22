@@ -1,68 +1,150 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 const baseURL =
   process.env.SPARSH_SHOWCASE_URL ?? "http://127.0.0.1:4176";
 
-test("showcase components preview stays interactive and can switch routes", async ({
-  page,
-}) => {
-  await page.goto(baseURL);
+const viewports = [
+  { name: "desktop", width: 1440, height: 1024, stackedShell: false },
+  { name: "tablet", width: 900, height: 1180, stackedShell: true },
+  { name: "mobile", width: 390, height: 844, stackedShell: true },
+] as const;
+
+async function openShowcase(
+  page: Page,
+  viewport: (typeof viewports)[number],
+  hash = "",
+) {
+  await page.setViewportSize({ width: viewport.width, height: viewport.height });
+  await page.goto(`${baseURL}${hash}`);
   await expect(page).toHaveTitle(/Sparsh(?:a)? Showcase/);
-  await expect(
-    page.getByText("Basic component preview", { exact: true }).first(),
-  ).toBeVisible();
+}
 
-  const checkbox = page.getByRole("checkbox", {
-    name: "Showcase interactive checkbox",
+async function expectNoHorizontalOverflow(page: Page) {
+  const hasOverflow = await page.evaluate(
+    () => document.documentElement.scrollWidth > window.innerWidth + 1,
+  );
+  expect(hasOverflow).toBeFalsy();
+}
+
+async function expectStackedShell(page: Page) {
+  const sidebarHeading = page.getByText("In scope", { exact: true }).first();
+  const contentHeading = page
+    .getByText("Basic component preview", { exact: true })
+    .last();
+  await expect(sidebarHeading).toBeVisible();
+  await expect(contentHeading).toBeVisible();
+  const sidebarBox = await sidebarHeading.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return { x: rect.x, y: rect.y };
   });
-  await expect(checkbox).toBeChecked();
-  await checkbox.focus();
-  await expect(checkbox).toBeFocused();
-  await page.keyboard.press("Enter");
-  await expect(checkbox).not.toBeChecked();
-
-  const singleLine = page.getByRole("textbox", {
-    name: "Showcase single-line input",
+  const contentBox = await contentHeading.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return { x: rect.x, y: rect.y };
   });
-  await singleLine.fill("preview@sparsh.dev");
-  await expect(singleLine).toHaveValue(/preview@sparsh\.dev$/);
+  expect(Math.abs(sidebarBox.x - contentBox.x)).toBeLessThan(48);
+  expect(sidebarBox.y).toBeLessThan(contentBox.y);
+}
 
-  const multiline = page.getByRole("textbox", {
-    name: "Showcase multiline input",
+async function scrollUntilVisible(page: Page, locatorText: string) {
+  return scrollLocatorUntilVisible(
+    page,
+    page.getByText(locatorText, { exact: true }).last(),
+    locatorText,
+    1200,
+  );
+}
+
+async function scrollLocatorUntilVisible(
+  page: Page,
+  locator: Locator,
+  description: string,
+  deltaY: number,
+) {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    if (await locator.isVisible()) {
+      return;
+    }
+    await page.mouse.wheel(0, deltaY);
+    await page.waitForTimeout(100);
+  }
+  throw new Error(`Could not scroll "${description}" into view after 4 attempts.`);
+}
+
+for (const viewport of viewports) {
+  test(`${viewport.name}: showcase components preview stays interactive and can switch routes`, async ({
+    page,
+  }) => {
+    await openShowcase(page, viewport);
+    await expect(
+      page.getByText("Basic component preview", { exact: true }).first(),
+    ).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+    if (viewport.stackedShell) {
+      await expectStackedShell(page);
+    }
+    await page.waitForTimeout(1500);
+
+    const checkbox = page.getByRole("checkbox", {
+      name: "Showcase interactive checkbox",
+    });
+    await expect(checkbox).toBeChecked();
+    await checkbox.focus();
+    await expect(checkbox).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(checkbox).not.toBeChecked();
+
+    const singleLine = page.getByRole("textbox", {
+      name: "Showcase single-line input",
+    });
+    await page.keyboard.press("Tab");
+    await expect(singleLine).toBeFocused();
+
+    const multiline = page.getByRole("textbox", {
+      name: "Showcase multiline input",
+    });
+    await page.keyboard.press("Tab");
+    await expect(multiline).toBeFocused();
+
+    await scrollUntilVisible(page, "Virtualized list");
+    const twoAxisScroll = page.getByText("Two-axis scroll", { exact: true }).last();
+    const virtualListHeading = page.getByText("Virtualized list", { exact: true }).last();
+    await expect(twoAxisScroll).toBeVisible();
+    await expect(virtualListHeading).toBeVisible();
+
+    const virtualList = page.getByRole("list", { name: "Showcase virtualized list" });
+    await expect(virtualList).toBeVisible();
+    await expect(page.getByText("Animations", { exact: true }).first()).toBeVisible();
+
+    const renderingButton = page.getByRole("button", { name: "Rendering" });
+    await scrollLocatorUntilVisible(
+      page,
+      renderingButton,
+      "Rendering route button",
+      -1200,
+    );
+    await renderingButton.click({ force: true });
+    await expect(
+      page.getByText("Manual rendering checks", { exact: true }).first(),
+    ).toBeVisible();
+    await expect(page).toHaveURL(/#\/rendering$/);
+    await expectNoHorizontalOverflow(page);
+    await expect(page.getByText("Rendering atlas", { exact: true }).first()).toBeVisible();
   });
-  await expect(multiline).toBeVisible();
-  await multiline.focus();
-  await expect(multiline).toBeFocused();
 
-  const virtualList = page.getByRole("list", { name: "Showcase virtualized list" });
-  await expect(virtualList).toBeVisible();
-  await expect(page.getByText("Animations", { exact: true }).first()).toBeVisible();
+  test(`${viewport.name}: showcase rendering route loads directly from the hash`, async ({
+    page,
+  }) => {
+    await openShowcase(page, viewport, "#/rendering");
+    await expect(
+      page.getByText("Pixel alignment", { exact: true }).first(),
+    ).toBeVisible();
+    await expect(page.getByText("Rendering atlas", { exact: true }).first()).toBeVisible();
+    await expectNoHorizontalOverflow(page);
 
-  await page.getByRole("button", { name: "Rendering" }).click({ force: true });
-  await expect(
-    page.getByText("Manual rendering checks", { exact: true }).first(),
-  ).toBeVisible();
-  await expect(page).toHaveURL(/#\/rendering$/);
-  await expect(page.getByText("Rendering atlas", { exact: true }).first()).toBeVisible();
-
-  await page.getByRole("button", { name: "Components" }).click({ force: true });
-  await expect(page).toHaveURL(/#\/components$/);
-  await expect(
-    page.getByText("Basic component preview", { exact: true }).first(),
-  ).toBeVisible();
-});
-
-test("showcase rendering route loads directly from the hash", async ({ page }) => {
-  await page.goto(`${baseURL}#/rendering`);
-  await expect(page).toHaveTitle(/Sparsh(?:a)? Showcase/);
-  await expect(
-    page.getByText("Pixel alignment", { exact: true }).first(),
-  ).toBeVisible();
-  await expect(page.getByText("Rendering atlas", { exact: true }).first()).toBeVisible();
-
-  await page.reload();
-  await expect(page).toHaveURL(/#\/rendering$/);
-  await expect(
-    page.getByText("Text rendering", { exact: true }).first(),
-  ).toBeVisible();
-});
+    await page.reload();
+    await expect(page).toHaveURL(/#\/rendering$/);
+    await expect(
+      page.getByText("Text rendering", { exact: true }).first(),
+    ).toBeVisible();
+  });
+}

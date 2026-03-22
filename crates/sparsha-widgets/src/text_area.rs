@@ -4,7 +4,8 @@ use crate::text_editor::{EditorCore, TextEditorState};
 use crate::text_input::TextInputStyle;
 use crate::{
     control_state::{focus_ring_border_width, focus_ring_bounds, focus_ring_color},
-    current_theme, AccessibilityAction, AccessibilityInfo, AccessibilityRole, EventContext,
+    current_theme, responsive_text_area_min_height, responsive_theme_controls,
+    responsive_typography, AccessibilityAction, AccessibilityInfo, AccessibilityRole, EventContext,
     PaintContext, Widget,
 };
 use sparsha_core::Color;
@@ -33,6 +34,7 @@ struct LineMetrics {
 pub struct TextArea {
     id: WidgetId,
     editor: EditorCore,
+    declared_value: Option<String>,
     placeholder: String,
     style: TextAreaStyle,
     on_change: Option<TextAreaCallback>,
@@ -41,11 +43,18 @@ pub struct TextArea {
     line_metrics: RefCell<Vec<LineMetrics>>,
 }
 
+#[derive(Clone)]
+struct TextAreaBuildState {
+    editor: EditorCore,
+    declared_value: Option<String>,
+}
+
 impl TextArea {
     pub fn new() -> Self {
         Self {
             id: WidgetId::default(),
             editor: EditorCore::new(String::new()),
+            declared_value: None,
             placeholder: String::new(),
             style: TextAreaStyle {
                 min_height: 96.0,
@@ -63,7 +72,9 @@ impl TextArea {
     }
 
     pub fn value(mut self, value: impl Into<String>) -> Self {
-        self.editor.set_text(value.into());
+        let value = value.into();
+        self.editor.set_text(value.clone());
+        self.declared_value = Some(value);
         self
     }
 
@@ -101,6 +112,8 @@ impl TextArea {
     fn resolved_style(&self) -> TextAreaStyle {
         if self.use_theme_defaults {
             let theme = current_theme();
+            let controls = responsive_theme_controls(&theme);
+            let typography = responsive_typography(&theme);
             TextAreaStyle {
                 background: theme.colors.input_background,
                 background_focused: theme.colors.surface,
@@ -110,11 +123,11 @@ impl TextArea {
                 border_color_focused: theme.colors.primary,
                 border_width: 1.0,
                 corner_radius: theme.radii.md,
-                padding_h: theme.controls.control_padding_x,
-                padding_v: theme.controls.control_padding_y,
-                font_size: theme.typography.body_size,
+                padding_h: controls.control_padding_x,
+                padding_v: controls.control_padding_y,
+                font_size: typography.body_size,
                 min_width: 180.0,
-                min_height: 96.0,
+                min_height: responsive_text_area_min_height(&theme),
             }
         } else {
             self.style.clone()
@@ -363,6 +376,30 @@ impl Widget for TextArea {
 
     fn set_id(&mut self, id: WidgetId) {
         self.id = id;
+    }
+
+    fn rebuild(&mut self, ctx: &mut crate::BuildContext) {
+        if let Some(state) = ctx
+            .take_boxed_state()
+            .and_then(|state| state.downcast::<TextAreaBuildState>().ok())
+            .map(|state| *state)
+        {
+            if state.declared_value == self.declared_value {
+                self.editor = state.editor;
+            }
+        }
+
+        ctx.store_boxed_state(Box::new(TextAreaBuildState {
+            editor: self.editor.clone(),
+            declared_value: self.declared_value.clone(),
+        }));
+    }
+
+    fn persist_build_state(&self, ctx: &mut crate::BuildContext) {
+        ctx.store_boxed_state(Box::new(TextAreaBuildState {
+            editor: self.editor.clone(),
+            declared_value: self.declared_value.clone(),
+        }));
     }
 
     fn style(&self) -> Style {
@@ -732,7 +769,9 @@ fn line_slices(text: &str) -> Vec<(usize, usize, &str)> {
 mod tests {
     use super::*;
     use crate::test_helpers::{layout_bounds, mock_event_context};
-    use crate::{PaintCommands, PaintContext};
+    use crate::{
+        set_current_theme, set_current_viewport, PaintCommands, PaintContext, Theme, ViewportInfo,
+    };
     use sparsha_input::{FocusManager, InputEvent, KeyboardEvent, Modifiers};
     use sparsha_layout::LayoutTree;
     use sparsha_render::DrawList;
@@ -746,6 +785,10 @@ mod tests {
             max_height: None,
         };
         let _ = area.measure(&mut ctx);
+    }
+
+    fn reset_viewport() {
+        set_current_viewport(ViewportInfo::default());
     }
 
     fn primary_modifiers() -> Modifiers {
@@ -762,6 +805,7 @@ mod tests {
 
     #[test]
     fn enter_inserts_newline_and_vertical_navigation_moves_cursor() {
+        reset_viewport();
         let mut area = TextArea::new().value("hello");
         area.set_id(Default::default());
         let layout = layout_bounds(0.0, 0.0, 280.0, 120.0);
@@ -799,6 +843,7 @@ mod tests {
 
     #[test]
     fn paste_and_undo_work_for_multiline_content() {
+        reset_viewport();
         let mut area = TextArea::new();
         area.set_id(Default::default());
         let layout = layout_bounds(0.0, 0.0, 280.0, 120.0);
@@ -831,6 +876,7 @@ mod tests {
 
     #[test]
     fn pointer_hit_testing_stays_correct_after_scaled_paint() {
+        reset_viewport();
         let mut area = TextArea::new().value("line one\nline two");
         area.set_id(Default::default());
 
@@ -869,6 +915,7 @@ mod tests {
 
     #[test]
     fn trailing_space_text_input_advances_cursor() {
+        reset_viewport();
         let mut area = TextArea::new().value("hello");
         area.set_id(Default::default());
         let layout = layout_bounds(0.0, 0.0, 280.0, 120.0);
@@ -901,6 +948,7 @@ mod tests {
 
     #[test]
     fn line_metrics_track_trailing_space_width() {
+        reset_viewport();
         let area = TextArea::new().value("a \nline");
         prepare_area_with_cache(&area);
 
@@ -918,5 +966,21 @@ mod tests {
             .expect("width after trailing space");
 
         assert!(width_after_space > width_after_a);
+    }
+
+    #[test]
+    fn themed_defaults_scale_down_for_mobile_viewport() {
+        let mut theme = Theme::default();
+        theme.typography.body_size = 16.0;
+        theme.controls.control_height = 38.0;
+        theme.controls.control_padding_y = 8.0;
+        set_current_theme(theme);
+        set_current_viewport(ViewportInfo::new(390.0, 844.0));
+
+        let area = TextArea::new();
+        let style = area.resolved_style();
+        assert!(style.font_size < 16.0);
+        assert!(style.min_height < 96.0);
+        assert!(style.padding_v < 8.0);
     }
 }

@@ -1285,8 +1285,18 @@ fn install_event_listeners(
                 return;
             };
             let mut state_ref = state.borrow_mut();
+            let previous_pos = state_ref.mouse_pos;
             state_ref.mouse_pos = pos;
             state_ref.handle_event(InputEvent::PointerMove { pos });
+            let delta = glam::Vec2::new(
+                (pos.x - previous_pos.x) / 20.0,
+                (pos.y - previous_pos.y) / 20.0,
+            );
+            state_ref.handle_event(InputEvent::Scroll {
+                pos,
+                delta,
+                modifiers: Modifiers::default(),
+            });
             let should_schedule = state_ref.should_schedule_frame();
             drop(state_ref);
             if should_schedule {

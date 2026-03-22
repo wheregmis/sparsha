@@ -1329,26 +1329,6 @@ fn pixel_alignment_scene(ctx: &mut PaintContext, bounds: Rect) {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn rendering_atlas_height_uses_painted_width_breakpoint() {
-        let viewport = ViewportInfo::new(1140.0, 900.0);
-        let layout = ShowcaseLayout::new(viewport);
-
-        assert!(layout.rendering_atlas_content_width() >= RENDERING_ATLAS_STACK_BREAKPOINT);
-        assert!(rendering_atlas_painted_width(layout) < RENDERING_ATLAS_STACK_BREAKPOINT);
-        assert_eq!(
-            rendering_atlas_height(viewport),
-            RENDERING_ATLAS_STACKED_PANEL_HEIGHT * 3.0
-                + RENDERING_ATLAS_STACKED_GAP * 2.0
-                + RENDERING_ATLAS_OUTER_INSET * 2.0
-        );
-    }
-}
-
 fn stroke_and_clip_scene(ctx: &mut PaintContext, bounds: Rect) {
     let theme = current_theme();
     let bounds = bounds.inset(2.0);
@@ -1490,4 +1470,24 @@ fn text_rendering_scene(ctx: &mut PaintContext, bounds: Rect) {
         ctx.draw_text(sentence, &light_style, light.x + 14.0, y);
     }
     ctx.pop_clip();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rendering_atlas_height_uses_painted_width_breakpoint() {
+        let viewport = ViewportInfo::new(1140.0, 900.0);
+        let layout = ShowcaseLayout::new(viewport);
+
+        assert!(layout.rendering_atlas_content_width() >= RENDERING_ATLAS_STACK_BREAKPOINT);
+        assert!(rendering_atlas_painted_width(layout) < RENDERING_ATLAS_STACK_BREAKPOINT);
+        assert_eq!(
+            rendering_atlas_height(viewport),
+            RENDERING_ATLAS_STACKED_PANEL_HEIGHT * 3.0
+                + RENDERING_ATLAS_STACKED_GAP * 2.0
+                + RENDERING_ATLAS_OUTER_INSET * 2.0
+        );
+    }
 }

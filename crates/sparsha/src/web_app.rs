@@ -44,6 +44,8 @@ fn format_js_error(error: &wasm_bindgen::JsValue) -> String {
     error.as_string().unwrap_or_else(|| format!("{error:?}"))
 }
 
+const WEB_SCROLL_DELTA_UNIT: f32 = 20.0;
+
 pub(crate) fn run_dom_app(
     config: AppConfig,
     theme: AppTheme,
@@ -1285,8 +1287,18 @@ fn install_event_listeners(
                 return;
             };
             let mut state_ref = state.borrow_mut();
+            let previous_pos = state_ref.mouse_pos;
             state_ref.mouse_pos = pos;
             state_ref.handle_event(InputEvent::PointerMove { pos });
+            let delta = glam::Vec2::new(
+                (pos.x - previous_pos.x) / WEB_SCROLL_DELTA_UNIT,
+                (pos.y - previous_pos.y) / WEB_SCROLL_DELTA_UNIT,
+            );
+            state_ref.handle_event(InputEvent::Scroll {
+                pos,
+                delta,
+                modifiers: Modifiers::default(),
+            });
             let should_schedule = state_ref.should_schedule_frame();
             drop(state_ref);
             if should_schedule {
@@ -1479,8 +1491,8 @@ fn install_event_listeners(
             let mut delta_x = event.delta_x() as f32;
             let mut delta_y = -(event.delta_y() as f32);
             if event.delta_mode() == WheelEvent::DOM_DELTA_PIXEL {
-                delta_x /= 20.0;
-                delta_y /= 20.0;
+                delta_x /= WEB_SCROLL_DELTA_UNIT;
+                delta_y /= WEB_SCROLL_DELTA_UNIT;
             }
             let mut state_ref = state.borrow_mut();
             state_ref.handle_event(InputEvent::Scroll {

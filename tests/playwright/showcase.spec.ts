@@ -2,6 +2,7 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 
 const baseURL =
   process.env.SPARSH_SHOWCASE_URL ?? "http://127.0.0.1:4176";
+const TOUCH_IDENTIFIER = 1;
 
 const viewports = [
   { name: "desktop", width: 1440, height: 1024, stackedShell: false },
@@ -68,6 +69,54 @@ async function scrollLocatorUntilVisible(
     await page.waitForTimeout(100);
   }
   throw new Error(`Could not scroll "${description}" into view after 4 attempts.`);
+}
+
+async function swipeUp(page: Page, startY = 730, distance = 360) {
+  await page.evaluate(
+    ({ startY, distance, touchIdentifier }) => {
+      const root = document.querySelector(".sparsha-dom-root");
+      if (!(root instanceof HTMLElement) || typeof Touch === "undefined") {
+        return;
+      }
+      const touchId = touchIdentifier;
+      const startX = window.innerWidth * 0.5;
+      const createTouch = (clientY: number) =>
+        new Touch({
+          identifier: touchId,
+          target: root,
+          clientX: startX,
+          clientY,
+          pageX: startX,
+          pageY: clientY,
+          screenX: startX,
+          screenY: clientY,
+        });
+      const dispatch = (type: string, touches: Touch[], changedTouches: Touch[]) => {
+        root.dispatchEvent(
+          new TouchEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            touches,
+            changedTouches,
+            targetTouches: touches,
+          }),
+        );
+      };
+      const steps = 6;
+      const startTouch = createTouch(startY);
+      dispatch("touchstart", [startTouch], [startTouch]);
+      for (let step = 1; step <= steps; step += 1) {
+        const progress = step / steps;
+        const y = startY - distance * progress;
+        const moveTouch = createTouch(y);
+        dispatch("touchmove", [moveTouch], [moveTouch]);
+      }
+      const endTouch = createTouch(startY - distance);
+      dispatch("touchend", [], [endTouch]);
+    },
+    { startY, distance, touchIdentifier: TOUCH_IDENTIFIER },
+  );
+  await page.waitForTimeout(100);
 }
 
 for (const viewport of viewports) {
@@ -148,3 +197,19 @@ for (const viewport of viewports) {
     ).toBeVisible();
   });
 }
+
+test("mobile: touch swipe scrolls components content", async ({ page }) => {
+  const mobileViewport = viewports.find((viewport) => viewport.name === "mobile");
+  if (!mobileViewport) {
+    throw new Error("Missing mobile viewport configuration.");
+  }
+  await openShowcase(page, mobileViewport);
+  const sectionHeading = page.getByText("Basic component preview", { exact: true }).last();
+  await expect(sectionHeading).toBeVisible();
+  const initialY = await sectionHeading.evaluate(
+    (element) => element.getBoundingClientRect().y,
+  );
+  await swipeUp(page);
+  const nextY = await sectionHeading.evaluate((element) => element.getBoundingClientRect().y);
+  expect(nextY).toBeLessThan(initialY - 16);
+});

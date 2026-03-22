@@ -62,6 +62,7 @@ impl DomRenderer {
         set_style(&root, "height", "100vh")?;
         set_style(&root, "overflow", "hidden")?;
         set_style(&root, "user-select", "none")?;
+        set_style(&root, "touch-action", "none")?;
         set_style(&root, "outline", "none")?;
         root.set_tab_index(0);
         body.append_child(&root)?;

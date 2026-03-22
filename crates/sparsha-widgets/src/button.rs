@@ -442,6 +442,28 @@ mod tests {
     }
 
     #[test]
+    fn primary_pointer_down_up_fires_click() {
+        let clicked = Arc::new(AtomicBool::new(false));
+        let clicked_clone = Arc::clone(&clicked);
+        let mut button =
+            Button::new("OK").on_click(move || clicked_clone.store(true, Ordering::SeqCst));
+        let (x, y, w, h) = button_bounds();
+        let layout = layout_bounds(x, y, w, h);
+        let layout_tree = LayoutTree::new();
+        let mut focus = FocusManager::new();
+        button.set_id(Default::default());
+
+        let mut ctx = mock_event_context(layout, &layout_tree, &mut focus, button.id(), false);
+        let inside = (x + w / 2.0, y + h / 2.0);
+
+        button.event(&mut ctx, &pointer_down_at(inside.0, inside.1));
+        ctx.commands = Default::default();
+        button.event(&mut ctx, &pointer_up_at(inside.0, inside.1));
+
+        assert!(clicked.load(Ordering::SeqCst));
+    }
+
+    #[test]
     fn disabled_button_ignores_events() {
         let mut button = Button::new("OK").disabled(true);
         let (x, y, w, h) = button_bounds();

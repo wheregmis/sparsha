@@ -2,6 +2,7 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 
 const baseURL =
   process.env.SPARSH_SHOWCASE_URL ?? "http://127.0.0.1:4176";
+const TOUCH_IDENTIFIER = 1;
 
 const viewports = [
   { name: "desktop", width: 1440, height: 1024, stackedShell: false },
@@ -72,12 +73,12 @@ async function scrollLocatorUntilVisible(
 
 async function swipeUp(page: Page, startY = 730, distance = 360) {
   await page.evaluate(
-    ({ startY, distance }) => {
+    ({ startY, distance, touchIdentifier }) => {
       const root = document.querySelector(".sparsha-dom-root");
       if (!(root instanceof HTMLElement) || typeof Touch === "undefined") {
         return;
       }
-      const touchId = 1;
+      const touchId = touchIdentifier;
       const startX = window.innerWidth * 0.5;
       const createTouch = (clientY: number) =>
         new Touch({
@@ -113,7 +114,7 @@ async function swipeUp(page: Page, startY = 730, distance = 360) {
       const endTouch = createTouch(startY - distance);
       dispatch("touchend", [], [endTouch]);
     },
-    { startY, distance },
+    { startY, distance, touchIdentifier: TOUCH_IDENTIFIER },
   );
   await page.waitForTimeout(100);
 }

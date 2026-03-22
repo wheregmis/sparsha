@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 const baseURL =
   process.env.SPARSH_SHOWCASE_URL ?? "http://127.0.0.1:4176";
@@ -46,15 +46,28 @@ async function expectStackedShell(page: Page) {
 }
 
 async function scrollUntilVisible(page: Page, locatorText: string) {
-  const locator = page.getByText(locatorText, { exact: true }).last();
+  return scrollLocatorUntilVisible(
+    page,
+    page.getByText(locatorText, { exact: true }).last(),
+    locatorText,
+    1200,
+  );
+}
+
+async function scrollLocatorUntilVisible(
+  page: Page,
+  locator: Locator,
+  description: string,
+  deltaY: number,
+) {
   for (let attempt = 0; attempt < 4; attempt += 1) {
     if (await locator.isVisible()) {
       return;
     }
-    await page.mouse.wheel(0, 1200);
+    await page.mouse.wheel(0, deltaY);
     await page.waitForTimeout(100);
   }
-  throw new Error(`Could not scroll "${locatorText}" into view after 4 attempts.`);
+  throw new Error(`Could not scroll "${description}" into view after 4 attempts.`);
 }
 
 for (const viewport of viewports) {
@@ -102,7 +115,14 @@ for (const viewport of viewports) {
     await expect(virtualList).toBeVisible();
     await expect(page.getByText("Animations", { exact: true }).first()).toBeVisible();
 
-    await page.getByRole("button", { name: "Rendering" }).click({ force: true });
+    const renderingButton = page.getByRole("button", { name: "Rendering" });
+    await scrollLocatorUntilVisible(
+      page,
+      renderingButton,
+      "Rendering route button",
+      -1200,
+    );
+    await renderingButton.click({ force: true });
     await expect(
       page.getByText("Manual rendering checks", { exact: true }).first(),
     ).toBeVisible();

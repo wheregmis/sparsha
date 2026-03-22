@@ -36,7 +36,8 @@ use wasm_bindgen::{closure::Closure, JsCast};
 use web_sys::{
     ClipboardEvent, CompositionEvent as WebCompositionEvent, CustomEvent, Document, Element, Event,
     HtmlElement, HtmlInputElement, HtmlTextAreaElement, InputEvent as WebInputEvent,
-    KeyboardEvent as WebKeyboardEvent, MouseEvent, TouchEvent, WheelEvent, Window,
+    KeyboardEvent as WebKeyboardEvent, MouseEvent, Touch, TouchEvent, TouchList, WheelEvent,
+    Window,
 };
 
 fn format_js_error(error: &wasm_bindgen::JsValue) -> String {
@@ -98,6 +99,7 @@ pub(crate) fn run_dom_app(
         root_widget,
         start_time: web_time::Instant::now(),
         mouse_pos: glam::Vec2::ZERO,
+        active_touch_id: None,
         scale_factor: 1.0,
         viewport_width: 0.0,
         viewport_height: 0.0,
@@ -150,6 +152,7 @@ struct WebAppState {
     root_widget: Box<dyn Widget>,
     start_time: web_time::Instant,
     mouse_pos: glam::Vec2,
+    active_touch_id: Option<i32>,
     scale_factor: f32,
     viewport_width: f32,
     viewport_height: f32,
@@ -1184,11 +1187,15 @@ fn install_event_listeners(
         let root_for_event = target.clone();
         let on_touch_start = Closure::wrap(Box::new(move |event: TouchEvent| {
             event.prevent_default();
-            let Some(pos) = touch_pos(&root_for_event, &event) else {
+            let Some((touch_id, pos)) = first_changed_touch(&root_for_event, &event) else {
                 return;
             };
-            root_for_event.focus().ok();
             let mut state_ref = state.borrow_mut();
+            if state_ref.active_touch_id.is_some() {
+                return;
+            }
+            state_ref.active_touch_id = Some(touch_id);
+            root_for_event.focus().ok();
             state_ref.mouse_pos = pos;
             state_ref.handle_event(InputEvent::PointerDown {
                 pos,
@@ -1200,8 +1207,10 @@ fn install_event_listeners(
                 schedule_animation_frame(&window, &pending_animation_frame, &frame_cb);
             }
         }) as Box<dyn FnMut(_)>);
-        let _ =
-            target.add_event_listener_with_callback("touchstart", on_touch_start.as_ref().unchecked_ref());
+        let _ = target.add_event_listener_with_callback(
+            "touchstart",
+            on_touch_start.as_ref().unchecked_ref(),
+        );
         on_touch_start.forget();
     }
 
@@ -1266,10 +1275,13 @@ fn install_event_listeners(
         let root_for_event = target.clone();
         let on_touch_move = Closure::wrap(Box::new(move |event: TouchEvent| {
             event.prevent_default();
+            let Some(touch_id) = state.borrow().active_touch_id else {
+                return;
+            };
             if state.borrow().capture_path.is_some() {
                 return;
             }
-            let Some(pos) = touch_pos(&root_for_event, &event) else {
+            let Some(pos) = changed_touch_pos(&root_for_event, &event, touch_id) else {
                 return;
             };
             let mut state_ref = state.borrow_mut();
@@ -1281,8 +1293,8 @@ fn install_event_listeners(
                 schedule_animation_frame(&window, &pending_animation_frame, &frame_cb);
             }
         }) as Box<dyn FnMut(_)>);
-        let _ =
-            target.add_event_listener_with_callback("touchmove", on_touch_move.as_ref().unchecked_ref());
+        let _ = target
+            .add_event_listener_with_callback("touchmove", on_touch_move.as_ref().unchecked_ref());
         on_touch_move.forget();
     }
 
@@ -1295,10 +1307,13 @@ fn install_event_listeners(
         let root_for_event = root.clone();
         let on_move_captured = Closure::wrap(Box::new(move |event: TouchEvent| {
             event.prevent_default();
+            let Some(touch_id) = state.borrow().active_touch_id else {
+                return;
+            };
             if state.borrow().capture_path.is_none() {
                 return;
             }
-            let Some(pos) = touch_pos(&root_for_event, &event) else {
+            let Some(pos) = changed_touch_pos(&root_for_event, &event, touch_id) else {
                 return;
             };
             let mut state_ref = state.borrow_mut();
@@ -1310,8 +1325,10 @@ fn install_event_listeners(
                 schedule_animation_frame(&window_for_listener, &pending_animation_frame, &frame_cb);
             }
         }) as Box<dyn FnMut(_)>);
-        let _ =
-            window.add_event_listener_with_callback("touchmove", on_move_captured.as_ref().unchecked_ref());
+        let _ = window.add_event_listener_with_callback(
+            "touchmove",
+            on_move_captured.as_ref().unchecked_ref(),
+        );
         on_move_captured.forget();
     }
 
@@ -1350,10 +1367,13 @@ fn install_event_listeners(
         let root_for_event = target.clone();
         let on_touch_end = Closure::wrap(Box::new(move |event: TouchEvent| {
             event.prevent_default();
+            let Some(touch_id) = state.borrow().active_touch_id else {
+                return;
+            };
             if state.borrow().capture_path.is_some() {
                 return;
             }
-            let Some(pos) = touch_pos(&root_for_event, &event) else {
+            let Some(pos) = changed_touch_pos(&root_for_event, &event, touch_id) else {
                 return;
             };
             let mut state_ref = state.borrow_mut();
@@ -1362,6 +1382,8 @@ fn install_event_listeners(
                 pos,
                 button: PointerButton::Primary,
             });
+            state_ref.active_touch_id = None;
+            clear_touch_hover(&mut state_ref, &root_for_event);
             let should_schedule = state_ref.should_schedule_frame();
             drop(state_ref);
             if should_schedule {
@@ -1382,10 +1404,13 @@ fn install_event_listeners(
         let root_for_event = root.clone();
         let on_up_captured = Closure::wrap(Box::new(move |event: TouchEvent| {
             event.prevent_default();
+            let Some(touch_id) = state.borrow().active_touch_id else {
+                return;
+            };
             if state.borrow().capture_path.is_none() {
                 return;
             }
-            let Some(pos) = touch_pos(&root_for_event, &event) else {
+            let Some(pos) = changed_touch_pos(&root_for_event, &event, touch_id) else {
                 return;
             };
             let mut state_ref = state.borrow_mut();
@@ -1394,6 +1419,8 @@ fn install_event_listeners(
                 pos,
                 button: PointerButton::Primary,
             });
+            state_ref.active_touch_id = None;
+            clear_touch_hover(&mut state_ref, &root_for_event);
             let should_schedule = state_ref.should_schedule_frame();
             drop(state_ref);
             if should_schedule {
@@ -1414,10 +1441,15 @@ fn install_event_listeners(
         let root_for_event = target.clone();
         let on_cancel = Closure::wrap(Box::new(move |event: TouchEvent| {
             event.prevent_default();
-            let Some(pos) = touch_pos(&root_for_event, &event) else {
+            let Some(touch_id) = state.borrow().active_touch_id else {
                 return;
             };
+            let Some(_pos) = changed_touch_pos(&root_for_event, &event, touch_id) else {
+                return;
+            };
+            let pos = touch_outside_pos(&root_for_event);
             let mut state_ref = state.borrow_mut();
+            state_ref.active_touch_id = None;
             state_ref.mouse_pos = pos;
             state_ref.handle_event(InputEvent::PointerUp {
                 pos,
@@ -2084,19 +2116,48 @@ fn mouse_pos_wheel(root: &web_sys::HtmlElement, event: &WheelEvent) -> glam::Vec
     )
 }
 
-fn touch_pos(root: &web_sys::HtmlElement, event: &TouchEvent) -> Option<glam::Vec2> {
-    // Prefer changed_touches for end/cancel events where active touches can already be empty.
-    // Fall back to touches/target_touches for start/move where the active contact is still present.
-    let touch = event
-        .changed_touches()
-        .item(0)
-        .or_else(|| event.touches().item(0))
-        .or_else(|| event.target_touches().item(0))?;
+fn first_changed_touch(
+    root: &web_sys::HtmlElement,
+    event: &TouchEvent,
+) -> Option<(i32, glam::Vec2)> {
+    let touch = event.changed_touches().item(0)?;
+    Some((touch.identifier(), touch_to_local_pos(root, &touch)))
+}
+
+fn changed_touch_pos(
+    root: &web_sys::HtmlElement,
+    event: &TouchEvent,
+    touch_id: i32,
+) -> Option<glam::Vec2> {
+    touch_by_id(&event.changed_touches(), touch_id).map(|touch| touch_to_local_pos(root, &touch))
+}
+
+fn touch_by_id(list: &TouchList, touch_id: i32) -> Option<Touch> {
+    (0..list.length()).find_map(|index| {
+        let touch = list.item(index)?;
+        (touch.identifier() == touch_id).then_some(touch)
+    })
+}
+
+fn touch_to_local_pos(root: &web_sys::HtmlElement, touch: &Touch) -> glam::Vec2 {
     let rect = root.get_bounding_client_rect();
-    Some(glam::Vec2::new(
+    glam::Vec2::new(
         touch.client_x() as f32 - rect.left() as f32,
         touch.client_y() as f32 - rect.top() as f32,
-    ))
+    )
+}
+
+fn touch_outside_pos(root: &web_sys::HtmlElement) -> glam::Vec2 {
+    glam::Vec2::new(
+        -(root.client_width() as f32) - 1.0,
+        -(root.client_height() as f32) - 1.0,
+    )
+}
+
+fn clear_touch_hover(state: &mut WebAppState, root: &web_sys::HtmlElement) {
+    let pos = touch_outside_pos(root);
+    state.mouse_pos = pos;
+    state.handle_event(InputEvent::PointerMove { pos });
 }
 
 fn browser_modifiers(event: &WebKeyboardEvent) -> Modifiers {

@@ -46,14 +46,15 @@ async function expectStackedShell(page: Page) {
 }
 
 async function scrollUntilVisible(page: Page, locatorText: string) {
+  const locator = page.getByText(locatorText, { exact: true }).last();
   for (let attempt = 0; attempt < 4; attempt += 1) {
-    const locator = page.getByText(locatorText, { exact: true }).last();
     if (await locator.isVisible()) {
       return;
     }
     await page.mouse.wheel(0, 1200);
     await page.waitForTimeout(100);
   }
+  throw new Error(`Could not scroll "${locatorText}" into view after 4 attempts.`);
 }
 
 for (const viewport of viewports) {

@@ -1005,8 +1005,9 @@ mod tests {
 
         let input = TextInput::new();
         let style = input.resolved_style();
-        assert!(style.font_size < 16.0);
-        assert!(style.min_height < 38.0);
-        assert!(style.padding_h < 12.0);
+        let epsilon = f32::EPSILON;
+        assert!((style.font_size - 14.0).abs() <= epsilon);
+        assert!((style.min_height - 34.0).abs() <= epsilon);
+        assert!((style.padding_h - 10.0).abs() <= epsilon);
     }
 }

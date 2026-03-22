@@ -29,6 +29,10 @@ pub struct ViewportInfo {
 
 impl ViewportInfo {
     pub fn new(width: f32, height: f32) -> Self {
+        Self::from_dimensions(width, height)
+    }
+
+    fn from_dimensions(width: f32, height: f32) -> Self {
         let width = width.max(0.0);
         let height = height.max(0.0);
         let shortest_side = width.min(height);
@@ -45,6 +49,10 @@ impl ViewportInfo {
             orientation,
             class,
         }
+    }
+
+    fn normalized(self) -> Self {
+        Self::from_dimensions(self.width, self.height)
     }
 }
 
@@ -74,7 +82,7 @@ pub fn current_viewport() -> ViewportInfo {
 #[doc(hidden)]
 pub fn set_current_viewport(viewport: ViewportInfo) {
     CURRENT_VIEWPORT.with(|slot| {
-        *slot.borrow_mut() = viewport;
+        *slot.borrow_mut() = viewport.normalized();
     });
 }
 
@@ -180,5 +188,23 @@ mod tests {
         let landscape = ViewportInfo::new(1180.0, 820.0);
         assert_eq!(landscape.orientation, ViewportOrientation::Landscape);
         assert_eq!(landscape.shortest_side, 820.0);
+    }
+
+    #[test]
+    fn set_current_viewport_normalizes_derived_fields() {
+        set_current_viewport(ViewportInfo {
+            width: 390.0,
+            height: 844.0,
+            shortest_side: 9_999.0,
+            orientation: ViewportOrientation::Landscape,
+            class: ViewportClass::Desktop,
+        });
+
+        let viewport = current_viewport();
+        assert_eq!(viewport.shortest_side, 390.0);
+        assert_eq!(viewport.orientation, ViewportOrientation::Portrait);
+        assert_eq!(viewport.class, ViewportClass::Mobile);
+
+        set_current_viewport(ViewportInfo::default());
     }
 }

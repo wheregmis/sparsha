@@ -216,6 +216,40 @@ impl ShowcaseLayout {
             16.0
         }
     }
+
+    fn main_content_width(self) -> f32 {
+        if self.is_desktop() {
+            (self.content_width() - self.sidebar_width()).max(0.0)
+        } else {
+            self.content_width()
+        }
+    }
+
+    fn rendering_atlas_content_width(self) -> f32 {
+        (self.main_content_width() - self.page_padding() * 2.0 - self.section_padding() * 2.0)
+            .max(0.0)
+    }
+}
+
+const RENDERING_ATLAS_STACK_BREAKPOINT: f32 = 720.0;
+const RENDERING_ATLAS_DESKTOP_HEIGHT: f32 = 320.0;
+const RENDERING_ATLAS_STACKED_PANEL_HEIGHT: f32 = 328.0;
+const RENDERING_ATLAS_STACKED_GAP: f32 = 12.0;
+const RENDERING_ATLAS_OUTER_INSET: f32 = 8.0;
+
+fn rendering_atlas_stacks(viewport: ViewportInfo, bounds_width: f32) -> bool {
+    viewport.class != ViewportClass::Desktop || bounds_width < RENDERING_ATLAS_STACK_BREAKPOINT
+}
+
+fn rendering_atlas_height(viewport: ViewportInfo) -> f32 {
+    let layout = ShowcaseLayout::new(viewport);
+    if rendering_atlas_stacks(viewport, layout.rendering_atlas_content_width()) {
+        RENDERING_ATLAS_STACKED_PANEL_HEIGHT * 3.0
+            + RENDERING_ATLAS_STACKED_GAP * 2.0
+            + RENDERING_ATLAS_OUTER_INSET * 2.0
+    } else {
+        RENDERING_ATLAS_DESKTOP_HEIGHT
+    }
 }
 
 fn showcase_theme() -> Theme {
@@ -1151,11 +1185,7 @@ impl Widget for RenderingAtlas {
     }
 
     fn style(&self) -> Style {
-        let height = match current_viewport().class {
-            ViewportClass::Desktop => 320.0,
-            ViewportClass::Tablet => 420.0,
-            ViewportClass::Mobile => 560.0,
-        };
+        let height = rendering_atlas_height(current_viewport());
         Style {
             size: Size {
                 width: percent(1.0),
@@ -1182,9 +1212,9 @@ fn scene_label_style(size: f32, color: Color) -> TextStyle {
 }
 
 fn rendering_atlas_scene(ctx: &mut PaintContext) {
-    let bounds = ctx.bounds().inset(8.0);
-    let gap = 12.0;
-    let stack_vertical = current_viewport().class != ViewportClass::Desktop || bounds.width < 720.0;
+    let bounds = ctx.bounds().inset(RENDERING_ATLAS_OUTER_INSET);
+    let gap = RENDERING_ATLAS_STACKED_GAP;
+    let stack_vertical = rendering_atlas_stacks(current_viewport(), bounds.width);
     let (left, middle, right) = if stack_vertical {
         let panel_height = (bounds.height - gap * 2.0) / 3.0;
         (

@@ -204,6 +204,11 @@ pub struct List {
     style: Style,
 }
 
+#[derive(Clone, Copy)]
+struct VirtualizedListBuildState {
+    model: ScrollModel,
+}
+
 impl List {
     /// Create a new empty vertical list.
     pub fn new() -> Self {
@@ -467,9 +472,25 @@ impl Widget for List {
         }
     }
 
-    fn rebuild(&mut self, _ctx: &mut crate::BuildContext) {
+    fn rebuild(&mut self, ctx: &mut crate::BuildContext) {
         if let ListMode::Virtualized(state) = &mut self.mode {
+            if let Some(saved) = ctx
+                .take_boxed_state()
+                .and_then(|state| state.downcast::<VirtualizedListBuildState>().ok())
+                .map(|state| *state)
+            {
+                state.model = saved.model;
+            }
+
             state.update_realized_children(self.direction);
+
+            ctx.store_boxed_state(Box::new(VirtualizedListBuildState { model: state.model }));
+        }
+    }
+
+    fn persist_build_state(&self, ctx: &mut crate::BuildContext) {
+        if let ListMode::Virtualized(state) = &self.mode {
+            ctx.store_boxed_state(Box::new(VirtualizedListBuildState { model: state.model }));
         }
     }
 

@@ -50,6 +50,7 @@ impl Default for CheckboxStyle {
 pub struct Checkbox {
     id: WidgetId,
     checked: bool,
+    declared_checked: bool,
     disabled: bool,
     interaction: ControlState,
     style: CheckboxStyle,
@@ -58,12 +59,19 @@ pub struct Checkbox {
     on_toggle: Option<Box<dyn FnMut(bool)>>,
 }
 
+#[derive(Clone, Copy)]
+struct CheckboxBuildState {
+    checked: bool,
+    declared_checked: bool,
+}
+
 impl Checkbox {
     /// Create a new unchecked checkbox.
     pub fn new() -> Self {
         Self {
             id: WidgetId::default(),
             checked: false,
+            declared_checked: false,
             disabled: false,
             interaction: ControlState::default(),
             style: CheckboxStyle::default(),
@@ -81,6 +89,7 @@ impl Checkbox {
     /// Set checked state.
     pub fn checked(mut self, checked: bool) -> Self {
         self.checked = checked;
+        self.declared_checked = checked;
         self
     }
 
@@ -169,6 +178,30 @@ impl Widget for Checkbox {
 
     fn set_id(&mut self, id: WidgetId) {
         self.id = id;
+    }
+
+    fn rebuild(&mut self, ctx: &mut crate::BuildContext) {
+        if let Some(state) = ctx
+            .take_boxed_state()
+            .and_then(|state| state.downcast::<CheckboxBuildState>().ok())
+            .map(|state| *state)
+        {
+            if state.declared_checked == self.declared_checked {
+                self.checked = state.checked;
+            }
+        }
+
+        ctx.store_boxed_state(Box::new(CheckboxBuildState {
+            checked: self.checked,
+            declared_checked: self.declared_checked,
+        }));
+    }
+
+    fn persist_build_state(&self, ctx: &mut crate::BuildContext) {
+        ctx.store_boxed_state(Box::new(CheckboxBuildState {
+            checked: self.checked,
+            declared_checked: self.declared_checked,
+        }));
     }
 
     fn style(&self) -> Style {

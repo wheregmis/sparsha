@@ -50,6 +50,11 @@ pub trait Widget {
         // Default: no-op
     }
 
+    /// Persist live runtime state before a rebuild may replace this widget.
+    fn persist_build_state(&self, _ctx: &mut super::BuildContext) {
+        // Default: no-op
+    }
+
     /// Handle an input event.
     fn event(&mut self, ctx: &mut super::EventContext, event: &InputEvent) {
         let _ = (ctx, event);

@@ -59,6 +59,11 @@ pub struct Scroll {
     debug_overlay: bool,
 }
 
+#[derive(Clone, Copy)]
+struct ScrollBuildState {
+    model: ScrollModel,
+}
+
 impl Default for Scroll {
     fn default() -> Self {
         Self::new()
@@ -381,6 +386,22 @@ impl Widget for Scroll {
 
     fn set_id(&mut self, id: WidgetId) {
         self.id = id;
+    }
+
+    fn rebuild(&mut self, ctx: &mut crate::BuildContext) {
+        if let Some(state) = ctx
+            .take_boxed_state()
+            .and_then(|state| state.downcast::<ScrollBuildState>().ok())
+            .map(|state| *state)
+        {
+            self.model = state.model;
+        }
+
+        ctx.store_boxed_state(Box::new(ScrollBuildState { model: self.model }));
+    }
+
+    fn persist_build_state(&self, ctx: &mut crate::BuildContext) {
+        ctx.store_boxed_state(Box::new(ScrollBuildState { model: self.model }));
     }
 
     fn style(&self) -> Style {

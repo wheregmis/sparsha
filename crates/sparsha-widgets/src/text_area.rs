@@ -34,6 +34,7 @@ struct LineMetrics {
 pub struct TextArea {
     id: WidgetId,
     editor: EditorCore,
+    declared_value: Option<String>,
     placeholder: String,
     style: TextAreaStyle,
     on_change: Option<TextAreaCallback>,
@@ -42,11 +43,18 @@ pub struct TextArea {
     line_metrics: RefCell<Vec<LineMetrics>>,
 }
 
+#[derive(Clone)]
+struct TextAreaBuildState {
+    editor: EditorCore,
+    declared_value: Option<String>,
+}
+
 impl TextArea {
     pub fn new() -> Self {
         Self {
             id: WidgetId::default(),
             editor: EditorCore::new(String::new()),
+            declared_value: None,
             placeholder: String::new(),
             style: TextAreaStyle {
                 min_height: 96.0,
@@ -64,7 +72,9 @@ impl TextArea {
     }
 
     pub fn value(mut self, value: impl Into<String>) -> Self {
-        self.editor.set_text(value.into());
+        let value = value.into();
+        self.editor.set_text(value.clone());
+        self.declared_value = Some(value);
         self
     }
 
@@ -366,6 +376,30 @@ impl Widget for TextArea {
 
     fn set_id(&mut self, id: WidgetId) {
         self.id = id;
+    }
+
+    fn rebuild(&mut self, ctx: &mut crate::BuildContext) {
+        if let Some(state) = ctx
+            .take_boxed_state()
+            .and_then(|state| state.downcast::<TextAreaBuildState>().ok())
+            .map(|state| *state)
+        {
+            if state.declared_value == self.declared_value {
+                self.editor = state.editor;
+            }
+        }
+
+        ctx.store_boxed_state(Box::new(TextAreaBuildState {
+            editor: self.editor.clone(),
+            declared_value: self.declared_value.clone(),
+        }));
+    }
+
+    fn persist_build_state(&self, ctx: &mut crate::BuildContext) {
+        ctx.store_boxed_state(Box::new(TextAreaBuildState {
+            editor: self.editor.clone(),
+            declared_value: self.declared_value.clone(),
+        }));
     }
 
     fn style(&self) -> Style {

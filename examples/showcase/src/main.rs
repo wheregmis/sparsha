@@ -235,15 +235,23 @@ const RENDERING_ATLAS_STACK_BREAKPOINT: f32 = 720.0;
 const RENDERING_ATLAS_DESKTOP_HEIGHT: f32 = 320.0;
 const RENDERING_ATLAS_STACKED_PANEL_HEIGHT: f32 = 328.0;
 const RENDERING_ATLAS_STACKED_GAP: f32 = 12.0;
+const RENDERING_ATLAS_CARD_PADDING: f32 = 12.0;
 const RENDERING_ATLAS_OUTER_INSET: f32 = 8.0;
 
 fn rendering_atlas_stacks(viewport: ViewportInfo, bounds_width: f32) -> bool {
     viewport.class != ViewportClass::Desktop || bounds_width < RENDERING_ATLAS_STACK_BREAKPOINT
 }
 
+fn rendering_atlas_painted_width(layout: ShowcaseLayout) -> f32 {
+    (layout.rendering_atlas_content_width()
+        - RENDERING_ATLAS_CARD_PADDING * 2.0
+        - RENDERING_ATLAS_OUTER_INSET * 2.0)
+        .max(0.0)
+}
+
 fn rendering_atlas_height(viewport: ViewportInfo) -> f32 {
     let layout = ShowcaseLayout::new(viewport);
-    if rendering_atlas_stacks(viewport, layout.rendering_atlas_content_width()) {
+    if rendering_atlas_stacks(viewport, rendering_atlas_painted_width(layout)) {
         RENDERING_ATLAS_STACKED_PANEL_HEIGHT * 3.0
             + RENDERING_ATLAS_STACKED_GAP * 2.0
             + RENDERING_ATLAS_OUTER_INSET * 2.0
@@ -280,24 +288,31 @@ fn showcase_theme() -> Theme {
 fn showcase_shell(route: ShowcaseRoute, navigator: Navigator, viewport: ViewportInfo) -> Container {
     let layout = ShowcaseLayout::new(viewport);
     let theme = current_theme();
-    let shell = if layout.shell_is_stacked() {
-        Container::new()
+    if layout.shell_is_stacked() {
+        return Container::new()
+            .size(
+                layout.viewport.width.max(1.0),
+                layout.viewport.height.max(1.0),
+            )
+            .background(theme.colors.background)
             .column()
-            .fill()
-            .width(layout.content_width())
-            .flex_grow(1.0)
-            .child(build_sidebar(route, layout))
-            .child(build_main_area(route, layout))
-    } else {
-        Container::new()
-            .row()
-            .fill()
-            .width(layout.content_width())
-            .flex_grow(1.0)
-            .stretch()
-            .child(build_sidebar(route, layout))
-            .child(build_main_area(route, layout))
-    };
+            .align_items(AlignItems::Center)
+            .child(build_top_bar(route, navigator, layout))
+            .child(
+                Scroll::new()
+                    .vertical()
+                    .fill()
+                    .width(layout.content_width())
+                    .flex_grow(1.0)
+                    .content(
+                        Container::new()
+                            .column()
+                            .fill_width()
+                            .child(build_sidebar(route, layout))
+                            .child(build_route_page(route, layout)),
+                    ),
+            );
+    }
 
     Container::new()
         .size(
@@ -308,7 +323,16 @@ fn showcase_shell(route: ShowcaseRoute, navigator: Navigator, viewport: Viewport
         .column()
         .align_items(AlignItems::Center)
         .child(build_top_bar(route, navigator, layout))
-        .child(shell)
+        .child(
+            Container::new()
+                .row()
+                .fill()
+                .width(layout.content_width())
+                .flex_grow(1.0)
+                .stretch()
+                .child(build_sidebar(route, layout))
+                .child(build_main_area(route, layout)),
+        )
 }
 
 fn build_top_bar(route: ShowcaseRoute, navigator: Navigator, layout: ShowcaseLayout) -> Container {
@@ -553,21 +577,20 @@ fn sidebar_block(title: &'static str, lines: &[&'static str]) -> Container {
 }
 
 fn build_main_area(route: ShowcaseRoute, layout: ShowcaseLayout) -> Scroll {
-    let scroll = Scroll::new()
+    Scroll::new()
         .vertical()
         .fill_width()
         .fill_height()
         .flex_grow(1.0)
         .flex_shrink(1.0)
-        .content(match route {
-            ShowcaseRoute::Components => build_components_page(layout),
-            ShowcaseRoute::Rendering => build_rendering_page(layout),
-        });
+        .width((layout.content_width() - layout.sidebar_width()).max(0.0))
+        .content(build_route_page(route, layout))
+}
 
-    if layout.is_desktop() {
-        scroll.width((layout.content_width() - layout.sidebar_width()).max(0.0))
-    } else {
-        scroll
+fn build_route_page(route: ShowcaseRoute, layout: ShowcaseLayout) -> Container {
+    match route {
+        ShowcaseRoute::Components => build_components_page(layout),
+        ShowcaseRoute::Rendering => build_rendering_page(layout),
     }
 }
 
@@ -1038,7 +1061,7 @@ fn rendering_atlas_card(layout: ShowcaseLayout) -> Container {
         "Three small diagnostics in one frame: pixel alignment, stroke + clip, and text balance.",
         Container::new().column().child(
             Container::new()
-                .padding(12.0)
+                .padding(RENDERING_ATLAS_CARD_PADDING)
                 .background(Color::from_hex(0x0B0E13))
                 .border(1.0, theme.colors.border)
                 .corner_radius(12.0)
@@ -1303,6 +1326,26 @@ fn pixel_alignment_scene(ctx: &mut PaintContext, bounds: Rect) {
         let x = ramp_origin.x + index as f32 * 18.0;
         let y = ramp_origin.y + (9 - index) as f32 * 1.5;
         ctx.fill_rect(Rect::new(x, y, size, size), bright);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rendering_atlas_height_uses_painted_width_breakpoint() {
+        let viewport = ViewportInfo::new(1140.0, 900.0);
+        let layout = ShowcaseLayout::new(viewport);
+
+        assert!(layout.rendering_atlas_content_width() >= RENDERING_ATLAS_STACK_BREAKPOINT);
+        assert!(rendering_atlas_painted_width(layout) < RENDERING_ATLAS_STACK_BREAKPOINT);
+        assert_eq!(
+            rendering_atlas_height(viewport),
+            RENDERING_ATLAS_STACKED_PANEL_HEIGHT * 3.0
+                + RENDERING_ATLAS_STACKED_GAP * 2.0
+                + RENDERING_ATLAS_OUTER_INSET * 2.0
+        );
     }
 }
 

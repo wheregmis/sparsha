@@ -661,6 +661,23 @@ impl AppRunner {
                     }
                 }
 
+                fn persist_widget_state(
+                    widget: &dyn Widget,
+                    build_ctx: &mut BuildContext,
+                    path: &mut Vec<usize>,
+                ) {
+                    build_ctx.set_path(path);
+                    widget.persist_build_state(build_ctx);
+                    let child_keys: Vec<_> = (0..widget.children().len())
+                        .map(|index| widget.child_path_key(index))
+                        .collect();
+                    for (index, child) in widget.children().iter().enumerate() {
+                        path.push(child_keys[index]);
+                        persist_widget_state(child.as_ref(), build_ctx, path);
+                        path.pop();
+                    }
+                }
+
                 let mut build_ctx = BuildContext::default();
                 build_ctx.set_theme(resolved_theme);
                 build_ctx.insert_resource(navigator);
@@ -671,6 +688,9 @@ impl AppRunner {
                 // lifetime of `build_ctx` and nothing aliases it during rebuild.
                 unsafe { build_ctx.set_state_store(&mut state.component_states) };
                 let mut path = Vec::new();
+                persist_widget_state(state.root_widget.as_ref(), &mut build_ctx, &mut path);
+                state.component_states.begin_rebuild();
+                path.clear();
                 rebuild_widget(state.root_widget.as_mut(), &mut build_ctx, &mut path);
             });
             state.component_states.finish_rebuild();

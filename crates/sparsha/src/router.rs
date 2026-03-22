@@ -706,7 +706,9 @@ fn page_transition_overlay_alpha(progress: f32, peak_alpha: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{component::ComponentStateStore, runtime_widget::with_widget_mut};
     use sparsha_signals::RuntimeHandle;
+    use sparsha_widgets::{AccessibilityAction, BuildContext, TextInput, ViewportInfo};
 
     fn screen(name: &'static str) -> Container {
         Container::new().child(Text::new(name))
@@ -715,6 +717,58 @@ mod tests {
     fn with_runtime(f: impl FnOnce()) {
         let runtime = RuntimeHandle::new();
         runtime.run_with_current(f);
+    }
+
+    fn rebuild_host(
+        host: &mut RouterHost,
+        store: &mut ComponentStateStore,
+        viewport: ViewportInfo,
+    ) {
+        fn persist_widget_state(
+            widget: &dyn Widget,
+            build_ctx: &mut BuildContext,
+            path: &mut Vec<usize>,
+        ) {
+            build_ctx.set_path(path);
+            widget.persist_build_state(build_ctx);
+            let child_keys: Vec<_> = (0..widget.children().len())
+                .map(|index| widget.child_path_key(index))
+                .collect();
+            for (index, child) in widget.children().iter().enumerate() {
+                path.push(child_keys[index]);
+                persist_widget_state(child.as_ref(), build_ctx, path);
+                path.pop();
+            }
+        }
+
+        fn rebuild_widget(
+            widget: &mut dyn Widget,
+            build_ctx: &mut BuildContext,
+            path: &mut Vec<usize>,
+        ) {
+            build_ctx.set_path(path);
+            widget.rebuild(build_ctx);
+            let child_keys: Vec<_> = (0..widget.children().len())
+                .map(|index| widget.child_path_key(index))
+                .collect();
+            for (index, child) in widget.children_mut().iter_mut().enumerate() {
+                path.push(child_keys[index]);
+                rebuild_widget(child.as_mut(), build_ctx, path);
+                path.pop();
+            }
+        }
+
+        let mut build = BuildContext::default();
+        build.insert_resource(viewport);
+        // SAFETY: the test owns `store` for the entire rebuild pass.
+        unsafe { build.set_state_store(store) };
+
+        let mut path = Vec::new();
+        store.begin_rebuild();
+        persist_widget_state(host, &mut build, &mut path);
+        store.begin_rebuild();
+        rebuild_widget(host, &mut build, &mut path);
+        store.finish_rebuild();
     }
 
     #[test]
@@ -841,5 +895,34 @@ mod tests {
         assert!(mid > 0.0);
         assert!(mid > start);
         assert!(mid > end);
+    }
+
+    #[test]
+    fn viewport_rebuild_preserves_text_input_state() {
+        with_runtime(|| {
+            let router = Router::new()
+                .route("/", || TextInput::new().value("seed"))
+                .fallback("/");
+            let mut host = RouterHost::new(router);
+            let mut store = ComponentStateStore::default();
+
+            rebuild_host(&mut host, &mut store, ViewportInfo::new(1280.0, 800.0));
+
+            let changed = with_widget_mut(&mut host, &[1, 0], |widget| {
+                widget.handle_accessibility_action(
+                    AccessibilityAction::SetValue,
+                    Some("edited".to_owned()),
+                )
+            })
+            .expect("text input");
+            assert!(changed);
+
+            rebuild_host(&mut host, &mut store, ViewportInfo::new(820.0, 1180.0));
+
+            let state = with_widget_mut(&mut host, &[1, 0], |widget| widget.text_editor_state())
+                .expect("text input")
+                .expect("editor state");
+            assert_eq!(state.text, "edited");
+        });
     }
 }

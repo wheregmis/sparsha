@@ -63,6 +63,7 @@ impl Default for TextInputStyle {
 pub struct TextInput {
     id: WidgetId,
     editor: EditorCore,
+    declared_value: Option<String>,
     placeholder: String,
     style: TextInputStyle,
     on_change: Option<TextInputCallback>,
@@ -72,12 +73,19 @@ pub struct TextInput {
     prefix_widths: RefCell<Vec<(usize, f32)>>,
 }
 
+#[derive(Clone)]
+struct TextInputBuildState {
+    editor: EditorCore,
+    declared_value: Option<String>,
+}
+
 impl TextInput {
     /// Create a new text input.
     pub fn new() -> Self {
         Self {
             id: WidgetId::default(),
             editor: EditorCore::new(String::new()),
+            declared_value: None,
             placeholder: String::new(),
             style: TextInputStyle::default(),
             on_change: None,
@@ -90,7 +98,9 @@ impl TextInput {
 
     /// Set the initial value.
     pub fn value(mut self, value: impl Into<String>) -> Self {
-        self.editor.set_text(value.into());
+        let value = value.into();
+        self.editor.set_text(value.clone());
+        self.declared_value = Some(value);
         self
     }
 
@@ -430,6 +440,30 @@ impl Widget for TextInput {
 
     fn set_id(&mut self, id: WidgetId) {
         self.id = id;
+    }
+
+    fn rebuild(&mut self, ctx: &mut crate::BuildContext) {
+        if let Some(state) = ctx
+            .take_boxed_state()
+            .and_then(|state| state.downcast::<TextInputBuildState>().ok())
+            .map(|state| *state)
+        {
+            if state.declared_value == self.declared_value {
+                self.editor = state.editor;
+            }
+        }
+
+        ctx.store_boxed_state(Box::new(TextInputBuildState {
+            editor: self.editor.clone(),
+            declared_value: self.declared_value.clone(),
+        }));
+    }
+
+    fn persist_build_state(&self, ctx: &mut crate::BuildContext) {
+        ctx.store_boxed_state(Box::new(TextInputBuildState {
+            editor: self.editor.clone(),
+            declared_value: self.declared_value.clone(),
+        }));
     }
 
     fn style(&self) -> Style {

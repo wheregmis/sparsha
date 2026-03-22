@@ -1,4 +1,5 @@
 use crate::{Navigator, TaskKey, TaskPayload, TaskResult, TaskResultSubscription, TaskRuntime};
+use bon::builder;
 use sparsha_layout::taffy::prelude::{AlignItems, Display, FlexDirection, Style};
 use sparsha_layout::WidgetId;
 use sparsha_signals::{Effect, Memo, Signal};
@@ -250,6 +251,7 @@ impl<F> Component<F> {
 }
 
 /// Build a widget from a function component.
+#[builder(start_fn(name = component_builder))]
 pub fn component<F, W>(render: F) -> Component<F>
 where
     F: for<'a> Fn(&'a mut ComponentContext<'a>) -> W + 'static,
@@ -446,6 +448,19 @@ mod tests {
             let viewport = observed.get().expect("viewport");
             assert_eq!(viewport.width, 820.0);
             assert_eq!(viewport.class, sparsha_widgets::ViewportClass::Tablet);
+        });
+    }
+
+    #[test]
+    fn component_builder_named_args_constructs_component() {
+        let runtime = RuntimeHandle::new();
+        runtime.run_with_current(|| {
+            let mut build = BuildContext::default();
+            let mut host = component_builder()
+                .render(|_: &mut ComponentContext<'_>| Text::new("from-builder"))
+                .call();
+            host.rebuild(&mut build);
+            assert_eq!(host.children().len(), 1);
         });
     }
 }

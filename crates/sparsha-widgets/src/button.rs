@@ -442,7 +442,7 @@ mod tests {
     }
 
     #[test]
-    fn touch_tap_primary_pointer_events_fire_click() {
+    fn primary_pointer_down_up_fires_click() {
         let clicked = Arc::new(AtomicBool::new(false));
         let clicked_clone = Arc::clone(&clicked);
         let mut button =

@@ -1182,7 +1182,7 @@ fn install_event_listeners(
         let window = window.clone();
         let target = root.clone();
         let root_for_event = target.clone();
-        let on_down = Closure::wrap(Box::new(move |event: TouchEvent| {
+        let on_touch_start = Closure::wrap(Box::new(move |event: TouchEvent| {
             event.prevent_default();
             let Some(pos) = touch_pos(&root_for_event, &event) else {
                 return;
@@ -1201,8 +1201,8 @@ fn install_event_listeners(
             }
         }) as Box<dyn FnMut(_)>);
         let _ =
-            target.add_event_listener_with_callback("touchstart", on_down.as_ref().unchecked_ref());
-        on_down.forget();
+            target.add_event_listener_with_callback("touchstart", on_touch_start.as_ref().unchecked_ref());
+        on_touch_start.forget();
     }
 
     {
@@ -1264,7 +1264,7 @@ fn install_event_listeners(
         let window = window.clone();
         let target = root.clone();
         let root_for_event = target.clone();
-        let on_move = Closure::wrap(Box::new(move |event: TouchEvent| {
+        let on_touch_move = Closure::wrap(Box::new(move |event: TouchEvent| {
             event.prevent_default();
             if state.borrow().capture_path.is_some() {
                 return;
@@ -1282,8 +1282,8 @@ fn install_event_listeners(
             }
         }) as Box<dyn FnMut(_)>);
         let _ =
-            target.add_event_listener_with_callback("touchmove", on_move.as_ref().unchecked_ref());
-        on_move.forget();
+            target.add_event_listener_with_callback("touchmove", on_touch_move.as_ref().unchecked_ref());
+        on_touch_move.forget();
     }
 
     {
@@ -1293,7 +1293,7 @@ fn install_event_listeners(
         let window = window.clone();
         let window_for_listener = window.clone();
         let root_for_event = root.clone();
-        let on_move = Closure::wrap(Box::new(move |event: TouchEvent| {
+        let on_move_captured = Closure::wrap(Box::new(move |event: TouchEvent| {
             event.prevent_default();
             if state.borrow().capture_path.is_none() {
                 return;
@@ -1311,8 +1311,8 @@ fn install_event_listeners(
             }
         }) as Box<dyn FnMut(_)>);
         let _ =
-            window.add_event_listener_with_callback("touchmove", on_move.as_ref().unchecked_ref());
-        on_move.forget();
+            window.add_event_listener_with_callback("touchmove", on_move_captured.as_ref().unchecked_ref());
+        on_move_captured.forget();
     }
 
     {
@@ -1348,7 +1348,7 @@ fn install_event_listeners(
         let window = window.clone();
         let target = root.clone();
         let root_for_event = target.clone();
-        let on_up = Closure::wrap(Box::new(move |event: TouchEvent| {
+        let on_touch_end = Closure::wrap(Box::new(move |event: TouchEvent| {
             event.prevent_default();
             if state.borrow().capture_path.is_some() {
                 return;
@@ -1368,8 +1368,9 @@ fn install_event_listeners(
                 schedule_animation_frame(&window, &pending_animation_frame, &frame_cb);
             }
         }) as Box<dyn FnMut(_)>);
-        let _ = target.add_event_listener_with_callback("touchend", on_up.as_ref().unchecked_ref());
-        on_up.forget();
+        let _ = target
+            .add_event_listener_with_callback("touchend", on_touch_end.as_ref().unchecked_ref());
+        on_touch_end.forget();
     }
 
     {
@@ -1379,7 +1380,7 @@ fn install_event_listeners(
         let window = window.clone();
         let window_for_listener = window.clone();
         let root_for_event = root.clone();
-        let on_up = Closure::wrap(Box::new(move |event: TouchEvent| {
+        let on_up_captured = Closure::wrap(Box::new(move |event: TouchEvent| {
             event.prevent_default();
             if state.borrow().capture_path.is_none() {
                 return;
@@ -1399,8 +1400,9 @@ fn install_event_listeners(
                 schedule_animation_frame(&window_for_listener, &pending_animation_frame, &frame_cb);
             }
         }) as Box<dyn FnMut(_)>);
-        let _ = window.add_event_listener_with_callback("touchend", on_up.as_ref().unchecked_ref());
-        on_up.forget();
+        let _ = window
+            .add_event_listener_with_callback("touchend", on_up_captured.as_ref().unchecked_ref());
+        on_up_captured.forget();
     }
 
     {
@@ -2083,6 +2085,8 @@ fn mouse_pos_wheel(root: &web_sys::HtmlElement, event: &WheelEvent) -> glam::Vec
 }
 
 fn touch_pos(root: &web_sys::HtmlElement, event: &TouchEvent) -> Option<glam::Vec2> {
+    // Prefer changed_touches for end/cancel events where active touches can already be empty.
+    // Fall back to touches/target_touches for start/move where the active contact is still present.
     let touch = event
         .changed_touches()
         .item(0)

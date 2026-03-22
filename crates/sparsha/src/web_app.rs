@@ -36,7 +36,7 @@ use wasm_bindgen::{closure::Closure, JsCast};
 use web_sys::{
     ClipboardEvent, CompositionEvent as WebCompositionEvent, CustomEvent, Document, Element, Event,
     HtmlElement, HtmlInputElement, HtmlTextAreaElement, InputEvent as WebInputEvent,
-    KeyboardEvent as WebKeyboardEvent, MouseEvent, WheelEvent, Window,
+    KeyboardEvent as WebKeyboardEvent, MouseEvent, TouchEvent, WheelEvent, Window,
 };
 
 fn format_js_error(error: &wasm_bindgen::JsValue) -> String {
@@ -1182,6 +1182,36 @@ fn install_event_listeners(
         let window = window.clone();
         let target = root.clone();
         let root_for_event = target.clone();
+        let on_down = Closure::wrap(Box::new(move |event: TouchEvent| {
+            event.prevent_default();
+            let Some(pos) = touch_pos(&root_for_event, &event) else {
+                return;
+            };
+            root_for_event.focus().ok();
+            let mut state_ref = state.borrow_mut();
+            state_ref.mouse_pos = pos;
+            state_ref.handle_event(InputEvent::PointerDown {
+                pos,
+                button: PointerButton::Primary,
+            });
+            let should_schedule = state_ref.should_schedule_frame();
+            drop(state_ref);
+            if should_schedule {
+                schedule_animation_frame(&window, &pending_animation_frame, &frame_cb);
+            }
+        }) as Box<dyn FnMut(_)>);
+        let _ =
+            target.add_event_listener_with_callback("touchstart", on_down.as_ref().unchecked_ref());
+        on_down.forget();
+    }
+
+    {
+        let state = Rc::clone(state);
+        let pending_animation_frame = Rc::clone(pending_animation_frame);
+        let frame_cb = Rc::clone(frame_cb);
+        let window = window.clone();
+        let target = root.clone();
+        let root_for_event = target.clone();
         let on_up = Closure::wrap(Box::new(move |event: MouseEvent| {
             if state.borrow().capture_path.is_some() {
                 return;
@@ -1232,6 +1262,64 @@ fn install_event_listeners(
         let pending_animation_frame = Rc::clone(pending_animation_frame);
         let frame_cb = Rc::clone(frame_cb);
         let window = window.clone();
+        let target = root.clone();
+        let root_for_event = target.clone();
+        let on_move = Closure::wrap(Box::new(move |event: TouchEvent| {
+            event.prevent_default();
+            if state.borrow().capture_path.is_some() {
+                return;
+            }
+            let Some(pos) = touch_pos(&root_for_event, &event) else {
+                return;
+            };
+            let mut state_ref = state.borrow_mut();
+            state_ref.mouse_pos = pos;
+            state_ref.handle_event(InputEvent::PointerMove { pos });
+            let should_schedule = state_ref.should_schedule_frame();
+            drop(state_ref);
+            if should_schedule {
+                schedule_animation_frame(&window, &pending_animation_frame, &frame_cb);
+            }
+        }) as Box<dyn FnMut(_)>);
+        let _ =
+            target.add_event_listener_with_callback("touchmove", on_move.as_ref().unchecked_ref());
+        on_move.forget();
+    }
+
+    {
+        let state = Rc::clone(state);
+        let pending_animation_frame = Rc::clone(pending_animation_frame);
+        let frame_cb = Rc::clone(frame_cb);
+        let window = window.clone();
+        let window_for_listener = window.clone();
+        let root_for_event = root.clone();
+        let on_move = Closure::wrap(Box::new(move |event: TouchEvent| {
+            event.prevent_default();
+            if state.borrow().capture_path.is_none() {
+                return;
+            }
+            let Some(pos) = touch_pos(&root_for_event, &event) else {
+                return;
+            };
+            let mut state_ref = state.borrow_mut();
+            state_ref.mouse_pos = pos;
+            state_ref.handle_event(InputEvent::PointerMove { pos });
+            let should_schedule = state_ref.should_schedule_frame();
+            drop(state_ref);
+            if should_schedule {
+                schedule_animation_frame(&window_for_listener, &pending_animation_frame, &frame_cb);
+            }
+        }) as Box<dyn FnMut(_)>);
+        let _ =
+            window.add_event_listener_with_callback("touchmove", on_move.as_ref().unchecked_ref());
+        on_move.forget();
+    }
+
+    {
+        let state = Rc::clone(state);
+        let pending_animation_frame = Rc::clone(pending_animation_frame);
+        let frame_cb = Rc::clone(frame_cb);
+        let window = window.clone();
         let window_for_listener = window.clone();
         let root_for_event = root.clone();
         let on_up = Closure::wrap(Box::new(move |event: MouseEvent| {
@@ -1251,6 +1339,97 @@ fn install_event_listeners(
         }) as Box<dyn FnMut(_)>);
         let _ = window.add_event_listener_with_callback("mouseup", on_up.as_ref().unchecked_ref());
         on_up.forget();
+    }
+
+    {
+        let state = Rc::clone(state);
+        let pending_animation_frame = Rc::clone(pending_animation_frame);
+        let frame_cb = Rc::clone(frame_cb);
+        let window = window.clone();
+        let target = root.clone();
+        let root_for_event = target.clone();
+        let on_up = Closure::wrap(Box::new(move |event: TouchEvent| {
+            event.prevent_default();
+            if state.borrow().capture_path.is_some() {
+                return;
+            }
+            let Some(pos) = touch_pos(&root_for_event, &event) else {
+                return;
+            };
+            let mut state_ref = state.borrow_mut();
+            state_ref.mouse_pos = pos;
+            state_ref.handle_event(InputEvent::PointerUp {
+                pos,
+                button: PointerButton::Primary,
+            });
+            let should_schedule = state_ref.should_schedule_frame();
+            drop(state_ref);
+            if should_schedule {
+                schedule_animation_frame(&window, &pending_animation_frame, &frame_cb);
+            }
+        }) as Box<dyn FnMut(_)>);
+        let _ = target.add_event_listener_with_callback("touchend", on_up.as_ref().unchecked_ref());
+        on_up.forget();
+    }
+
+    {
+        let state = Rc::clone(state);
+        let pending_animation_frame = Rc::clone(pending_animation_frame);
+        let frame_cb = Rc::clone(frame_cb);
+        let window = window.clone();
+        let window_for_listener = window.clone();
+        let root_for_event = root.clone();
+        let on_up = Closure::wrap(Box::new(move |event: TouchEvent| {
+            event.prevent_default();
+            if state.borrow().capture_path.is_none() {
+                return;
+            }
+            let Some(pos) = touch_pos(&root_for_event, &event) else {
+                return;
+            };
+            let mut state_ref = state.borrow_mut();
+            state_ref.mouse_pos = pos;
+            state_ref.handle_event(InputEvent::PointerUp {
+                pos,
+                button: PointerButton::Primary,
+            });
+            let should_schedule = state_ref.should_schedule_frame();
+            drop(state_ref);
+            if should_schedule {
+                schedule_animation_frame(&window_for_listener, &pending_animation_frame, &frame_cb);
+            }
+        }) as Box<dyn FnMut(_)>);
+        let _ = window.add_event_listener_with_callback("touchend", on_up.as_ref().unchecked_ref());
+        on_up.forget();
+    }
+
+    {
+        let state = Rc::clone(state);
+        let pending_animation_frame = Rc::clone(pending_animation_frame);
+        let frame_cb = Rc::clone(frame_cb);
+        let window = window.clone();
+        let target = root.clone();
+        let root_for_event = target.clone();
+        let on_cancel = Closure::wrap(Box::new(move |event: TouchEvent| {
+            event.prevent_default();
+            let Some(pos) = touch_pos(&root_for_event, &event) else {
+                return;
+            };
+            let mut state_ref = state.borrow_mut();
+            state_ref.mouse_pos = pos;
+            state_ref.handle_event(InputEvent::PointerUp {
+                pos,
+                button: PointerButton::Primary,
+            });
+            let should_schedule = state_ref.should_schedule_frame();
+            drop(state_ref);
+            if should_schedule {
+                schedule_animation_frame(&window, &pending_animation_frame, &frame_cb);
+            }
+        }) as Box<dyn FnMut(_)>);
+        let _ = target
+            .add_event_listener_with_callback("touchcancel", on_cancel.as_ref().unchecked_ref());
+        on_cancel.forget();
     }
 
     {
@@ -1901,6 +2080,19 @@ fn mouse_pos_wheel(root: &web_sys::HtmlElement, event: &WheelEvent) -> glam::Vec
         event.client_x() as f32 - rect.left() as f32,
         event.client_y() as f32 - rect.top() as f32,
     )
+}
+
+fn touch_pos(root: &web_sys::HtmlElement, event: &TouchEvent) -> Option<glam::Vec2> {
+    let touch = event
+        .changed_touches()
+        .item(0)
+        .or_else(|| event.touches().item(0))
+        .or_else(|| event.target_touches().item(0))?;
+    let rect = root.get_bounding_client_rect();
+    Some(glam::Vec2::new(
+        touch.client_x() as f32 - rect.left() as f32,
+        touch.client_y() as f32 - rect.top() as f32,
+    ))
 }
 
 fn browser_modifiers(event: &WebKeyboardEvent) -> Modifiers {

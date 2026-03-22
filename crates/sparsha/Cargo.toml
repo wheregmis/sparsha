@@ -22,6 +22,7 @@ accesskit = { workspace = true }
 accesskit_winit = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+bon = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { workspace = true }

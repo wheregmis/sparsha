@@ -38,10 +38,23 @@ use web_sys::{
 };
 
 #[wasm_bindgen::prelude::wasm_bindgen(
-    inline_js = "export function sparshaStartViewTransition(document) {\n  const startViewTransition = document?.startViewTransition;\n  if (typeof startViewTransition !== 'function') {\n    return;\n  }\n  try {\n    startViewTransition.call(document, () => {});\n  } catch (_) {\n    // Ignore unsupported and timing-related failures.\n  }\n}"
+    inline_js = r#"
+export function startRouteViewTransition(document) {
+  const startViewTransition = document?.startViewTransition;
+  if (typeof startViewTransition !== "function") {
+    return;
+  }
+  try {
+    // The render/update happens in Rust; this callback intentionally no-ops.
+    startViewTransition.call(document, () => {});
+  } catch (_) {
+    // Ignore unsupported and timing-related failures.
+  }
+}
+"#
 )]
 extern "C" {
-    fn sparshaStartViewTransition(document: &web_sys::Document);
+    fn startRouteViewTransition(document: &web_sys::Document);
 }
 
 fn format_js_error(error: &wasm_bindgen::JsValue) -> String {
@@ -408,10 +421,6 @@ impl WebAppState {
         }
     }
 
-    fn desired_route_hash(&self) -> String {
-        path_to_hash(&self.router_navigator.current_path())
-    }
-
     fn shortcut_profile(&self) -> sparsha_input::ShortcutProfile {
         self.platform.shortcut_profile()
     }
@@ -495,6 +504,7 @@ impl WebAppState {
 
     fn frame(&mut self) {
         let current_route_path = self.router_navigator.current_path();
+        let desired_hash = path_to_hash(&current_route_path);
         let route_changed = current_route_path != self.last_route_path;
         let mut had_task_results = false;
         self.task_runtime.drain_completed(|result| {
@@ -538,7 +548,6 @@ impl WebAppState {
             self.surface_manager.status(),
         );
         if !should_render_layers {
-            let desired_hash = self.desired_route_hash();
             self.sync_route_hash(&desired_hash);
             self.last_route_path = current_route_path;
             return;
@@ -546,12 +555,11 @@ impl WebAppState {
 
         let focused_editor_state = self.focused_text_editor_state().cloned();
         let suppress_text_bridge = self.accessibility_text_focus_matches_widget_focus();
-        let desired_hash = self.desired_route_hash();
         self.sync_route_hash(&desired_hash);
         self.sync_text_input_bridge_with_state(focused_editor_state.as_ref(), suppress_text_bridge);
 
         let (dom_rendered, pending_surface_retry) = {
-            if should_start_route_view_transition(route_changed, self.first_paint_emitted) {
+            if can_start_route_view_transition(route_changed, self.first_paint_emitted) {
                 start_document_view_transition();
             }
 
@@ -1785,7 +1793,7 @@ fn should_sync_external_hash(current_path: &str, hash: &str) -> bool {
     hash_to_path(hash) != current_path
 }
 
-fn should_start_route_view_transition(route_changed: bool, first_paint_emitted: bool) -> bool {
+fn can_start_route_view_transition(route_changed: bool, first_paint_emitted: bool) -> bool {
     route_changed && first_paint_emitted
 }
 
@@ -1797,7 +1805,7 @@ fn start_document_view_transition() {
         return;
     };
 
-    sparshaStartViewTransition(&document);
+    startRouteViewTransition(&document);
 }
 
 fn should_render_web_layers(
@@ -1951,10 +1959,15 @@ mod wasm_tests {
 
     #[test]
     fn route_view_transition_runs_only_after_first_paint() {
-        assert!(!should_start_route_view_transition(false, false));
-        assert!(!should_start_route_view_transition(false, true));
-        assert!(!should_start_route_view_transition(true, false));
-        assert!(should_start_route_view_transition(true, true));
+        assert!(!can_start_route_view_transition(false, false));
+        assert!(!can_start_route_view_transition(false, true));
+        assert!(!can_start_route_view_transition(true, false));
+        assert!(can_start_route_view_transition(true, true));
+    }
+
+    #[wasm_bindgen_test]
+    fn start_document_view_transition_degrades_gracefully() {
+        start_document_view_transition();
     }
 
     #[test]

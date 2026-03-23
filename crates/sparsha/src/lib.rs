@@ -45,7 +45,9 @@
 mod accessibility;
 mod app;
 mod component;
+mod platform;
 mod router;
+mod runtime_core;
 mod runtime_widget;
 mod tasks;
 
@@ -85,8 +87,8 @@ pub mod prelude {
         TaskResultSubscription, TaskRuntime, TaskStatus,
     };
     pub use crate::{
-        component, component_builder, App, AppRunError, Component, ComponentContext, Navigator, Route, Router,
-        RouterTransition, TaskHook, ThemeInput, ThemeMode, ThemeModeInput,
+        component, component_builder, App, AppRunError, Component, ComponentContext, Navigator,
+        Route, Router, RouterTransition, TaskHook, ThemeInput, ThemeMode, ThemeModeInput,
     };
     pub use sparsha_core::{Color, Rect};
     pub use sparsha_input::{InputEvent, Key, Modifiers, PointerButton};

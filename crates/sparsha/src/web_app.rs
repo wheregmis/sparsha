@@ -8,25 +8,29 @@ use crate::{
     app::{AppConfig, AppRunError, AppTheme},
     component::ComponentStateStore,
     dom_renderer::{DomFrameSnapshot, DomRenderer},
-    router::{hash_to_path, path_to_hash, Navigator, Router, RouterHost},
-    runtime_widget::{
-        add_widget_to_layout, apply_focus_change, collect_accessibility_tree,
-        dispatch_widget_event, move_focus_path, remap_path, sync_focus_manager, with_widget_mut,
-        WidgetPath, WidgetRuntimeRegistry,
+    platform::events::WebEventTranslator,
+    platform::{
+        ClipboardService, PlatformCapabilities, PlatformEffect, PlatformFeature, PlatformId,
+        PointerCaptureService, TextInputService,
     },
+    router::{hash_to_path, path_to_hash, Navigator, Router, RouterHost},
+    runtime_core::{
+        build_layout as build_runtime_layout, focused_text_editor_state,
+        handle_accessibility_action, handle_input_event, refresh_accessibility_tree,
+        RuntimeCoreContext,
+    },
+    runtime_widget::{WidgetPath, WidgetRuntimeRegistry},
     web_surface_manager::{HybridSurfaceManager, HybridSurfaceStatus, SurfaceFrame},
 };
 use sparsha_core::Color;
-use sparsha_input::{
-    Action, ActionMapper, FocusManager, InputEvent, Modifiers, PointerButton, StandardAction,
-};
+use sparsha_input::{FocusManager, InputEvent, Modifiers, PointerButton, StandardAction};
 use sparsha_layout::LayoutTree;
 use sparsha_render::DrawList;
 use sparsha_signals::{RuntimeHandle, SubscriberKind};
 use sparsha_text::TextSystem;
 use sparsha_widgets::{
-    set_current_theme, set_current_viewport, AccessibilityAction, AccessibilityRole, BuildContext,
-    PaintCommands, PaintContext, TextEditorState, ViewportInfo, Widget,
+    set_current_theme, set_current_viewport, AccessibilityAction, AccessibilityRole, PaintCommands,
+    PaintContext, TextEditorState, ViewportInfo, Widget,
 };
 use std::{
     cell::{Cell, RefCell},
@@ -81,10 +85,14 @@ pub(crate) fn run_dom_app(
     let root_widget = signal_runtime.run_with_current(|| {
         Box::new(RouterHost::new(router_for_build.clone())) as Box<dyn Widget>
     });
+    let platform_id = PlatformId::Web;
 
     let mut state = WebAppState {
         config,
         theme,
+        platform_id,
+        platform_capabilities: PlatformCapabilities::new(platform_id),
+        event_translator: WebEventTranslator::new(),
         router_navigator: navigator,
         dom_renderer,
         text_system: TextSystem::new_headless(),
@@ -138,6 +146,9 @@ pub(crate) fn run_dom_app(
 struct WebAppState {
     config: AppConfig,
     theme: AppTheme,
+    platform_id: PlatformId,
+    platform_capabilities: PlatformCapabilities,
+    event_translator: WebEventTranslator,
     router_navigator: Navigator,
     dom_renderer: DomRenderer,
     text_system: TextSystem,
@@ -244,6 +255,102 @@ impl WebTextInputBridge {
         }
         self.syncing = false;
     }
+}
+
+struct WebClipboardBridge<'a> {
+    pending_write: &'a mut Option<String>,
+}
+
+impl ClipboardService for WebClipboardBridge<'_> {
+    fn read_text(&mut self) -> Option<String> {
+        None
+    }
+
+    fn write_text(&mut self, text: &str) {
+        *self.pending_write = Some(text.to_owned());
+    }
+}
+
+struct WebTextInputService<'a> {
+    bridge: &'a mut WebTextInputBridge,
+}
+
+impl TextInputService for WebTextInputService<'_> {
+    fn sync_editor_state(
+        &mut self,
+        editor_state: Option<&sparsha_widgets::TextEditorState>,
+        suppress_bridge: bool,
+    ) {
+        if suppress_bridge {
+            self.bridge.sync(None);
+        } else {
+            self.bridge.sync(editor_state);
+        }
+    }
+}
+
+struct WebPointerCaptureBridge;
+
+impl PointerCaptureService for WebPointerCaptureBridge {
+    fn sync_capture(&mut self, _has_capture: bool) {}
+}
+
+fn web_feature_for_effect(effect: &PlatformEffect) -> PlatformFeature {
+    match effect {
+        PlatformEffect::SyncTextInput => PlatformFeature::TextInputBridge,
+        PlatformEffect::SyncPointerCapture => PlatformFeature::PointerCapture,
+        PlatformEffect::WriteClipboard(_) => PlatformFeature::ClipboardWrite,
+    }
+}
+
+fn log_web_effect_support(state: &WebAppState, effect: &PlatformEffect) {
+    let feature = web_feature_for_effect(effect);
+    let support = state.platform_capabilities.support(feature);
+    if matches!(
+        support.support,
+        crate::platform::SupportLevel::Partial | crate::platform::SupportLevel::Unsupported
+    ) {
+        log::warn!(
+            "platform {:?} handling {:?} via {:?}: {}",
+            state.platform_id,
+            feature,
+            support.fallback,
+            support.rationale
+        );
+    }
+}
+
+fn apply_web_platform_effects(state: &mut WebAppState, effects: &crate::platform::PlatformEffects) {
+    for effect in effects.iter() {
+        log_web_effect_support(state, effect);
+    }
+    let focused_editor_state = state.focused_text_editor_state().cloned();
+    let suppress_bridge = state.accessibility_text_focus_matches_widget_focus();
+    let has_capture = state.capture_path.is_some();
+    let mut clipboard = WebClipboardBridge {
+        pending_write: &mut state.pending_clipboard_write,
+    };
+    let mut text_input = WebTextInputService {
+        bridge: &mut state.text_input_bridge,
+    };
+    let mut pointer_capture = WebPointerCaptureBridge;
+
+    for effect in effects.iter() {
+        match effect {
+            PlatformEffect::SyncTextInput => {
+                text_input.sync_editor_state(focused_editor_state.as_ref(), suppress_bridge)
+            }
+            PlatformEffect::SyncPointerCapture => pointer_capture.sync_capture(has_capture),
+            PlatformEffect::WriteClipboard(text) => clipboard.write_text(text),
+        }
+    }
+
+    refresh_accessibility_tree(
+        &mut state.widget_registry,
+        state.root_widget.as_ref(),
+        &state.layout_tree,
+        state.focused_path.as_ref(),
+    );
 }
 
 struct WebSemanticDomLayer {
@@ -563,9 +670,7 @@ impl WebAppState {
     }
 
     fn focused_text_editor_state(&self) -> Option<&sparsha_widgets::TextEditorState> {
-        self.focused_path
-            .as_ref()
-            .and_then(|path| self.widget_registry.text_editor_state_for_path(path))
+        focused_text_editor_state(&self.widget_registry, self.focused_path.as_deref())
     }
 
     fn focused_selection_text(&self) -> Option<String> {
@@ -574,8 +679,10 @@ impl WebAppState {
         (start < end).then(|| state.text.get(start..end).unwrap_or_default().to_owned())
     }
 
+    #[allow(dead_code)]
     fn refresh_accessibility(&mut self) {
-        self.widget_registry.accessibility = collect_accessibility_tree(
+        refresh_accessibility_tree(
+            &mut self.widget_registry,
             self.root_widget.as_ref(),
             &self.layout_tree,
             self.focused_path.as_ref(),
@@ -620,52 +727,32 @@ impl WebAppState {
         action: AccessibilityAction,
         value: Option<String>,
     ) {
-        let Some(path) = self
-            .widget_registry
-            .path_for_accessibility_node(node_id)
-            .map(ToOwned::to_owned)
-        else {
-            return;
-        };
-
-        match action {
-            AccessibilityAction::Focus => {
-                let focus_changed = apply_focus_change(
-                    self.root_widget.as_mut(),
-                    &mut self.focus_manager,
-                    &self.widget_registry,
-                    &mut self.focused_path,
-                    Some(path),
-                );
-                if focus_changed {
-                    self.ime_composing = false;
-                    self.needs_repaint = true;
-                }
-            }
-            action => {
-                let handled = with_widget_mut(self.root_widget.as_mut(), &path, |widget| {
-                    widget.handle_accessibility_action(action, value.clone())
-                })
-                .unwrap_or(false);
-                if handled {
-                    if matches!(action, AccessibilityAction::SetValue) {
-                        self.needs_layout = true;
-                    }
-                    self.needs_repaint = true;
-                }
-            }
-        }
-
-        self.signal_runtime.run_effects(64);
-        let dirty = self.signal_runtime.take_dirty_flags();
-        if dirty.rebuild || dirty.layout {
-            self.needs_layout = true;
-        }
-        if dirty.paint {
-            self.needs_repaint = true;
-        }
-        self.refresh_accessibility();
-        self.sync_text_input_bridge();
+        let viewport = self.logical_viewport();
+        let effects = handle_accessibility_action(
+            RuntimeCoreContext {
+                theme: &self.theme,
+                navigator: self.router_navigator.clone(),
+                root_widget: self.root_widget.as_mut(),
+                layout_tree: &mut self.layout_tree,
+                widget_registry: &mut self.widget_registry,
+                component_states: &mut self.component_states,
+                focus_manager: &mut self.focus_manager,
+                focused_path: &mut self.focused_path,
+                capture_path: &mut self.capture_path,
+                signal_runtime: self.signal_runtime.clone(),
+                task_runtime: self.task_runtime.clone(),
+                text_system: &mut self.text_system,
+                viewport,
+                shortcut_profile: self.platform_capabilities.shortcut_profile(),
+                ime_composing: &mut self.ime_composing,
+                needs_layout: &mut self.needs_layout,
+                needs_repaint: &mut self.needs_repaint,
+            },
+            node_id,
+            action,
+            value,
+        );
+        apply_web_platform_effects(self, &effects);
     }
 
     fn update_viewport(&mut self) {
@@ -719,98 +806,27 @@ impl WebAppState {
     }
 
     fn build_layout(&mut self) {
-        let runtime = self.signal_runtime.clone();
-        self.layout_tree = LayoutTree::new();
-        self.component_states.begin_rebuild();
-
-        runtime.with_tracking(SubscriberKind::Rebuild, || {
-            let resolved_theme = self.theme.resolve_theme();
-            let navigator = self.router_navigator.clone();
-            let viewport = self.logical_viewport();
-            set_current_theme(resolved_theme.clone());
-            set_current_viewport(viewport);
-
-            fn rebuild_widget(
-                widget: &mut dyn Widget,
-                build_ctx: &mut BuildContext,
-                path: &mut Vec<usize>,
-            ) {
-                build_ctx.set_path(path);
-                widget.rebuild(build_ctx);
-                let child_keys: Vec<_> = (0..widget.children().len())
-                    .map(|index| widget.child_path_key(index))
-                    .collect();
-                for (index, child) in widget.children_mut().iter_mut().enumerate() {
-                    path.push(child_keys[index]);
-                    rebuild_widget(child.as_mut(), build_ctx, path);
-                    path.pop();
-                }
-            }
-
-            fn persist_widget_state(
-                widget: &dyn Widget,
-                build_ctx: &mut BuildContext,
-                path: &mut Vec<usize>,
-            ) {
-                build_ctx.set_path(path);
-                widget.persist_build_state(build_ctx);
-                let child_keys: Vec<_> = (0..widget.children().len())
-                    .map(|index| widget.child_path_key(index))
-                    .collect();
-                for (index, child) in widget.children().iter().enumerate() {
-                    path.push(child_keys[index]);
-                    persist_widget_state(child.as_ref(), build_ctx, path);
-                    path.pop();
-                }
-            }
-
-            let mut build_ctx = BuildContext::default();
-            build_ctx.set_theme(resolved_theme);
-            build_ctx.insert_resource(navigator);
-            build_ctx.insert_resource(self.task_runtime.clone());
-            build_ctx.insert_resource(self.signal_runtime.clone());
-            build_ctx.insert_resource(viewport);
-            // SAFETY: the rebuild pass owns `component_states` for the entire
-            // lifetime of `build_ctx` and does not alias it elsewhere.
-            unsafe { build_ctx.set_state_store(&mut self.component_states) };
-            let mut path = Vec::new();
-            persist_widget_state(self.root_widget.as_ref(), &mut build_ctx, &mut path);
-            self.component_states.begin_rebuild();
-            path.clear();
-            rebuild_widget(self.root_widget.as_mut(), &mut build_ctx, &mut path);
+        let viewport = self.logical_viewport();
+        let effects = build_runtime_layout(RuntimeCoreContext {
+            theme: &self.theme,
+            navigator: self.router_navigator.clone(),
+            root_widget: self.root_widget.as_mut(),
+            layout_tree: &mut self.layout_tree,
+            widget_registry: &mut self.widget_registry,
+            component_states: &mut self.component_states,
+            focus_manager: &mut self.focus_manager,
+            focused_path: &mut self.focused_path,
+            capture_path: &mut self.capture_path,
+            signal_runtime: self.signal_runtime.clone(),
+            task_runtime: self.task_runtime.clone(),
+            text_system: &mut self.text_system,
+            viewport,
+            shortcut_profile: self.platform_capabilities.shortcut_profile(),
+            ime_composing: &mut self.ime_composing,
+            needs_layout: &mut self.needs_layout,
+            needs_repaint: &mut self.needs_repaint,
         });
-        self.component_states.finish_rebuild();
-
-        let mut widget_registry = WidgetRuntimeRegistry::default();
-        let root_id = runtime.with_tracking(SubscriberKind::Layout, || {
-            set_current_theme(self.theme.resolve_theme());
-            set_current_viewport(self.logical_viewport());
-            let mut path = Vec::new();
-            add_widget_to_layout(
-                self.root_widget.as_mut(),
-                &mut self.layout_tree,
-                &mut self.text_system,
-                &mut widget_registry,
-                &mut path,
-                false,
-                true,
-            )
-        });
-        self.layout_tree.set_root(root_id);
-        self.widget_registry = widget_registry;
-        self.layout_tree
-            .compute_layout(self.viewport_width.max(1.0), self.viewport_height.max(1.0));
-        self.focused_path = remap_path(self.focused_path.take(), &self.widget_registry);
-        self.capture_path = remap_path(self.capture_path.take(), &self.widget_registry);
-        sync_focus_manager(
-            &mut self.focus_manager,
-            &self.widget_registry,
-            self.focused_path.as_ref(),
-        );
-        self.refresh_accessibility();
-        self.sync_text_input_bridge();
-        self.needs_layout = false;
-        self.needs_repaint = true;
+        apply_web_platform_effects(self, &effects);
     }
 
     fn paint(&mut self) {
@@ -841,109 +857,31 @@ impl WebAppState {
     }
 
     fn handle_event(&mut self, event: InputEvent) {
-        let runtime = self.signal_runtime.clone();
-        let mapper = ActionMapper::new();
-        let mut handled_focus_navigation = false;
-        if let Some(Action::Standard(action)) = mapper.map_event(&event) {
-            match action {
-                StandardAction::FocusNext | StandardAction::FocusPrevious => {
-                    let next_focus = move_focus_path(
-                        self.focused_path.as_ref(),
-                        &self.widget_registry,
-                        matches!(action, StandardAction::FocusNext),
-                    );
-                    let focus_changed = apply_focus_change(
-                        self.root_widget.as_mut(),
-                        &mut self.focus_manager,
-                        &self.widget_registry,
-                        &mut self.focused_path,
-                        next_focus,
-                    );
-                    if focus_changed {
-                        self.ime_composing = false;
-                        self.sync_text_input_bridge();
-                        self.needs_repaint = true;
-                    }
-                    handled_focus_navigation = true;
-                }
-                _ => {}
-            }
-        }
-        if handled_focus_navigation {
-            self.refresh_accessibility();
-            return;
-        }
-
-        let current_focus_id = self
-            .focused_path
-            .as_ref()
-            .and_then(|path| self.widget_registry.id_for_path(path));
-        let current_capture_path = self.capture_path.clone();
-        let outcome = runtime.run_with_current(|| {
-            dispatch_widget_event(
-                self.root_widget.as_mut(),
-                &self.layout_tree,
-                current_focus_id,
-                current_capture_path.as_ref(),
-                &event,
-            )
-        });
-
-        let clear_text_focus_on_pointer_down = matches!(event, InputEvent::PointerDown { .. })
-            && !outcome.commands.request_focus
-            && !outcome.commands.clear_focus
-            && self.focused_text_editor_state().is_some();
-
-        if outcome.commands.request_focus
-            || outcome.commands.clear_focus
-            || clear_text_focus_on_pointer_down
-        {
-            let next_focus_path = if clear_text_focus_on_pointer_down {
-                None
-            } else {
-                outcome.focus_path.clone()
-            };
-            let focus_changed = apply_focus_change(
-                self.root_widget.as_mut(),
-                &mut self.focus_manager,
-                &self.widget_registry,
-                &mut self.focused_path,
-                next_focus_path,
-            );
-            if focus_changed {
-                self.ime_composing = false;
-                self.needs_repaint = true;
-            }
-        }
-
-        if outcome.commands.capture_pointer || outcome.commands.release_pointer {
-            self.capture_path = outcome.capture_path;
-            self.needs_repaint = true;
-        }
-
-        if outcome.commands.clipboard_write.is_some() {
-            self.pending_clipboard_write = outcome.commands.clipboard_write.clone();
-        }
-
-        self.sync_text_input_bridge();
-
-        if outcome.commands.request_paint {
-            self.needs_repaint = true;
-        }
-        if outcome.commands.request_layout {
-            self.needs_layout = true;
-        }
-
-        runtime.run_effects(64);
-        let dirty = runtime.take_dirty_flags();
-        if dirty.rebuild || dirty.layout {
-            self.needs_layout = true;
-        }
-        if dirty.paint {
-            self.needs_repaint = true;
-        }
-
-        self.refresh_accessibility();
+        let viewport = self.logical_viewport();
+        let effects = handle_input_event(
+            RuntimeCoreContext {
+                theme: &self.theme,
+                navigator: self.router_navigator.clone(),
+                root_widget: self.root_widget.as_mut(),
+                layout_tree: &mut self.layout_tree,
+                widget_registry: &mut self.widget_registry,
+                component_states: &mut self.component_states,
+                focus_manager: &mut self.focus_manager,
+                focused_path: &mut self.focused_path,
+                capture_path: &mut self.capture_path,
+                signal_runtime: self.signal_runtime.clone(),
+                task_runtime: self.task_runtime.clone(),
+                text_system: &mut self.text_system,
+                viewport,
+                shortcut_profile: self.platform_capabilities.shortcut_profile(),
+                ime_composing: &mut self.ime_composing,
+                needs_layout: &mut self.needs_layout,
+                needs_repaint: &mut self.needs_repaint,
+            },
+            event,
+            None,
+        );
+        apply_web_platform_effects(self, &effects);
     }
 
     fn frame(&mut self) {
@@ -1177,7 +1115,11 @@ fn install_event_listeners(
         let root_for_event = target.clone();
         let on_down = Closure::wrap(Box::new(move |event: MouseEvent| {
             let pos = mouse_pos(&root_for_event, &event);
-            let button = mouse_button(event.button());
+            let button = state
+                .borrow()
+                .event_translator
+                .map_mouse_button(event.button());
+            root_for_event.focus().ok();
             let mut state_ref = state.borrow_mut();
             state_ref.mouse_pos = pos;
             state_ref.handle_event(InputEvent::PointerDown { pos, button });
@@ -1239,7 +1181,10 @@ fn install_event_listeners(
                 return;
             }
             let pos = mouse_pos(&root_for_event, &event);
-            let button = mouse_button(event.button());
+            let button = state
+                .borrow()
+                .event_translator
+                .map_mouse_button(event.button());
             let mut state_ref = state.borrow_mut();
             state_ref.mouse_pos = pos;
             state_ref.handle_event(InputEvent::PointerUp { pos, button });
@@ -1367,7 +1312,10 @@ fn install_event_listeners(
                 return;
             }
             let pos = mouse_pos(&root_for_event, &event);
-            let button = mouse_button(event.button());
+            let button = state
+                .borrow()
+                .event_translator
+                .map_mouse_button(event.button());
             let mut state_ref = state.borrow_mut();
             state_ref.mouse_pos = pos;
             state_ref.handle_event(InputEvent::PointerUp { pos, button });
@@ -1505,11 +1453,17 @@ fn install_event_listeners(
                 delta_x /= WEB_SCROLL_DELTA_UNIT;
                 delta_y /= WEB_SCROLL_DELTA_UNIT;
             }
+            let modifiers = state.borrow().event_translator.modifiers_from_flags(
+                event.shift_key(),
+                event.ctrl_key(),
+                event.alt_key(),
+                event.meta_key(),
+            );
             let mut state_ref = state.borrow_mut();
             state_ref.handle_event(InputEvent::Scroll {
                 pos,
                 delta: glam::Vec2::new(delta_x, delta_y),
-                modifiers: browser_wheel_modifiers(&event),
+                modifiers,
             });
             let should_schedule = state_ref.should_schedule_frame();
             drop(state_ref);
@@ -1527,47 +1481,23 @@ fn install_event_listeners(
         let frame_cb = Rc::clone(frame_cb);
         let window = window.clone();
         let on_key_down = Closure::wrap(Box::new(move |event: WebKeyboardEvent| {
-            if let Some(key) = map_browser_key(event.key()) {
-                let code = sparsha_input::ui_events::keyboard::Code::Unidentified;
-                let mut kb_event = sparsha_input::KeyboardEvent::key_down(key, code);
-                kb_event.modifiers = browser_modifiers(&event);
-                let mapped = ActionMapper::new().map_event(&InputEvent::KeyDown {
-                    event: kb_event.clone(),
-                });
-                let focused_text_editor = state.borrow().focused_text_editor_state().is_some();
-                if focused_text_editor {
-                    if let Some(Action::Standard(action)) = mapped {
-                        if should_prevent_keydown_for_text_editor_action(&kb_event, action) {
-                            event.prevent_default();
-                        }
-                    }
-                } else if matches!(
-                    mapped,
-                    Some(Action::Standard(
-                        StandardAction::FocusNext | StandardAction::FocusPrevious
-                    ))
-                ) {
-                    event.prevent_default();
-                }
-
-                let browser_key = event.key();
-                if should_forward_keydown_to_widget_tree(
-                    focused_text_editor,
-                    &browser_key,
-                    event.ctrl_key(),
-                    event.alt_key(),
-                    event.meta_key(),
-                ) {
-                    state
-                        .borrow_mut()
-                        .handle_event(InputEvent::KeyDown { event: kb_event });
-                }
+            let focused_text_editor = state.borrow().focused_text_editor_state().is_some();
+            let dispatch = state.borrow().event_translator.translate_key_down(
+                &event.key(),
+                event.shift_key(),
+                event.ctrl_key(),
+                event.alt_key(),
+                event.meta_key(),
+                focused_text_editor,
+            );
+            if dispatch.prevent_default {
+                event.prevent_default();
             }
-
-            if !state.borrow().focused_text_editor_state().is_some() && should_emit_text(&event) {
-                state
-                    .borrow_mut()
-                    .handle_event(InputEvent::TextInput { text: event.key() });
+            if let Some(keyboard_event) = dispatch.keyboard_event {
+                state.borrow_mut().handle_event(keyboard_event);
+            }
+            if let Some(text_event) = dispatch.text_event {
+                state.borrow_mut().handle_event(text_event);
             }
             if state.borrow().should_schedule_frame() {
                 schedule_animation_frame(&window, &pending_animation_frame, &frame_cb);
@@ -1584,16 +1514,17 @@ fn install_event_listeners(
         let frame_cb = Rc::clone(frame_cb);
         let window = window.clone();
         let on_key_up = Closure::wrap(Box::new(move |event: WebKeyboardEvent| {
-            if let Some(key) = map_browser_key(event.key()) {
-                let code = sparsha_input::ui_events::keyboard::Code::Unidentified;
-                let mut kb_event = sparsha_input::KeyboardEvent::key_up(key, code);
-                kb_event.modifiers = browser_modifiers(&event);
-                state
-                    .borrow_mut()
-                    .handle_event(InputEvent::KeyUp { event: kb_event });
-                if state.borrow().should_schedule_frame() {
-                    schedule_animation_frame(&window, &pending_animation_frame, &frame_cb);
-                }
+            if let Some(key_event) = state.borrow().event_translator.translate_key_up(
+                &event.key(),
+                event.shift_key(),
+                event.ctrl_key(),
+                event.alt_key(),
+                event.meta_key(),
+            ) {
+                state.borrow_mut().handle_event(key_event);
+            }
+            if state.borrow().should_schedule_frame() {
+                schedule_animation_frame(&window, &pending_animation_frame, &frame_cb);
             }
         }) as Box<dyn FnMut(_)>);
         let _ = root.add_event_listener_with_callback("keyup", on_key_up.as_ref().unchecked_ref());
@@ -1607,22 +1538,15 @@ fn install_event_listeners(
         let frame_cb = Rc::clone(frame_cb);
         let window = window.clone();
         let on_before_input = Closure::wrap(Box::new(move |event: WebInputEvent| {
-            if state.borrow().text_input_bridge.is_syncing() {
-                return;
-            }
-            if state.borrow().focused_text_editor_state().is_none() {
-                return;
-            }
-            match event.input_type().as_str() {
-                "insertText" => {
-                    if let Some(text) = event.data() {
-                        event.prevent_default();
-                        state
-                            .borrow_mut()
-                            .handle_event(InputEvent::TextInput { text });
-                    }
-                }
-                _ => {}
+            let translated = state.borrow().event_translator.translate_before_input(
+                &event.input_type(),
+                event.data(),
+                state.borrow().text_input_bridge.is_syncing(),
+                state.borrow().focused_text_editor_state().is_some(),
+            );
+            if let Some(input_event) = translated {
+                event.prevent_default();
+                state.borrow_mut().handle_event(input_event);
             }
             if state.borrow().should_schedule_frame() {
                 schedule_animation_frame(&window, &pending_animation_frame, &frame_cb);
@@ -1664,19 +1588,19 @@ fn install_event_listeners(
         let frame_cb = Rc::clone(frame_cb);
         let window = window.clone();
         let on_composition_start = Closure::wrap(Box::new(move |_event: WebCompositionEvent| {
-            if state.borrow().text_input_bridge.is_syncing() {
-                return;
-            }
-            if state.borrow().focused_text_editor_state().is_none() {
-                return;
-            }
-            let mut state_ref = state.borrow_mut();
-            state_ref.ime_composing = true;
-            state_ref.handle_event(InputEvent::CompositionStart);
-            let should_schedule = state_ref.should_schedule_frame();
-            drop(state_ref);
-            if should_schedule {
-                schedule_animation_frame(&window, &pending_animation_frame, &frame_cb);
+            let translated = state.borrow().event_translator.translate_composition_start(
+                state.borrow().text_input_bridge.is_syncing(),
+                state.borrow().focused_text_editor_state().is_some(),
+            );
+            if let Some(input_event) = translated {
+                let mut state_ref = state.borrow_mut();
+                state_ref.ime_composing = true;
+                state_ref.handle_event(input_event);
+                let should_schedule = state_ref.should_schedule_frame();
+                drop(state_ref);
+                if should_schedule {
+                    schedule_animation_frame(&window, &pending_animation_frame, &frame_cb);
+                }
             }
         }) as Box<dyn FnMut(_)>);
         let _ = bridge.add_event_listener_with_callback(
@@ -1693,18 +1617,19 @@ fn install_event_listeners(
         let frame_cb = Rc::clone(frame_cb);
         let window = window.clone();
         let on_composition_update = Closure::wrap(Box::new(move |event: WebCompositionEvent| {
-            if state.borrow().text_input_bridge.is_syncing() {
-                return;
-            }
-            if state.borrow().focused_text_editor_state().is_none() {
-                return;
-            }
-            let text = event.data().unwrap_or_default();
-            state
-                .borrow_mut()
-                .handle_event(InputEvent::CompositionUpdate { text });
-            if state.borrow().should_schedule_frame() {
-                schedule_animation_frame(&window, &pending_animation_frame, &frame_cb);
+            if let Some(input_event) = state
+                .borrow()
+                .event_translator
+                .translate_composition_update(
+                    event.data().unwrap_or_default(),
+                    state.borrow().text_input_bridge.is_syncing(),
+                    state.borrow().focused_text_editor_state().is_some(),
+                )
+            {
+                state.borrow_mut().handle_event(input_event);
+                if state.borrow().should_schedule_frame() {
+                    schedule_animation_frame(&window, &pending_animation_frame, &frame_cb);
+                }
             }
         }) as Box<dyn FnMut(_)>);
         let _ = bridge.add_event_listener_with_callback(
@@ -1721,21 +1646,19 @@ fn install_event_listeners(
         let frame_cb = Rc::clone(frame_cb);
         let window = window.clone();
         let on_composition_end = Closure::wrap(Box::new(move |event: WebCompositionEvent| {
-            if state.borrow().text_input_bridge.is_syncing() {
-                return;
-            }
-            if state.borrow().focused_text_editor_state().is_none() {
-                return;
-            }
-            let mut state_ref = state.borrow_mut();
-            state_ref.ime_composing = false;
-            state_ref.handle_event(InputEvent::CompositionEnd {
-                text: event.data().unwrap_or_default(),
-            });
-            let should_schedule = state_ref.should_schedule_frame();
-            drop(state_ref);
-            if should_schedule {
-                schedule_animation_frame(&window, &pending_animation_frame, &frame_cb);
+            if let Some(input_event) = state.borrow().event_translator.translate_composition_end(
+                event.data().unwrap_or_default(),
+                state.borrow().text_input_bridge.is_syncing(),
+                state.borrow().focused_text_editor_state().is_some(),
+            ) {
+                let mut state_ref = state.borrow_mut();
+                state_ref.ime_composing = false;
+                state_ref.handle_event(input_event);
+                let should_schedule = state_ref.should_schedule_frame();
+                drop(state_ref);
+                if should_schedule {
+                    schedule_animation_frame(&window, &pending_animation_frame, &frame_cb);
+                }
             }
         }) as Box<dyn FnMut(_)>);
         let _ = bridge.add_event_listener_with_callback(
@@ -1752,19 +1675,18 @@ fn install_event_listeners(
         let frame_cb = Rc::clone(frame_cb);
         let window = window.clone();
         let on_paste = Closure::wrap(Box::new(move |event: ClipboardEvent| {
-            if state.borrow().focused_text_editor_state().is_none() {
-                return;
-            }
-            let Some(clipboard) = event.clipboard_data() else {
-                return;
-            };
-            let Ok(text) = clipboard.get_data("text/plain") else {
-                return;
-            };
-            event.prevent_default();
-            state.borrow_mut().handle_event(InputEvent::Paste { text });
-            if state.borrow().should_schedule_frame() {
-                schedule_animation_frame(&window, &pending_animation_frame, &frame_cb);
+            let translated = state.borrow().event_translator.translate_paste(
+                event
+                    .clipboard_data()
+                    .and_then(|clipboard| clipboard.get_data("text/plain").ok()),
+                state.borrow().focused_text_editor_state().is_some(),
+            );
+            if let Some(input_event) = translated {
+                event.prevent_default();
+                state.borrow_mut().handle_event(input_event);
+                if state.borrow().should_schedule_frame() {
+                    schedule_animation_frame(&window, &pending_animation_frame, &frame_cb);
+                }
             }
         }) as Box<dyn FnMut(_)>);
         let _ = bridge.add_event_listener_with_callback("paste", on_paste.as_ref().unchecked_ref());
@@ -1815,11 +1737,16 @@ fn install_event_listeners(
             };
 
             if clipboard_text.is_none() && fallback_text.is_some() {
+                let primary_modifiers = state
+                    .borrow()
+                    .platform_capabilities
+                    .shortcut_profile()
+                    .primary_modifiers();
                 let mut synthetic = sparsha_input::KeyboardEvent::key_down(
                     sparsha_input::Key::Character("x".to_owned()),
                     sparsha_input::ui_events::keyboard::Code::Unidentified,
                 );
-                synthetic.modifiers = primary_shortcut_modifiers();
+                synthetic.modifiers = primary_modifiers;
                 state
                     .borrow_mut()
                     .handle_event(InputEvent::KeyDown { event: synthetic });
@@ -1829,7 +1756,7 @@ fn install_event_listeners(
                         sparsha_input::Key::Character("x".to_owned()),
                         sparsha_input::ui_events::keyboard::Code::Unidentified,
                     );
-                    ctrl_synthetic.modifiers = ctrl_shortcut_modifiers();
+                    ctrl_synthetic.modifiers = Modifiers::CONTROL;
                     state.borrow_mut().handle_event(InputEvent::KeyDown {
                         event: ctrl_synthetic,
                     });
@@ -2069,13 +1996,9 @@ fn install_event_listeners(
     }
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn mouse_button(button: i16) -> PointerButton {
-    match button {
-        0 => PointerButton::Primary,
-        1 => PointerButton::Auxiliary,
-        2 => PointerButton::Secondary,
-        _ => PointerButton::Primary,
-    }
+    WebEventTranslator::new().map_mouse_button(button)
 }
 
 fn event_target_element(target: Option<web_sys::EventTarget>) -> Option<Element> {
@@ -2183,6 +2106,7 @@ fn clear_touch_hover(state: &mut WebAppState, root: &web_sys::HtmlElement) {
     state.handle_event(InputEvent::PointerMove { pos });
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn browser_modifiers(event: &WebKeyboardEvent) -> Modifiers {
     browser_modifiers_from_flags(
         event.shift_key(),
@@ -2192,6 +2116,7 @@ fn browser_modifiers(event: &WebKeyboardEvent) -> Modifiers {
     )
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn browser_wheel_modifiers(event: &WheelEvent) -> Modifiers {
     browser_modifiers_from_flags(
         event.shift_key(),
@@ -2201,71 +2126,22 @@ fn browser_wheel_modifiers(event: &WheelEvent) -> Modifiers {
     )
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn browser_modifiers_from_flags(shift: bool, ctrl: bool, alt: bool, meta: bool) -> Modifiers {
-    let mut modifiers = Modifiers::empty();
-    if shift {
-        modifiers |= Modifiers::SHIFT;
-    }
-    if ctrl {
-        modifiers |= Modifiers::CONTROL;
-    }
-    if alt {
-        modifiers |= Modifiers::ALT;
-    }
-    if meta {
-        modifiers |= Modifiers::META;
-    }
-    modifiers
+    WebEventTranslator::new().modifiers_from_flags(shift, ctrl, alt, meta)
 }
 
-fn primary_shortcut_modifiers() -> Modifiers {
-    Modifiers::META
-}
-
-fn ctrl_shortcut_modifiers() -> Modifiers {
-    Modifiers::CONTROL
-}
-
-fn is_plain_printable_key(key: &str, ctrl: bool, alt: bool, meta: bool) -> bool {
-    key.chars().count() == 1 && !ctrl && !alt && !meta
-}
-
+#[cfg_attr(not(test), allow(dead_code))]
 fn should_prevent_keydown_for_text_editor_action(
     event: &sparsha_input::KeyboardEvent,
     action: StandardAction,
 ) -> bool {
-    matches!(
-        action,
-        StandardAction::FocusNext
-            | StandardAction::FocusPrevious
-            | StandardAction::SelectAll
-            | StandardAction::Undo
-            | StandardAction::Redo
-            | StandardAction::Backspace
-            | StandardAction::Delete
-            | StandardAction::MoveLeft
-            | StandardAction::MoveRight
-            | StandardAction::MoveUp
-            | StandardAction::MoveDown
-            | StandardAction::MoveWordLeft
-            | StandardAction::MoveWordRight
-            | StandardAction::MoveToStart
-            | StandardAction::MoveToEnd
-            | StandardAction::SelectLeft
-            | StandardAction::SelectRight
-            | StandardAction::SelectUp
-            | StandardAction::SelectDown
-            | StandardAction::SelectWordLeft
-            | StandardAction::SelectWordRight
-            | StandardAction::SelectToStart
-            | StandardAction::SelectToEnd
-            | StandardAction::Cancel
-    ) || matches!(action, StandardAction::Activate)
-        && !matches!(&event.key, sparsha_input::Key::Character(value) if value == " ")
+    WebEventTranslator::new().should_prevent_keydown_for_text_editor_action(event, action)
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn should_emit_text(event: &WebKeyboardEvent) -> bool {
-    is_plain_printable_key(
+    WebEventTranslator::new().should_emit_text(
         &event.key(),
         event.ctrl_key(),
         event.alt_key(),
@@ -2273,6 +2149,7 @@ fn should_emit_text(event: &WebKeyboardEvent) -> bool {
     )
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn should_forward_keydown_to_widget_tree(
     focused_text_editor: bool,
     key: &str,
@@ -2280,7 +2157,13 @@ fn should_forward_keydown_to_widget_tree(
     alt: bool,
     meta: bool,
 ) -> bool {
-    !focused_text_editor || !is_plain_printable_key(key, ctrl, alt, meta)
+    WebEventTranslator::new().should_forward_keydown_to_widget_tree(
+        focused_text_editor,
+        key,
+        ctrl,
+        alt,
+        meta,
+    )
 }
 
 fn should_sync_external_hash(current_path: &str, hash: &str) -> bool {
@@ -2298,25 +2181,9 @@ fn should_render_web_layers(
         || (has_surface_frames && matches!(surface_status, HybridSurfaceStatus::Initializing))
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn map_browser_key(key: String) -> Option<sparsha_input::Key> {
-    use sparsha_input::{Key, NamedKey};
-    Some(match key.as_str() {
-        "Enter" => Key::Named(NamedKey::Enter),
-        "Tab" => Key::Named(NamedKey::Tab),
-        "Backspace" => Key::Named(NamedKey::Backspace),
-        "Delete" => Key::Named(NamedKey::Delete),
-        "Escape" => Key::Named(NamedKey::Escape),
-        "ArrowUp" => Key::Named(NamedKey::ArrowUp),
-        "ArrowDown" => Key::Named(NamedKey::ArrowDown),
-        "ArrowLeft" => Key::Named(NamedKey::ArrowLeft),
-        "ArrowRight" => Key::Named(NamedKey::ArrowRight),
-        "Home" => Key::Named(NamedKey::Home),
-        "End" => Key::Named(NamedKey::End),
-        "PageUp" => Key::Named(NamedKey::PageUp),
-        "PageDown" => Key::Named(NamedKey::PageDown),
-        value if value.chars().count() == 1 => Key::Character(value.to_string()),
-        _ => return None,
-    })
+    WebEventTranslator::new().map_key(&key)
 }
 
 #[cfg(test)]

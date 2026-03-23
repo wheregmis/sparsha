@@ -10,6 +10,60 @@ pub use ui_events::{
 };
 
 use glam::Vec2;
+use std::cell::Cell;
+
+/// Platform-specific shortcut interpretation profile.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ShortcutProfile {
+    /// Command/Meta is treated as the primary shortcut modifier.
+    CommandPrimary,
+    /// Control is treated as the primary shortcut modifier.
+    ControlPrimary,
+}
+
+impl ShortcutProfile {
+    /// Resolve the default profile for the current build target.
+    pub const fn current_target() -> Self {
+        #[cfg(any(target_os = "macos", target_arch = "wasm32"))]
+        {
+            Self::CommandPrimary
+        }
+
+        #[cfg(not(any(target_os = "macos", target_arch = "wasm32")))]
+        {
+            Self::ControlPrimary
+        }
+    }
+
+    /// Return the modifier bitmask that represents the primary shortcut modifier.
+    pub const fn primary_modifiers(self) -> Modifiers {
+        match self {
+            Self::CommandPrimary => Modifiers::META,
+            Self::ControlPrimary => Modifiers::CONTROL,
+        }
+    }
+}
+
+thread_local! {
+    static ACTIVE_SHORTCUT_PROFILE: Cell<Option<ShortcutProfile>> = const { Cell::new(None) };
+}
+
+/// Run the provided closure with an explicitly selected shortcut profile.
+pub fn with_shortcut_profile<R>(profile: ShortcutProfile, f: impl FnOnce() -> R) -> R {
+    ACTIVE_SHORTCUT_PROFILE.with(|slot| {
+        let previous = slot.replace(Some(profile));
+        let result = f();
+        slot.set(previous);
+        result
+    })
+}
+
+/// Return the currently active shortcut profile.
+pub fn active_shortcut_profile() -> ShortcutProfile {
+    ACTIVE_SHORTCUT_PROFILE
+        .with(|slot| slot.get())
+        .unwrap_or_else(ShortcutProfile::current_target)
+}
 
 /// Wrapper for common input events used in the widget system.
 #[derive(Clone, Debug)]
@@ -116,48 +170,83 @@ pub mod shortcuts {
 
     /// Return whether the platform-primary shortcut modifier is active.
     ///
-    /// Sparsha treats Meta as primary on macOS and wasm targets, and Control elsewhere.
+    /// Prefer `primary_modifier_for` in shared runtime code so the platform
+    /// layer can select the profile explicitly.
     pub fn primary_modifier(modifiers: Modifiers) -> bool {
-        #[cfg(any(target_os = "macos", target_arch = "wasm32"))]
-        {
-            modifiers.meta()
-        }
+        primary_modifier_for(active_shortcut_profile(), modifiers)
+    }
 
-        #[cfg(not(any(target_os = "macos", target_arch = "wasm32")))]
-        {
-            modifiers.ctrl()
+    /// Return whether the profile-primary shortcut modifier is active.
+    pub fn primary_modifier_for(profile: ShortcutProfile, modifiers: Modifiers) -> bool {
+        match profile {
+            ShortcutProfile::CommandPrimary => modifiers.meta(),
+            ShortcutProfile::ControlPrimary => modifiers.ctrl(),
         }
     }
 
     /// Check if this is the primary copy shortcut.
     pub fn is_copy(event: &KeyboardEvent) -> bool {
-        primary_modifier(event.modifiers) && is_char(event, 'c')
+        is_copy_for(active_shortcut_profile(), event)
+    }
+
+    /// Check if this is the primary copy shortcut for the given profile.
+    pub fn is_copy_for(profile: ShortcutProfile, event: &KeyboardEvent) -> bool {
+        primary_modifier_for(profile, event.modifiers) && is_char(event, 'c')
     }
 
     /// Check if this is the primary paste shortcut.
     pub fn is_paste(event: &KeyboardEvent) -> bool {
-        primary_modifier(event.modifiers) && is_char(event, 'v')
+        is_paste_for(active_shortcut_profile(), event)
+    }
+
+    /// Check if this is the primary paste shortcut for the given profile.
+    pub fn is_paste_for(profile: ShortcutProfile, event: &KeyboardEvent) -> bool {
+        primary_modifier_for(profile, event.modifiers) && is_char(event, 'v')
     }
 
     /// Check if this is the primary cut shortcut.
     pub fn is_cut(event: &KeyboardEvent) -> bool {
-        primary_modifier(event.modifiers) && is_char(event, 'x')
+        is_cut_for(active_shortcut_profile(), event)
+    }
+
+    /// Check if this is the primary cut shortcut for the given profile.
+    pub fn is_cut_for(profile: ShortcutProfile, event: &KeyboardEvent) -> bool {
+        primary_modifier_for(profile, event.modifiers) && is_char(event, 'x')
     }
 
     /// Check if this is the primary select-all shortcut.
     pub fn is_select_all(event: &KeyboardEvent) -> bool {
-        primary_modifier(event.modifiers) && is_char(event, 'a')
+        is_select_all_for(active_shortcut_profile(), event)
+    }
+
+    /// Check if this is the primary select-all shortcut for the given profile.
+    pub fn is_select_all_for(profile: ShortcutProfile, event: &KeyboardEvent) -> bool {
+        primary_modifier_for(profile, event.modifiers) && is_char(event, 'a')
     }
 
     /// Check if this is the primary undo shortcut.
     pub fn is_undo(event: &KeyboardEvent) -> bool {
-        primary_modifier(event.modifiers) && !event.modifiers.shift() && is_char(event, 'z')
+        is_undo_for(active_shortcut_profile(), event)
+    }
+
+    /// Check if this is the primary undo shortcut for the given profile.
+    pub fn is_undo_for(profile: ShortcutProfile, event: &KeyboardEvent) -> bool {
+        primary_modifier_for(profile, event.modifiers)
+            && !event.modifiers.shift()
+            && is_char(event, 'z')
     }
 
     /// Check if this is the primary redo shortcut.
     pub fn is_redo(event: &KeyboardEvent) -> bool {
-        (primary_modifier(event.modifiers) && event.modifiers.shift() && is_char(event, 'z'))
-            || (primary_modifier(event.modifiers) && is_char(event, 'y'))
+        is_redo_for(active_shortcut_profile(), event)
+    }
+
+    /// Check if this is the primary redo shortcut for the given profile.
+    pub fn is_redo_for(profile: ShortcutProfile, event: &KeyboardEvent) -> bool {
+        (primary_modifier_for(profile, event.modifiers)
+            && event.modifiers.shift()
+            && is_char(event, 'z'))
+            || (primary_modifier_for(profile, event.modifiers) && is_char(event, 'y'))
     }
 
     /// Check if this is the Escape key.

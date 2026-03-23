@@ -4,7 +4,10 @@
 //! This allows multiple input methods (keyboard, mouse, touch) to trigger
 //! the same logical action.
 
-use crate::{shortcuts, InputEvent, Key, KeyboardEvent, NamedKey, PointerButton};
+use crate::{
+    active_shortcut_profile, shortcuts, InputEvent, Key, KeyboardEvent, NamedKey, PointerButton,
+    ShortcutProfile,
+};
 
 /// Built-in UI actions that have standard semantics.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -110,7 +113,9 @@ impl From<&str> for Action {
 }
 
 /// Maps input events to actions using pattern matching.
-pub struct ActionMapper;
+pub struct ActionMapper {
+    shortcut_profile: ShortcutProfile,
+}
 
 impl Default for ActionMapper {
     fn default() -> Self {
@@ -121,7 +126,19 @@ impl Default for ActionMapper {
 impl ActionMapper {
     /// Create a new action mapper.
     pub fn new() -> Self {
-        Self
+        Self {
+            shortcut_profile: active_shortcut_profile(),
+        }
+    }
+
+    /// Create an action mapper with an explicit shortcut profile.
+    pub fn with_shortcut_profile(shortcut_profile: ShortcutProfile) -> Self {
+        Self { shortcut_profile }
+    }
+
+    /// Return the active shortcut profile for this mapper.
+    pub fn shortcut_profile(&self) -> ShortcutProfile {
+        self.shortcut_profile
     }
 
     /// Map a keyboard event to a standard action.
@@ -129,22 +146,22 @@ impl ActionMapper {
         use StandardAction::*;
 
         // Check shortcuts first (they use modifiers)
-        if shortcuts::is_copy(event) {
+        if shortcuts::is_copy_for(self.shortcut_profile, event) {
             return Some(Copy);
         }
-        if shortcuts::is_cut(event) {
+        if shortcuts::is_cut_for(self.shortcut_profile, event) {
             return Some(Cut);
         }
-        if shortcuts::is_paste(event) {
+        if shortcuts::is_paste_for(self.shortcut_profile, event) {
             return Some(Paste);
         }
-        if shortcuts::is_select_all(event) {
+        if shortcuts::is_select_all_for(self.shortcut_profile, event) {
             return Some(SelectAll);
         }
-        if shortcuts::is_undo(event) {
+        if shortcuts::is_undo_for(self.shortcut_profile, event) {
             return Some(Undo);
         }
-        if shortcuts::is_redo(event) {
+        if shortcuts::is_redo_for(self.shortcut_profile, event) {
             return Some(Redo);
         }
 
@@ -171,22 +188,32 @@ impl ActionMapper {
                 NamedKey::Backspace => Some(Backspace),
                 NamedKey::Delete => Some(Delete),
                 NamedKey::ArrowLeft => {
-                    if event.modifiers.shift() && shortcuts::primary_modifier(event.modifiers) {
+                    if event.modifiers.shift()
+                        && shortcuts::primary_modifier_for(self.shortcut_profile, event.modifiers)
+                    {
                         Some(SelectWordLeft)
                     } else if event.modifiers.shift() {
                         Some(SelectLeft)
-                    } else if shortcuts::primary_modifier(event.modifiers) {
+                    } else if shortcuts::primary_modifier_for(
+                        self.shortcut_profile,
+                        event.modifiers,
+                    ) {
                         Some(MoveWordLeft)
                     } else {
                         Some(MoveLeft)
                     }
                 }
                 NamedKey::ArrowRight => {
-                    if event.modifiers.shift() && shortcuts::primary_modifier(event.modifiers) {
+                    if event.modifiers.shift()
+                        && shortcuts::primary_modifier_for(self.shortcut_profile, event.modifiers)
+                    {
                         Some(SelectWordRight)
                     } else if event.modifiers.shift() {
                         Some(SelectRight)
-                    } else if shortcuts::primary_modifier(event.modifiers) {
+                    } else if shortcuts::primary_modifier_for(
+                        self.shortcut_profile,
+                        event.modifiers,
+                    ) {
                         Some(MoveWordRight)
                     } else {
                         Some(MoveRight)

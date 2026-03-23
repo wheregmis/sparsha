@@ -4,6 +4,7 @@
 //! re-export for advanced configuration.
 
 mod atlas;
+mod metrics_backend;
 mod system;
 
 pub use atlas::GlyphAtlas;

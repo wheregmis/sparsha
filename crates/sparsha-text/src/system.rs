@@ -1,6 +1,7 @@
 //! Text shaping and layout system using Parley.
 
 use crate::atlas::{CachedGlyph, GlyphAtlas, GlyphBitmap, GlyphKey};
+use crate::metrics_backend::{default_text_metrics_backend, TextMetricsBackend};
 #[cfg(not(target_arch = "wasm32"))]
 use parley::fontique::Blob;
 use parley::{
@@ -112,6 +113,7 @@ pub struct TextSystem {
     atlas: Option<GlyphAtlas>,
     measure_cache: HashMap<TextCacheKey, (f32, f32)>,
     shape_cache: HashMap<TextCacheKey, ShapedText>,
+    metrics_backend: Box<dyn TextMetricsBackend>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -179,6 +181,7 @@ impl TextSystem {
             atlas: None,
             measure_cache: HashMap::new(),
             shape_cache: HashMap::new(),
+            metrics_backend: default_text_metrics_backend(),
         }
     }
 
@@ -474,6 +477,17 @@ impl TextSystem {
         let cache_key = TextCacheKey::new(text, style, max_width);
         if let Some(cached) = self.measure_cache.get(&cache_key) {
             return *cached;
+        }
+
+        if max_width.is_none() {
+            if let Some((width, height)) = self.metrics_backend.measure_inline(text, style) {
+                let measured = (
+                    width.max(0.0),
+                    height.max(style.font_size * style.line_height),
+                );
+                cache_insert(&mut self.measure_cache, cache_key, measured, 1024);
+                return measured;
+            }
         }
 
         // Build layout with Parley

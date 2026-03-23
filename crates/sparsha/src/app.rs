@@ -4,15 +4,23 @@
 use crate::accessibility::{action_from_accesskit, AccessibilityTreeSnapshot};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::component::ComponentStateStore;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::platform::events::{NativeEventTranslator, NativeKeyboardDispatch};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::platform::{
+    AccessibilityBackend, ClipboardService, PlatformCapabilities, PlatformEffect, PlatformFeature,
+    PlatformId, PointerCaptureService, TextInputService,
+};
 use crate::router::Router;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::router::RouterHost;
 #[cfg(not(target_arch = "wasm32"))]
-use crate::runtime_widget::{
-    add_widget_to_layout, apply_focus_change, collect_accessibility_tree, dispatch_widget_event,
-    move_focus_path, remap_path, sync_focus_manager, with_widget_mut, WidgetPath,
-    WidgetRuntimeRegistry,
+use crate::runtime_core::{
+    build_layout as build_runtime_layout, focused_text_editor_state, handle_accessibility_action,
+    handle_input_event, refresh_accessibility_tree, RuntimeCoreContext,
 };
+#[cfg(not(target_arch = "wasm32"))]
+use crate::runtime_widget::{WidgetPath, WidgetRuntimeRegistry};
 use sparsha_core::Color;
 use sparsha_core::WgpuInitError;
 use sparsha_signals::{ReadSignal, Signal};
@@ -25,9 +33,7 @@ use crate::tasks::{TaskRuntime, TaskStatus};
 #[cfg(not(target_arch = "wasm32"))]
 use sparsha_core::{init_wgpu, SurfaceState};
 #[cfg(not(target_arch = "wasm32"))]
-use sparsha_input::{
-    Action, ActionMapper, FocusManager, InputEvent, Modifiers, PointerButton, StandardAction,
-};
+use sparsha_input::{FocusManager, InputEvent, Modifiers, PointerButton};
 #[cfg(not(target_arch = "wasm32"))]
 use sparsha_layout::LayoutTree;
 #[cfg(not(target_arch = "wasm32"))]
@@ -39,7 +45,7 @@ use sparsha_signals::{RuntimeHandle, SubscriberKind};
 #[cfg(not(target_arch = "wasm32"))]
 use sparsha_text::TextSystem;
 #[cfg(not(target_arch = "wasm32"))]
-use sparsha_widgets::{BuildContext, PaintCommands, PaintContext};
+use sparsha_widgets::{PaintCommands, PaintContext};
 #[cfg(not(target_arch = "wasm32"))]
 use wgpu::{Device, Queue};
 #[cfg(not(target_arch = "wasm32"))]
@@ -393,6 +399,10 @@ struct AppRunner {
 
 #[cfg(not(target_arch = "wasm32"))]
 struct AppState {
+    navigator: crate::router::Navigator,
+    platform_id: PlatformId,
+    platform_capabilities: PlatformCapabilities,
+    event_translator: NativeEventTranslator,
     window: &'static winit::window::Window,
     device: Device,
     queue: Queue,
@@ -429,29 +439,7 @@ impl AppState {
     }
 
     fn focused_text_editor_state(&self) -> Option<&sparsha_widgets::TextEditorState> {
-        self.focused_path
-            .as_ref()
-            .and_then(|path| self.widget_registry.text_editor_state_for_path(path))
-    }
-
-    fn set_clipboard_text(&mut self, text: &str) {
-        let Some(clipboard) = self.clipboard.as_mut() else {
-            return;
-        };
-        if let Err(err) = clipboard.set_text(text.to_owned()) {
-            log::warn!("failed to write clipboard text: {err}");
-        }
-    }
-
-    fn clipboard_text(&mut self) -> Option<String> {
-        let clipboard = self.clipboard.as_mut()?;
-        match clipboard.get_text() {
-            Ok(text) => Some(text),
-            Err(err) => {
-                log::warn!("failed to read clipboard text: {err}");
-                None
-            }
-        }
+        focused_text_editor_state(&self.widget_registry, self.focused_path.as_deref())
     }
 
     fn sync_window_metrics(&mut self) -> bool {
@@ -477,6 +465,152 @@ impl AppState {
 
         changed
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct NativeClipboardBridge<'a> {
+    clipboard: &'a mut Option<arboard::Clipboard>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl ClipboardService for NativeClipboardBridge<'_> {
+    fn read_text(&mut self) -> Option<String> {
+        let clipboard = self.clipboard.as_mut()?;
+        match clipboard.get_text() {
+            Ok(text) => Some(text),
+            Err(err) => {
+                log::warn!("failed to read clipboard text: {err}");
+                None
+            }
+        }
+    }
+
+    fn write_text(&mut self, text: &str) {
+        let Some(clipboard) = self.clipboard.as_mut() else {
+            return;
+        };
+        if let Err(err) = clipboard.set_text(text.to_owned()) {
+            log::warn!("failed to write clipboard text: {err}");
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct NativeTextInputBridge<'a> {
+    window: &'a winit::window::Window,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl TextInputService for NativeTextInputBridge<'_> {
+    fn sync_editor_state(
+        &mut self,
+        editor_state: Option<&sparsha_widgets::TextEditorState>,
+        _suppress_bridge: bool,
+    ) {
+        set_native_ime_allowed(self.window, editor_state.is_some());
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct NativePointerCaptureBridge;
+
+#[cfg(not(target_arch = "wasm32"))]
+impl PointerCaptureService for NativePointerCaptureBridge {
+    fn sync_capture(&mut self, _has_capture: bool) {}
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct NativeAccessibilityBridge<'a> {
+    snapshot: &'a Arc<Mutex<AccessibilityTreeSnapshot>>,
+    adapter: Option<&'a mut accesskit_winit::Adapter>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl AccessibilityBackend for NativeAccessibilityBridge<'_> {
+    fn update_accessibility(&mut self, title: &str, snapshot: &AccessibilityTreeSnapshot) {
+        match self.snapshot.lock() {
+            Ok(mut guard) => {
+                *guard = snapshot.clone();
+            }
+            Err(poisoned) => {
+                log::warn!("recovering from poisoned accessibility snapshot");
+                *poisoned.into_inner() = snapshot.clone();
+            }
+        }
+
+        if let Some(adapter) = self.adapter.as_mut() {
+            adapter.update_if_active(|| snapshot.to_tree_update(title));
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn feature_for_effect(effect: &PlatformEffect) -> PlatformFeature {
+    match effect {
+        PlatformEffect::SyncTextInput => PlatformFeature::ImeComposition,
+        PlatformEffect::SyncPointerCapture => PlatformFeature::PointerCapture,
+        PlatformEffect::WriteClipboard(_) => PlatformFeature::ClipboardWrite,
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn log_effect_support(state: &AppState, effect: &PlatformEffect) {
+    let feature = feature_for_effect(effect);
+    let support = state.platform_capabilities.support(feature);
+    if matches!(
+        support.support,
+        crate::platform::SupportLevel::Partial | crate::platform::SupportLevel::Unsupported
+    ) {
+        log::warn!(
+            "platform {:?} handling {:?} via {:?}: {}",
+            state.platform_id,
+            feature,
+            support.fallback,
+            support.rationale
+        );
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn apply_native_platform_effects(
+    state: &mut AppState,
+    title: &str,
+    effects: &crate::platform::PlatformEffects,
+) {
+    for effect in effects.iter() {
+        log_effect_support(state, effect);
+    }
+    let focused_editor_state = state.focused_text_editor_state().cloned();
+    let has_capture = state.capture_path.is_some();
+    let mut clipboard = NativeClipboardBridge {
+        clipboard: &mut state.clipboard,
+    };
+    let mut text_input = NativeTextInputBridge {
+        window: state.window,
+    };
+    let mut pointer_capture = NativePointerCaptureBridge;
+
+    for effect in effects.iter() {
+        match effect {
+            PlatformEffect::SyncTextInput => {
+                text_input.sync_editor_state(focused_editor_state.as_ref(), false)
+            }
+            PlatformEffect::SyncPointerCapture => pointer_capture.sync_capture(has_capture),
+            PlatformEffect::WriteClipboard(text) => clipboard.write_text(text),
+        }
+    }
+
+    let snapshot = refresh_accessibility_tree(
+        &mut state.widget_registry,
+        state.root_widget.as_ref(),
+        &state.layout_tree,
+        state.focused_path.as_ref(),
+    );
+    let mut accessibility = NativeAccessibilityBridge {
+        snapshot: &state.accessibility_snapshot,
+        adapter: state.accessibility_adapter.as_mut(),
+    };
+    accessibility.update_accessibility(title, &snapshot);
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -539,87 +673,46 @@ impl AppRunner {
         let Some(state) = self.state.as_mut() else {
             return;
         };
-
-        state.widget_registry.accessibility = collect_accessibility_tree(
-            state.root_widget.as_ref(),
-            &state.layout_tree,
-            state.focused_path.as_ref(),
+        apply_native_platform_effects(
+            state,
+            &self.config.title,
+            &crate::platform::PlatformEffects::default(),
         );
-        let snapshot = state.widget_registry.accessibility_tree().clone();
-        match state.accessibility_snapshot.lock() {
-            Ok(mut guard) => {
-                *guard = snapshot.clone();
-            }
-            Err(poisoned) => {
-                log::warn!("recovering from poisoned accessibility snapshot");
-                *poisoned.into_inner() = snapshot.clone();
-            }
-        }
-
-        if let Some(adapter) = state.accessibility_adapter.as_mut() {
-            let title = self.config.title.clone();
-            adapter.update_if_active(|| snapshot.to_tree_update(&title));
-        }
     }
 
     fn handle_accessibility_action(
         &mut self,
         request: crate::accessibility::RoutedAccessibilityAction,
     ) {
-        {
-            let Some(state) = self.state.as_mut() else {
-                return;
-            };
-
-            let Some(path) = state
-                .widget_registry
-                .path_for_accessibility_node(request.node_id)
-                .map(ToOwned::to_owned)
-            else {
-                return;
-            };
-
-            match request.action {
-                sparsha_widgets::AccessibilityAction::Focus => {
-                    let focus_changed = apply_focus_change(
-                        state.root_widget.as_mut(),
-                        &mut state.focus_manager,
-                        &state.widget_registry,
-                        &mut state.focused_path,
-                        Some(path),
-                    );
-                    if focus_changed {
-                        set_native_ime_allowed(
-                            state.window,
-                            state.focused_text_editor_state().is_some(),
-                        );
-                        state.needs_repaint = true;
-                    }
-                }
-                action => {
-                    let handled = with_widget_mut(state.root_widget.as_mut(), &path, |widget| {
-                        widget.handle_accessibility_action(action, request.value.clone())
-                    })
-                    .unwrap_or(false);
-                    if handled {
-                        if matches!(action, sparsha_widgets::AccessibilityAction::SetValue) {
-                            state.needs_layout = true;
-                        }
-                        state.needs_repaint = true;
-                    }
-                }
-            }
-
-            state.signal_runtime.run_effects(64);
-            let dirty = state.signal_runtime.take_dirty_flags();
-            if dirty.rebuild || dirty.layout {
-                state.needs_layout = true;
-            }
-            if dirty.paint {
-                state.needs_repaint = true;
-            }
-        }
-        self.refresh_accessibility();
+        let Some(state) = self.state.as_mut() else {
+            return;
+        };
+        let viewport = state.logical_viewport();
+        let effects = handle_accessibility_action(
+            RuntimeCoreContext {
+                theme: &state.theme,
+                navigator: state.navigator.clone(),
+                root_widget: state.root_widget.as_mut(),
+                layout_tree: &mut state.layout_tree,
+                widget_registry: &mut state.widget_registry,
+                component_states: &mut state.component_states,
+                focus_manager: &mut state.focus_manager,
+                focused_path: &mut state.focused_path,
+                capture_path: &mut state.capture_path,
+                signal_runtime: state.signal_runtime.clone(),
+                task_runtime: state.task_runtime.clone(),
+                text_system: &mut state.text_system,
+                viewport,
+                shortcut_profile: state.platform_capabilities.shortcut_profile(),
+                ime_composing: &mut state.ime_composing,
+                needs_layout: &mut state.needs_layout,
+                needs_repaint: &mut state.needs_repaint,
+            },
+            request.node_id,
+            request.action,
+            request.value,
+        );
+        apply_native_platform_effects(state, &self.config.title, &effects);
         if let Some(state) = self.state.as_ref() {
             if state.needs_layout || state.needs_repaint {
                 state.window.request_redraw();
@@ -628,111 +721,30 @@ impl AppRunner {
     }
 
     fn build_layout(&mut self) {
-        {
-            let Some(state) = self.state.as_mut() else {
-                return;
-            };
-            let runtime = state.signal_runtime.clone();
-
-            state.layout_tree = LayoutTree::new();
-            state.component_states.begin_rebuild();
-
-            runtime.with_tracking(SubscriberKind::Rebuild, || {
-                let resolved_theme = state.theme.resolve_theme();
-                let navigator = self.router.navigator();
-                let viewport = state.logical_viewport();
-                set_current_theme(resolved_theme.clone());
-                set_current_viewport(viewport);
-
-                fn rebuild_widget(
-                    widget: &mut dyn Widget,
-                    build_ctx: &mut BuildContext,
-                    path: &mut Vec<usize>,
-                ) {
-                    build_ctx.set_path(path);
-                    widget.rebuild(build_ctx);
-                    let child_keys: Vec<_> = (0..widget.children().len())
-                        .map(|index| widget.child_path_key(index))
-                        .collect();
-                    for (index, child) in widget.children_mut().iter_mut().enumerate() {
-                        path.push(child_keys[index]);
-                        rebuild_widget(child.as_mut(), build_ctx, path);
-                        path.pop();
-                    }
-                }
-
-                fn persist_widget_state(
-                    widget: &dyn Widget,
-                    build_ctx: &mut BuildContext,
-                    path: &mut Vec<usize>,
-                ) {
-                    build_ctx.set_path(path);
-                    widget.persist_build_state(build_ctx);
-                    let child_keys: Vec<_> = (0..widget.children().len())
-                        .map(|index| widget.child_path_key(index))
-                        .collect();
-                    for (index, child) in widget.children().iter().enumerate() {
-                        path.push(child_keys[index]);
-                        persist_widget_state(child.as_ref(), build_ctx, path);
-                        path.pop();
-                    }
-                }
-
-                let mut build_ctx = BuildContext::default();
-                build_ctx.set_theme(resolved_theme);
-                build_ctx.insert_resource(navigator);
-                build_ctx.insert_resource(state.task_runtime.clone());
-                build_ctx.insert_resource(state.signal_runtime.clone());
-                build_ctx.insert_resource(viewport);
-                // SAFETY: the build pass owns `component_states` for the entire
-                // lifetime of `build_ctx` and nothing aliases it during rebuild.
-                unsafe { build_ctx.set_state_store(&mut state.component_states) };
-                let mut path = Vec::new();
-                persist_widget_state(state.root_widget.as_ref(), &mut build_ctx, &mut path);
-                state.component_states.begin_rebuild();
-                path.clear();
-                rebuild_widget(state.root_widget.as_mut(), &mut build_ctx, &mut path);
-            });
-            state.component_states.finish_rebuild();
-
-            let mut widget_registry = WidgetRuntimeRegistry::default();
-            let root_id = runtime.with_tracking(SubscriberKind::Layout, || {
-                set_current_theme(state.theme.resolve_theme());
-                set_current_viewport(state.logical_viewport());
-                let mut path = Vec::new();
-                add_widget_to_layout(
-                    state.root_widget.as_mut(),
-                    &mut state.layout_tree,
-                    &mut state.text_system,
-                    &mut widget_registry,
-                    &mut path,
-                    false,
-                    true,
-                )
-            });
-            state.layout_tree.set_root(root_id);
-            state.widget_registry = widget_registry;
-
-            let size = state.surface_state.size;
-            let logical_width = (size.width as f32) / state.scale_factor;
-            let logical_height = (size.height as f32) / state.scale_factor;
-            state
-                .layout_tree
-                .compute_layout(logical_width, logical_height);
-
-            state.focused_path = remap_path(state.focused_path.take(), &state.widget_registry);
-            state.capture_path = remap_path(state.capture_path.take(), &state.widget_registry);
-            sync_focus_manager(
-                &mut state.focus_manager,
-                &state.widget_registry,
-                state.focused_path.as_ref(),
-            );
-            set_native_ime_allowed(state.window, state.focused_text_editor_state().is_some());
-
-            state.needs_layout = false;
-            state.needs_repaint = true;
-        }
-        self.refresh_accessibility();
+        let Some(state) = self.state.as_mut() else {
+            return;
+        };
+        let viewport = state.logical_viewport();
+        let effects = build_runtime_layout(RuntimeCoreContext {
+            theme: &state.theme,
+            navigator: state.navigator.clone(),
+            root_widget: state.root_widget.as_mut(),
+            layout_tree: &mut state.layout_tree,
+            widget_registry: &mut state.widget_registry,
+            component_states: &mut state.component_states,
+            focus_manager: &mut state.focus_manager,
+            focused_path: &mut state.focused_path,
+            capture_path: &mut state.capture_path,
+            signal_runtime: state.signal_runtime.clone(),
+            task_runtime: state.task_runtime.clone(),
+            text_system: &mut state.text_system,
+            viewport,
+            shortcut_profile: state.platform_capabilities.shortcut_profile(),
+            ime_composing: &mut state.ime_composing,
+            needs_layout: &mut state.needs_layout,
+            needs_repaint: &mut state.needs_repaint,
+        });
+        apply_native_platform_effects(state, &self.config.title, &effects);
     }
 
     fn paint(&mut self) {
@@ -844,122 +856,40 @@ impl AppRunner {
     }
 
     fn handle_event(&mut self, event: InputEvent) {
-        let mut handled_focus_navigation = false;
-        {
-            let Some(state) = self.state.as_mut() else {
-                return;
-            };
-
-            let runtime = state.signal_runtime.clone();
-            let mapper = ActionMapper::new();
-            let mut dispatch_event = event.clone();
-
-            if let Some(Action::Standard(action)) = mapper.map_event(&event) {
-                match action {
-                    StandardAction::FocusNext | StandardAction::FocusPrevious => {
-                        let next_focus = move_focus_path(
-                            state.focused_path.as_ref(),
-                            &state.widget_registry,
-                            matches!(action, StandardAction::FocusNext),
-                        );
-                        let focus_changed = apply_focus_change(
-                            state.root_widget.as_mut(),
-                            &mut state.focus_manager,
-                            &state.widget_registry,
-                            &mut state.focused_path,
-                            next_focus,
-                        );
-                        if focus_changed {
-                            set_native_ime_allowed(
-                                state.window,
-                                state.focused_text_editor_state().is_some(),
-                            );
-                            state.needs_repaint = true;
-                        }
-                        handled_focus_navigation = true;
-                    }
-                    StandardAction::Paste if state.focused_text_editor_state().is_some() => {
-                        let Some(text) = state.clipboard_text() else {
-                            return;
-                        };
-                        dispatch_event = InputEvent::Paste { text };
-                    }
-                    _ => {}
-                }
-            }
-
-            if !handled_focus_navigation {
-                let current_focus_id = state
-                    .focused_path
-                    .as_ref()
-                    .and_then(|path| state.widget_registry.id_for_path(path));
-                let current_capture_path = state.capture_path.clone();
-                let outcome = runtime.run_with_current(|| {
-                    dispatch_widget_event(
-                        state.root_widget.as_mut(),
-                        &state.layout_tree,
-                        current_focus_id,
-                        current_capture_path.as_ref(),
-                        &dispatch_event,
-                    )
-                });
-
-                if outcome.commands.request_focus || outcome.commands.clear_focus {
-                    let focus_changed = apply_focus_change(
-                        state.root_widget.as_mut(),
-                        &mut state.focus_manager,
-                        &state.widget_registry,
-                        &mut state.focused_path,
-                        outcome.focus_path.clone(),
-                    );
-                    if focus_changed {
-                        set_native_ime_allowed(
-                            state.window,
-                            state.focused_text_editor_state().is_some(),
-                        );
-                        if state.focused_text_editor_state().is_none() {
-                            state.ime_composing = false;
-                        }
-                        state.needs_repaint = true;
-                    }
-                }
-
-                if outcome.commands.capture_pointer || outcome.commands.release_pointer {
-                    state.capture_path = outcome.capture_path;
-                    state.needs_repaint = true;
-                }
-
-                if let Some(text) = outcome.commands.clipboard_write.as_deref() {
-                    state.set_clipboard_text(text);
-                }
-
-                if outcome.commands.request_paint {
-                    state.needs_repaint = true;
-                }
-                if outcome.commands.request_layout {
-                    state.needs_layout = true;
-                }
-
-                runtime.run_effects(64);
-                let dirty = runtime.take_dirty_flags();
-                if dirty.rebuild || dirty.layout {
-                    state.needs_layout = true;
-                }
-                if dirty.paint {
-                    state.needs_repaint = true;
-                }
-            }
-        }
-        if handled_focus_navigation {
-            self.refresh_accessibility();
-            if let Some(state) = self.state.as_ref() {
-                if state.needs_repaint || state.needs_layout {
-                    state.window.request_redraw();
-                }
-            }
+        let Some(state) = self.state.as_mut() else {
             return;
-        }
-        self.refresh_accessibility();
+        };
+        let clipboard_text = {
+            let mut clipboard = NativeClipboardBridge {
+                clipboard: &mut state.clipboard,
+            };
+            clipboard.read_text()
+        };
+        let viewport = state.logical_viewport();
+        let effects = handle_input_event(
+            RuntimeCoreContext {
+                theme: &state.theme,
+                navigator: state.navigator.clone(),
+                root_widget: state.root_widget.as_mut(),
+                layout_tree: &mut state.layout_tree,
+                widget_registry: &mut state.widget_registry,
+                component_states: &mut state.component_states,
+                focus_manager: &mut state.focus_manager,
+                focused_path: &mut state.focused_path,
+                capture_path: &mut state.capture_path,
+                signal_runtime: state.signal_runtime.clone(),
+                task_runtime: state.task_runtime.clone(),
+                text_system: &mut state.text_system,
+                viewport,
+                shortcut_profile: state.platform_capabilities.shortcut_profile(),
+                ime_composing: &mut state.ime_composing,
+                needs_layout: &mut state.needs_layout,
+                needs_repaint: &mut state.needs_repaint,
+            },
+            event,
+            clipboard_text,
+        );
+        apply_native_platform_effects(state, &self.config.title, &effects);
         if let Some(state) = self.state.as_ref() {
             if state.needs_repaint || state.needs_layout {
                 state.window.request_redraw();
@@ -969,58 +899,15 @@ impl AppRunner {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+#[cfg_attr(not(test), allow(dead_code))]
 fn map_winit_key(key: &winit::keyboard::Key<&str>) -> Option<sparsha_input::Key> {
-    use sparsha_input::{Key, NamedKey};
-
-    Some(match key {
-        winit::keyboard::Key::Character(value) => Key::Character(value.to_string()),
-        winit::keyboard::Key::Named(winit::keyboard::NamedKey::Space) => {
-            Key::Character(" ".to_owned())
-        }
-        winit::keyboard::Key::Named(named) => Key::Named(match named {
-            winit::keyboard::NamedKey::Enter => NamedKey::Enter,
-            winit::keyboard::NamedKey::Tab => NamedKey::Tab,
-            winit::keyboard::NamedKey::Backspace => NamedKey::Backspace,
-            winit::keyboard::NamedKey::Delete => NamedKey::Delete,
-            winit::keyboard::NamedKey::Escape => NamedKey::Escape,
-            winit::keyboard::NamedKey::ArrowUp => NamedKey::ArrowUp,
-            winit::keyboard::NamedKey::ArrowDown => NamedKey::ArrowDown,
-            winit::keyboard::NamedKey::ArrowLeft => NamedKey::ArrowLeft,
-            winit::keyboard::NamedKey::ArrowRight => NamedKey::ArrowRight,
-            winit::keyboard::NamedKey::Home => NamedKey::Home,
-            winit::keyboard::NamedKey::End => NamedKey::End,
-            winit::keyboard::NamedKey::PageUp => NamedKey::PageUp,
-            winit::keyboard::NamedKey::PageDown => NamedKey::PageDown,
-            _ => return None,
-        }),
-        _ => return None,
-    })
+    NativeEventTranslator::new(PlatformId::current_native()).map_key(key)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn winit_modifiers_to_input(modifiers: winit::keyboard::ModifiersState) -> Modifiers {
-    let mut converted = Modifiers::empty();
-    if modifiers.shift_key() {
-        converted |= Modifiers::SHIFT;
-    }
-    if modifiers.control_key() {
-        converted |= Modifiers::CONTROL;
-    }
-    if modifiers.alt_key() {
-        converted |= Modifiers::ALT;
-    }
-    if modifiers.super_key() {
-        converted |= Modifiers::META;
-    }
-    converted
-}
-
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg_attr(not(test), allow(dead_code))]
 fn should_emit_native_text(text: &str, modifiers: Modifiers) -> bool {
-    !text.is_empty()
-        && text.chars().all(|ch| !ch.is_control())
-        && !sparsha_input::shortcuts::primary_modifier(modifiers)
-        && !modifiers.alt()
+    NativeEventTranslator::new(PlatformId::current_native()).should_emit_text(text, modifiers)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1118,6 +1005,7 @@ impl winit::application::ApplicationHandler<NativeUserEvent> for AppRunner {
                 .run_with_current(|| Box::new(RouterHost::new(router.clone())) as Box<dyn Widget>);
 
             let scale_factor = window.scale_factor() as f32;
+            let platform_id = PlatformId::current_native();
             let clipboard = match arboard::Clipboard::new() {
                 Ok(clipboard) => Some(clipboard),
                 Err(err) => {
@@ -1127,6 +1015,10 @@ impl winit::application::ApplicationHandler<NativeUserEvent> for AppRunner {
             };
 
             self.state = Some(AppState {
+                navigator: self.router.navigator(),
+                platform_id,
+                platform_capabilities: PlatformCapabilities::new(platform_id),
+                event_translator: NativeEventTranslator::new(platform_id),
                 window,
                 device,
                 queue,
@@ -1216,15 +1108,17 @@ impl winit::application::ApplicationHandler<NativeUserEvent> for AppRunner {
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
-                // Convert physical pixels to logical pixels for event handling
-                let scale_factor = self.state.as_ref().map(|s| s.scale_factor).unwrap_or(1.0);
-                let pos = glam::Vec2::new(
-                    position.x as f32 / scale_factor,
-                    position.y as f32 / scale_factor,
-                );
-                if let Some(s) = self.state.as_mut() {
-                    s.mouse_pos = pos;
-                }
+                let pos = if let Some(state) = self.state.as_mut() {
+                    let pos = state.event_translator.cursor_position(
+                        position.x as f32,
+                        position.y as f32,
+                        state.scale_factor,
+                    );
+                    state.mouse_pos = pos;
+                    pos
+                } else {
+                    glam::Vec2::ZERO
+                };
                 self.handle_event(InputEvent::PointerMove { pos });
             }
             WindowEvent::MouseInput {
@@ -1233,12 +1127,11 @@ impl winit::application::ApplicationHandler<NativeUserEvent> for AppRunner {
                 ..
             } => {
                 let pos = self.state.as_ref().map(|s| s.mouse_pos).unwrap_or_default();
-                let button = match button {
-                    winit::event::MouseButton::Left => PointerButton::Primary,
-                    winit::event::MouseButton::Right => PointerButton::Secondary,
-                    winit::event::MouseButton::Middle => PointerButton::Auxiliary,
-                    _ => PointerButton::Primary,
-                };
+                let button = self
+                    .state
+                    .as_ref()
+                    .map(|state| state.event_translator.map_mouse_button(button))
+                    .unwrap_or(PointerButton::Primary);
 
                 match btn_state {
                     winit::event::ElementState::Pressed => {
@@ -1270,70 +1163,54 @@ impl winit::application::ApplicationHandler<NativeUserEvent> for AppRunner {
             }
             WindowEvent::ModifiersChanged(modifiers) => {
                 if let Some(state) = self.state.as_mut() {
-                    state.modifiers = winit_modifiers_to_input(modifiers.state());
+                    state.modifiers = state.event_translator.map_modifiers(modifiers.state());
                 }
             }
             WindowEvent::KeyboardInput { event, .. } => {
-                use sparsha_input::{ui_events::keyboard::Code, KeyboardEvent};
-
                 let modifiers = self
                     .state
                     .as_ref()
                     .map(|state| state.modifiers)
                     .unwrap_or_default();
                 let key_without_modifiers = event.key_without_modifiers();
-                if let Some(key) = map_winit_key(&key_without_modifiers.as_ref()) {
-                    let mut kb_event = if event.state.is_pressed() {
-                        KeyboardEvent::key_down(key, Code::Unidentified)
-                    } else {
-                        KeyboardEvent::key_up(key, Code::Unidentified)
-                    };
-                    kb_event.modifiers = modifiers;
-                    kb_event.repeat = event.repeat;
-
-                    if event.state.is_pressed() {
-                        self.handle_event(InputEvent::KeyDown {
-                            event: kb_event.clone(),
-                        });
-                    } else {
-                        self.handle_event(InputEvent::KeyUp { event: kb_event });
-                    }
+                let dispatch = self
+                    .state
+                    .as_ref()
+                    .map(|state| {
+                        state.event_translator.translate_keyboard(
+                            &key_without_modifiers.as_ref(),
+                            event.state,
+                            modifiers,
+                            event.repeat,
+                            event.text.as_deref(),
+                        )
+                    })
+                    .unwrap_or(NativeKeyboardDispatch {
+                        keyboard_event: None,
+                        text_event: None,
+                    });
+                if let Some(keyboard_event) = dispatch.keyboard_event {
+                    self.handle_event(keyboard_event);
                 }
-
-                if event.state.is_pressed() && !event.repeat {
-                    if let Some(text) = event.text.as_ref() {
-                        let text = text.to_string();
-                        if should_emit_native_text(&text, modifiers) {
-                            self.handle_event(InputEvent::TextInput { text });
-                        }
-                    }
+                if let Some(text_event) = dispatch.text_event {
+                    self.handle_event(text_event);
                 }
             }
             WindowEvent::Ime(event) => {
                 let Some(state) = self.state.as_mut() else {
                     return;
                 };
+                let was_composing = state.ime_composing;
+                let translated = state.event_translator.translate_ime(&event, was_composing);
                 match event {
+                    winit::event::Ime::Preedit(_, _) => state.ime_composing = true,
+                    winit::event::Ime::Commit(_) | winit::event::Ime::Disabled => {
+                        state.ime_composing = false
+                    }
                     winit::event::Ime::Enabled => {}
-                    winit::event::Ime::Preedit(text, _) => {
-                        if !state.ime_composing {
-                            state.ime_composing = true;
-                            self.handle_event(InputEvent::CompositionStart);
-                        }
-                        self.handle_event(InputEvent::CompositionUpdate { text });
-                    }
-                    winit::event::Ime::Commit(text) => {
-                        state.ime_composing = false;
-                        self.handle_event(InputEvent::CompositionEnd { text });
-                    }
-                    winit::event::Ime::Disabled => {
-                        if state.ime_composing {
-                            state.ime_composing = false;
-                            self.handle_event(InputEvent::CompositionEnd {
-                                text: String::new(),
-                            });
-                        }
-                    }
+                }
+                for translated_event in translated {
+                    self.handle_event(translated_event);
                 }
             }
             WindowEvent::Focused(focused) => {

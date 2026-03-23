@@ -16,11 +16,6 @@ use taffy::prelude::*;
 /// Callback type for text change and submit handlers.
 type TextInputCallback = Box<dyn FnMut(&str)>;
 
-#[cfg(target_arch = "wasm32")]
-thread_local! {
-    static TEXT_MEASURE_SPAN: RefCell<Option<web_sys::Element>> = const { RefCell::new(None) };
-}
-
 /// Style configuration for text input.
 #[derive(Clone, Debug)]
 pub struct TextInputStyle {
@@ -231,10 +226,6 @@ impl TextInput {
     }
 
     fn measure_width(&self, ctx: &mut PaintContext, style: &TextStyle, text: &str) -> f32 {
-        #[cfg(target_arch = "wasm32")]
-        if let Some(width) = measure_text_width_dom(text, style, ctx.scale_factor) {
-            return width;
-        }
         ctx.measure_text(text, style).0
     }
 
@@ -389,42 +380,6 @@ impl TextInput {
         ctx.stop_propagation();
         changed
     }
-}
-
-#[cfg(target_arch = "wasm32")]
-fn measure_text_width_dom(text: &str, style: &TextStyle, scale_factor: f32) -> Option<f32> {
-    let document = web_sys::window()?.document()?;
-    let span = TEXT_MEASURE_SPAN.with(|slot| {
-        if let Some(existing) = slot.borrow().as_ref() {
-            return Some(existing.clone());
-        }
-
-        let body = document.body()?;
-        let node = document.create_element("span").ok()?;
-        body.append_child(&node).ok()?;
-        *slot.borrow_mut() = Some(node.clone());
-        Some(node)
-    })?;
-
-    let family = if style.family.trim().is_empty() || style.family == "system-ui" {
-        "sans-serif"
-    } else {
-        style.family.as_str()
-    };
-
-    let css = format!(
-        "position:absolute;visibility:hidden;white-space:pre;left:-100000px;top:-100000px;\
-         pointer-events:none;font-size:{}px;font-family:{};font-style:{};font-weight:{};\
-         line-height:{};",
-        style.font_size * scale_factor,
-        family,
-        if style.italic { "italic" } else { "normal" },
-        if style.bold { "700" } else { "400" },
-        style.line_height
-    );
-    span.set_attribute("style", &css).ok()?;
-    span.set_text_content(Some(text));
-    Some(span.get_bounding_client_rect().width() as f32)
 }
 
 impl Default for TextInput {

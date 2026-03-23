@@ -110,6 +110,40 @@ Milestone checkboxes track implementation landing in the repo. The unchecked ite
 ### Exit Criteria
 - [ ] A clean CI run and the release checklist are both enough to sign off on 1.0.
 
+## Concrete Refactor Plan: Platform Abstraction (Layout → Events → Drawing)
+
+Goal: keep `sparsha` app bootstrap thin and move platform-specific behavior behind explicit adapters so native and web stay feature-parity without duplicating runtime logic.
+
+### Phase 1 — Layout Boundary (No Behavior Change)
+- [ ] Keep `sparsha-layout` as the single layout authority and make both runtimes consume the same layout snapshot contract.
+- [ ] Introduce a small internal layout adapter seam in `sparsha` (`platform::layout`) that only depends on `LayoutTree`, `ComputedLayout`, and `WidgetId`.
+- [ ] Remove any direct runtime-specific viewport/layout coupling from widget build paths; pass viewport via a shared adapter input.
+- [ ] Add parity tests that assert identical layout outputs for representative widget trees regardless of native/web runtime entrypoint.
+
+### Phase 2 — Event Boundary (Normalize Platform Input)
+- [ ] Add internal platform event adapters (`platform::events::native`, `platform::events::web`) that translate host events into `sparsha_input::InputEvent`.
+- [ ] Keep `InputEvent` as the canonical cross-platform event model; do not branch on `winit`/`web_sys` types outside adapters.
+- [ ] Move shortcut primary-modifier policy behind an explicit platform policy interface so web/native behavior is deliberate instead of `#[cfg]`-scattered.
+- [ ] Add shared conformance tests that replay the same semantic event sequences (pointer, keyboard, IME/composition, clipboard) through both adapters.
+
+### Phase 3 — Drawing Boundary (Backend Interface)
+- [ ] Define a rendering backend trait in runtime internals (for example `PlatformDrawBackend`) that consumes `DrawList` frames plus viewport/background metadata.
+- [ ] Keep `sparsha-render` command generation (`DrawCommand`/`DrawList`) platform-neutral and backend-agnostic.
+- [ ] Implement native GPU backend and web retained-DOM/hybrid backend behind the same interface, with no renderer-specific logic in widget/runtime orchestration.
+- [ ] Add golden-style paint tests at draw-command level and backend contract tests that verify clipping, translation stack, and text rendering invariants.
+
+### Phase 4 — Runtime Composition And Ownership
+- [ ] Introduce a small `platform` module in `crates/sparsha/src/` owning layout/event/draw adapter wiring for each runtime.
+- [ ] Keep `app.rs` and `web_app.rs` focused on lifecycle loop mechanics, delegating platform specifics to adapters.
+- [ ] Document what is public vs provisional in `docs/api-surface.md` after refactor boundaries are in place.
+- [ ] Gate completion on native+web smoke runs (`./scripts/web-smoke.sh` plus native example runs) with matching interaction behavior.
+
+### Exit Criteria For This Refactor Plan
+- [ ] One shared runtime flow consumes: `LayoutTree` output → `InputEvent` stream → `DrawList` frame.
+- [ ] Platform-specific code is isolated to adapter modules, with no cross-cutting `#[cfg]` branching through core runtime/widget logic.
+- [ ] Native and web pass the same semantic interaction scenarios for focus, editing, scroll, and draw-surface integration.
+- [ ] Architecture docs clearly identify stable abstraction seams and provisional adapter implementations.
+
 ## Recommended Release Order
 - [ ] First stabilize the public API and input/focus behavior.
 - [ ] Then make accessibility real, because it depends on stable widget semantics and focus.

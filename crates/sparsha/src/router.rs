@@ -713,9 +713,20 @@ fn page_transition_overlay_alpha(progress: f32, peak_alpha: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{component::ComponentStateStore, runtime_widget::with_widget_mut};
+    use crate::{
+        component,
+        component::ComponentStateStore,
+        runtime_widget::{add_widget_to_layout, with_widget_mut, WidgetRuntimeRegistry},
+    };
+    use sparsha_input::FocusManager;
+    use sparsha_layout::LayoutTree;
+    use sparsha_render::{DrawCommand, DrawList};
     use sparsha_signals::RuntimeHandle;
-    use sparsha_widgets::{AccessibilityAction, BuildContext, TextInput, ViewportInfo};
+    use sparsha_text::TextSystem;
+    use sparsha_widgets::{
+        AccessibilityAction, BuildContext, Button, CrossAxisAlignment, MainAxisAlignment,
+        PaintCommands, PaintContext, TextInput, ViewportInfo,
+    };
 
     fn screen(name: &'static str) -> Container {
         Container::column().child(Text::builder().content(name).build())
@@ -776,6 +787,81 @@ mod tests {
         store.begin_rebuild();
         rebuild_widget(host, &mut build, &mut path);
         store.finish_rebuild();
+    }
+
+    fn paint_widget_tree(
+        root: &dyn Widget,
+        layout_tree: &LayoutTree,
+        scale_factor: f32,
+    ) -> DrawList {
+        fn paint_recursive(
+            widget: &dyn Widget,
+            layout_tree: &LayoutTree,
+            focus: &FocusManager,
+            draw_list: &mut DrawList,
+            text_system: &mut TextSystem,
+            scale_factor: f32,
+        ) {
+            let Some(layout) = layout_tree.get_absolute_layout(widget.id()) else {
+                return;
+            };
+
+            let scaled_layout = sparsha_layout::ComputedLayout::new(sparsha_core::Rect::new(
+                layout.bounds.x * scale_factor,
+                layout.bounds.y * scale_factor,
+                layout.bounds.width * scale_factor,
+                layout.bounds.height * scale_factor,
+            ));
+
+            let mut commands = PaintCommands::default();
+            let mut ctx = PaintContext {
+                draw_list,
+                layout: scaled_layout,
+                layout_tree,
+                focus,
+                widget_id: widget.id(),
+                scale_factor,
+                text_system,
+                elapsed_time: 0.0,
+                commands: &mut commands,
+            };
+            widget.paint(&mut ctx);
+            for child in widget.children() {
+                paint_recursive(
+                    child.as_ref(),
+                    layout_tree,
+                    focus,
+                    draw_list,
+                    text_system,
+                    scale_factor,
+                );
+            }
+            let mut ctx = PaintContext {
+                draw_list,
+                layout: scaled_layout,
+                layout_tree,
+                focus,
+                widget_id: widget.id(),
+                scale_factor,
+                text_system,
+                elapsed_time: 0.0,
+                commands: &mut commands,
+            };
+            widget.paint_after_children(&mut ctx);
+        }
+
+        let focus = FocusManager::new();
+        let mut draw_list = DrawList::new();
+        let mut text_system = TextSystem::new_headless();
+        paint_recursive(
+            root,
+            layout_tree,
+            &focus,
+            &mut draw_list,
+            &mut text_system,
+            scale_factor,
+        );
+        draw_list
     }
 
     #[test]
@@ -951,6 +1037,187 @@ mod tests {
                 .expect("text input")
                 .expect("editor state");
             assert_eq!(state.text, "edited");
+        });
+    }
+
+    #[test]
+    fn route_root_fill_stays_full_height_inside_router_host() {
+        with_runtime(|| {
+            let router = Router::builder()
+                .routes(vec![Route::new("/", || {
+                    Container::column()
+                        .fill()
+                        .main_axis_alignment(MainAxisAlignment::Center)
+                        .cross_axis_alignment(CrossAxisAlignment::Center)
+                        .child(
+                            Container::column()
+                                .cross_axis_alignment(CrossAxisAlignment::Center)
+                                .child(Text::builder().content("Counter").build())
+                                .child(Button::builder().label("Increment").build()),
+                        )
+                })])
+                .fallback("/")
+                .build();
+            let mut host = RouterHost::new(router);
+            let mut store = ComponentStateStore::default();
+            let viewport = ViewportInfo::new(960.0, 640.0);
+
+            rebuild_host(&mut host, &mut store, viewport);
+
+            let mut tree = LayoutTree::new();
+            let mut registry = WidgetRuntimeRegistry::default();
+            let mut text = TextSystem::new_headless();
+            let mut path = Vec::new();
+            let root_id = add_widget_to_layout(
+                &mut host,
+                &mut tree,
+                &mut text,
+                &mut registry,
+                &mut path,
+                false,
+                true,
+            );
+            tree.set_root(root_id);
+            tree.compute_layout(viewport.width, viewport.height);
+
+            let route_root = tree
+                .get_layout(registry.id_for_path(&[1, 0]).expect("route root"))
+                .expect("route root layout");
+            let inner = tree
+                .get_layout(registry.id_for_path(&[1, 0, 0]).expect("inner column"))
+                .expect("inner layout");
+
+            assert_eq!(route_root.bounds.height, viewport.height);
+            assert!(inner.bounds.y > 100.0, "inner y was {}", inner.bounds.y);
+        });
+    }
+
+    #[test]
+    fn component_route_root_fill_stays_full_height_inside_router_host() {
+        with_runtime(|| {
+            let router = Router::builder()
+                .routes(vec![Route::new("/", || {
+                    component()
+                        .render(|_: &mut crate::component::ComponentContext<'_>| {
+                            Container::column()
+                                .fill()
+                                .main_axis_alignment(MainAxisAlignment::Center)
+                                .cross_axis_alignment(CrossAxisAlignment::Center)
+                                .child(
+                                    Container::column()
+                                        .cross_axis_alignment(CrossAxisAlignment::Center)
+                                        .child(Text::builder().content("Counter").build())
+                                        .child(Button::builder().label("Increment").build()),
+                                )
+                        })
+                        .call()
+                })])
+                .fallback("/")
+                .build();
+            let mut host = RouterHost::new(router);
+            let mut store = ComponentStateStore::default();
+            let viewport = ViewportInfo::new(960.0, 640.0);
+
+            rebuild_host(&mut host, &mut store, viewport);
+
+            let mut tree = LayoutTree::new();
+            let mut registry = WidgetRuntimeRegistry::default();
+            let mut text = TextSystem::new_headless();
+            let mut path = Vec::new();
+            let root_id = add_widget_to_layout(
+                &mut host,
+                &mut tree,
+                &mut text,
+                &mut registry,
+                &mut path,
+                false,
+                true,
+            );
+            tree.set_root(root_id);
+            tree.compute_layout(viewport.width, viewport.height);
+
+            let component_host = tree
+                .get_layout(registry.id_for_path(&[1, 0]).expect("component host"))
+                .expect("component host layout");
+            let route_root = tree
+                .get_layout(registry.id_for_path(&[1, 0, 0]).expect("route root"))
+                .expect("route root layout");
+            let inner = tree
+                .get_layout(registry.id_for_path(&[1, 0, 0, 0]).expect("inner column"))
+                .expect("inner layout");
+
+            assert_eq!(component_host.bounds.height, viewport.height);
+            assert_eq!(route_root.bounds.height, viewport.height);
+            assert!(inner.bounds.y > 100.0, "inner y was {}", inner.bounds.y);
+        });
+    }
+
+    #[test]
+    fn router_host_paint_keeps_centered_content_centered_on_hidpi() {
+        with_runtime(|| {
+            let router = Router::builder()
+                .routes(vec![Route::new("/", || {
+                    Container::column()
+                        .fill()
+                        .main_axis_alignment(MainAxisAlignment::Center)
+                        .cross_axis_alignment(CrossAxisAlignment::Center)
+                        .child(
+                            Container::column()
+                                .gap(14.0)
+                                .cross_axis_alignment(CrossAxisAlignment::Center)
+                                .child(Text::builder().content("Sparsha Counter").build())
+                                .child(Text::builder().content("Button pressed").build())
+                                .child(Text::builder().content("3").build())
+                                .child(Button::builder().label("Increment").build()),
+                        )
+                })])
+                .fallback("/")
+                .build();
+            let mut host = RouterHost::new(router);
+            let mut store = ComponentStateStore::default();
+            let viewport = ViewportInfo::new(960.0, 640.0);
+
+            rebuild_host(&mut host, &mut store, viewport);
+
+            let mut tree = LayoutTree::new();
+            let mut registry = WidgetRuntimeRegistry::default();
+            let mut text = TextSystem::new_headless();
+            let mut path = Vec::new();
+            let root_id = add_widget_to_layout(
+                &mut host,
+                &mut tree,
+                &mut text,
+                &mut registry,
+                &mut path,
+                false,
+                true,
+            );
+            tree.set_root(root_id);
+            tree.compute_layout(viewport.width, viewport.height);
+
+            let draw_list = paint_widget_tree(&host, &tree, 2.0);
+            let button_rect = draw_list
+                .commands()
+                .iter()
+                .find_map(|command| match command {
+                    DrawCommand::Rect { bounds, .. }
+                        if bounds.width > 120.0
+                            && bounds.width < 320.0
+                            && bounds.height > 40.0
+                            && bounds.height < 140.0 =>
+                    {
+                        Some(*bounds)
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("button rect; commands: {:?}", draw_list.commands()));
+
+            assert!(
+                button_rect.y > 350.0,
+                "button y was {}, commands: {:?}",
+                button_rect.y,
+                draw_list.commands()
+            );
         });
     }
 }

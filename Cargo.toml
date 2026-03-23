@@ -8,6 +8,8 @@ members = [
     "crates/sparsha-signals",
     "crates/sparsha-widgets",
     "crates/sparsha",
+    "examples/counter",
+    "examples/layout-probe",
     "examples/fractal-clock",
     "examples/hybrid-overlay",
     "examples/kitchen-sink",

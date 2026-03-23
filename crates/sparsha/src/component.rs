@@ -1,6 +1,6 @@
 use crate::{Navigator, TaskKey, TaskPayload, TaskResult, TaskResultSubscription, TaskRuntime};
 use bon::builder;
-use sparsha_layout::taffy::prelude::{AlignItems, Display, FlexDirection, Style};
+use sparsha_layout::taffy::prelude::Style;
 use sparsha_layout::WidgetId;
 use sparsha_signals::{Effect, Memo, Signal};
 use sparsha_widgets::context::BuildStateStore;
@@ -216,6 +216,21 @@ impl<'a> ComponentContext<'a> {
             .unwrap_or_else(TaskRuntime::current_or_default)
     }
 
+    /// Read the nearest provider-scoped context value for `T`.
+    pub fn use_context<T: Clone + 'static>(&self) -> Option<T> {
+        self.build.context::<T>()
+    }
+
+    /// Read the nearest subtree-scoped context value for `T`, or return `default`.
+    pub fn use_context_or<T: Clone + 'static>(&self, default: T) -> T {
+        self.use_context::<T>().unwrap_or(default)
+    }
+
+    /// Read the nearest subtree-scoped context value for `T`, or lazily compute a default.
+    pub fn use_context_or_else<T: Clone + 'static>(&self, default: impl FnOnce() -> T) -> T {
+        self.use_context::<T>().unwrap_or_else(default)
+    }
+
     pub fn use_task(
         &mut self,
         task_key: impl Into<TaskKey>,
@@ -274,12 +289,10 @@ where
     }
 
     fn style(&self) -> Style {
-        Style {
-            display: Display::Flex,
-            flex_direction: FlexDirection::Column,
-            align_items: Some(AlignItems::Stretch),
-            ..Default::default()
-        }
+        self.children
+            .first()
+            .map(|child| child.style())
+            .unwrap_or_default()
     }
 
     fn rebuild(&mut self, ctx: &mut BuildContext) {
@@ -316,7 +329,23 @@ mod tests {
     use crate::TaskStatus;
     use serde_json::json;
     use sparsha_signals::RuntimeHandle;
+    use sparsha_widgets::Provider;
     use sparsha_widgets::Text;
+
+    fn rebuild_widget(widget: &mut dyn Widget, build: &mut BuildContext, path: &mut Vec<usize>) {
+        build.set_path(path);
+        widget.rebuild(build);
+        widget.enter_build_scope(build);
+        let child_keys: Vec<_> = (0..widget.children().len())
+            .map(|index| widget.child_path_key(index))
+            .collect();
+        for (index, child) in widget.children_mut().iter_mut().enumerate() {
+            path.push(child_keys[index]);
+            rebuild_widget(child.as_mut(), build, path);
+            path.pop();
+        }
+        widget.exit_build_scope(build);
+    }
 
     #[test]
     fn component_signal_state_survives_host_recreation_at_same_path() {
@@ -471,6 +500,237 @@ mod tests {
                 .call();
             host.rebuild(&mut build);
             assert_eq!(host.children().len(), 1);
+        });
+    }
+
+    #[test]
+    fn use_context_returns_none_when_missing() {
+        let runtime = RuntimeHandle::new();
+        runtime.run_with_current(|| {
+            let observed = Signal::new(None::<String>);
+            let mut store = ComponentStateStore::default();
+            let mut build = BuildContext::default();
+            build.set_path(&[0]);
+            unsafe { build.set_state_store(&mut store) };
+
+            let mut host = component()
+                .render(move |cx| {
+                    observed.set(cx.use_context::<String>());
+                    Text::builder().content("context").build()
+                })
+                .call();
+            host.rebuild(&mut build);
+
+            assert_eq!(observed.get(), None);
+        });
+    }
+
+    #[test]
+    fn use_context_reads_nearest_provider_value() {
+        let runtime = RuntimeHandle::new();
+        runtime.run_with_current(|| {
+            let observed = Signal::new(None::<String>);
+            let mut store = ComponentStateStore::default();
+            let mut build = BuildContext::default();
+            unsafe { build.set_state_store(&mut store) };
+
+            let mut host = Provider::new(
+                String::from("outer"),
+                Provider::new(
+                    String::from("inner"),
+                    component()
+                        .render(move |cx| {
+                            observed.set(cx.use_context::<String>());
+                            Text::builder().content("context").build()
+                        })
+                        .call(),
+                ),
+            );
+            let mut path = Vec::new();
+            rebuild_widget(&mut host, &mut build, &mut path);
+
+            assert_eq!(observed.get().as_deref(), Some("inner"));
+        });
+    }
+
+    #[test]
+    fn use_context_does_not_read_builtin_runtime_resources() {
+        let runtime = RuntimeHandle::new();
+        runtime.run_with_current(|| {
+            let observed_context = Signal::new(None::<ViewportInfo>);
+            let observed_viewport = Signal::new(None::<ViewportInfo>);
+            let mut store = ComponentStateStore::default();
+            let mut build = BuildContext::default();
+            build.set_path(&[0]);
+            build.insert_resource(ViewportInfo::new(820.0, 1180.0));
+            unsafe { build.set_state_store(&mut store) };
+
+            let mut host = component()
+                .render(move |cx| {
+                    observed_context.set(cx.use_context::<ViewportInfo>());
+                    observed_viewport.set(Some(cx.viewport()));
+                    Text::builder().content("context").build()
+                })
+                .call();
+            host.rebuild(&mut build);
+
+            assert_eq!(observed_context.get(), None);
+            assert_eq!(observed_viewport.get().map(|it| it.width), Some(820.0));
+        });
+    }
+
+    #[test]
+    fn use_context_or_returns_default_when_missing() {
+        let runtime = RuntimeHandle::new();
+        runtime.run_with_current(|| {
+            let observed = Signal::new(String::new());
+            let mut store = ComponentStateStore::default();
+            let mut build = BuildContext::default();
+            build.set_path(&[0]);
+            unsafe { build.set_state_store(&mut store) };
+
+            let mut host = component()
+                .render(move |cx| {
+                    observed.set(cx.use_context_or(String::from("fallback")));
+                    Text::builder().content("context").build()
+                })
+                .call();
+            host.rebuild(&mut build);
+
+            assert_eq!(observed.get(), "fallback");
+        });
+    }
+
+    #[test]
+    fn use_context_or_else_is_lazy_when_value_is_present() {
+        let runtime = RuntimeHandle::new();
+        runtime.run_with_current(|| {
+            let observed = Signal::new(String::new());
+            let fallback_calls = Rc::new(std::cell::Cell::new(0usize));
+            let mut store = ComponentStateStore::default();
+            let mut build = BuildContext::default();
+            unsafe { build.set_state_store(&mut store) };
+
+            let calls_for_component = fallback_calls.clone();
+            let mut host = Provider::new(
+                String::from("provided"),
+                component()
+                    .render(move |cx| {
+                        observed.set(cx.use_context_or_else(|| {
+                            calls_for_component.set(calls_for_component.get() + 1);
+                            String::from("fallback")
+                        }));
+                        Text::builder().content("context").build()
+                    })
+                    .call(),
+            );
+            let mut path = Vec::new();
+            rebuild_widget(&mut host, &mut build, &mut path);
+
+            assert_eq!(observed.get(), "provided");
+            assert_eq!(fallback_calls.get(), 0);
+        });
+    }
+
+    #[test]
+    fn use_context_or_else_computes_default_when_missing() {
+        let runtime = RuntimeHandle::new();
+        runtime.run_with_current(|| {
+            let observed = Signal::new(String::new());
+            let fallback_calls = Rc::new(std::cell::Cell::new(0usize));
+            let mut store = ComponentStateStore::default();
+            let mut build = BuildContext::default();
+            build.set_path(&[0]);
+            unsafe { build.set_state_store(&mut store) };
+
+            let calls_for_component = fallback_calls.clone();
+            let mut host = component()
+                .render(move |cx| {
+                    observed.set(cx.use_context_or_else(|| {
+                        calls_for_component.set(calls_for_component.get() + 1);
+                        String::from("fallback")
+                    }));
+                    Text::builder().content("context").build()
+                })
+                .call();
+            host.rebuild(&mut build);
+
+            assert_eq!(observed.get(), "fallback");
+            assert_eq!(fallback_calls.get(), 1);
+        });
+    }
+
+    #[test]
+    fn provider_value_changes_are_observed_after_rebuild() {
+        let runtime = RuntimeHandle::new();
+        runtime.run_with_current(|| {
+            let observed = Signal::new(String::new());
+            let provided = Signal::new(String::from("light"));
+            let mut store = ComponentStateStore::default();
+            let mut build = BuildContext::default();
+            unsafe { build.set_state_store(&mut store) };
+
+            let mut path = Vec::new();
+            let mut host = Provider::new(
+                provided.get(),
+                component()
+                    .render(move |cx| {
+                        observed.set(
+                            cx.use_context::<String>()
+                                .unwrap_or_else(|| String::from("missing")),
+                        );
+                        Text::builder().content("context").build()
+                    })
+                    .call(),
+            );
+            rebuild_widget(&mut host, &mut build, &mut path);
+            assert_eq!(observed.get(), "light");
+
+            provided.set(String::from("dark"));
+            let mut host = Provider::new(
+                provided.get(),
+                component()
+                    .render(move |cx| {
+                        observed.set(
+                            cx.use_context::<String>()
+                                .unwrap_or_else(|| String::from("missing")),
+                        );
+                        Text::builder().content("context").build()
+                    })
+                    .call(),
+            );
+            path.clear();
+            rebuild_widget(&mut host, &mut build, &mut path);
+            assert_eq!(observed.get(), "dark");
+        });
+    }
+
+    #[test]
+    fn component_local_state_survives_rebuilds_under_provider() {
+        let runtime = RuntimeHandle::new();
+        runtime.run_with_current(|| {
+            let observed = Signal::new(0usize);
+            let mut store = ComponentStateStore::default();
+            let mut build = BuildContext::default();
+            unsafe { build.set_state_store(&mut store) };
+
+            for expected in [0usize, 1usize] {
+                let mut host = Provider::new(
+                    String::from("ctx"),
+                    component()
+                        .render(move |cx| {
+                            let _ = cx.use_context::<String>();
+                            let counter = cx.signal(0usize);
+                            observed.set(counter.get());
+                            counter.set(counter.get() + 1);
+                            Text::builder().content("component").build()
+                        })
+                        .call(),
+                );
+                let mut path = Vec::new();
+                rebuild_widget(&mut host, &mut build, &mut path);
+                assert_eq!(observed.get(), expected);
+            }
         });
     }
 }

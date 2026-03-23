@@ -105,7 +105,20 @@ pub(crate) fn add_widget_to_layout(
             max_width: None,
             max_height: None,
         };
-        if let Some((_, measured_height)) = widget.measure(&mut layout_ctx) {
+        if let Some((measured_width, measured_height)) = widget.measure(&mut layout_ctx) {
+            let valid_width = measured_width.is_finite() && measured_width > 0.0;
+            if valid_width && style.size.width.is_auto() {
+                let current_min_width = style.min_size.width;
+                let current_min_width_value = if current_min_width.is_auto() {
+                    0.0
+                } else {
+                    current_min_width.value()
+                };
+                if measured_width > current_min_width_value {
+                    style.min_size.width = Dimension::length(measured_width);
+                }
+            }
+
             let valid_height = measured_height.is_finite() && measured_height > 0.0;
             if valid_height {
                 let current_min_height = style.min_size.height;
@@ -667,7 +680,8 @@ mod tests {
     use sparsha_layout::taffy::{self, prelude::*};
     use sparsha_render::DrawList;
     use sparsha_widgets::{
-        Button, Container, PaintCommands, PaintContext, Semantics, TextInput, WidgetChildMode,
+        Button, Container, CrossAxisAlignment, MainAxisAlignment, PaintCommands, PaintContext,
+        Semantics, Text, TextInput, WidgetChildMode,
     };
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
@@ -1387,5 +1401,80 @@ mod tests {
 
         assert_eq!(tree_a.root_children, tree_b.root_children);
         assert_eq!(tree_a.focus, tree_b.focus);
+    }
+
+    #[test]
+    fn fill_container_centers_child_along_the_main_axis() {
+        let mut root = Container::column()
+            .fill()
+            .main_axis_alignment(MainAxisAlignment::Center)
+            .cross_axis_alignment(CrossAxisAlignment::Center)
+            .child(
+                Container::column()
+                    .cross_axis_alignment(CrossAxisAlignment::Center)
+                    .child(Text::builder().content("Counter").build())
+                    .child(Button::builder().label("Increment").build()),
+            );
+
+        let (layout_tree, registry) = build_registry(&mut root);
+        let root_layout = layout_tree.get_layout(root.id()).expect("root layout");
+        let child_layout = layout_tree
+            .get_layout(registry.id_for_path(&[0]).expect("child id"))
+            .expect("child layout");
+
+        assert_eq!(root_layout.bounds.height, 320.0);
+        assert!(
+            child_layout.bounds.y > 50.0,
+            "child y was {}",
+            child_layout.bounds.y
+        );
+    }
+
+    #[test]
+    fn intrinsic_text_leaf_reserves_measured_width_in_layout() {
+        let mut root = Container::column()
+            .fill()
+            .main_axis_alignment(MainAxisAlignment::Center)
+            .cross_axis_alignment(CrossAxisAlignment::Center)
+            .child(Text::builder().content("Centered label").build());
+
+        let (layout_tree, registry) = build_registry(&mut root);
+        let root_layout = layout_tree.get_layout(root.id()).expect("root layout");
+        let text_layout = layout_tree
+            .get_layout(registry.id_for_path(&[0]).expect("text id"))
+            .expect("text layout");
+
+        assert!(
+            text_layout.bounds.width > 0.0,
+            "text width should use intrinsic measurement"
+        );
+        assert!(
+            text_layout.bounds.x < root_layout.bounds.width / 2.0,
+            "text should reserve width before centering"
+        );
+    }
+
+    #[test]
+    fn fill_width_text_claims_full_available_width() {
+        let mut root = Container::column()
+            .fill()
+            .main_axis_alignment(MainAxisAlignment::Center)
+            .cross_axis_alignment(CrossAxisAlignment::Center)
+            .child(
+                Text::builder()
+                    .content("Centered block")
+                    .fill_width(true)
+                    .align(sparsha_widgets::TextAlign::Center)
+                    .build(),
+            );
+
+        let (layout_tree, registry) = build_registry(&mut root);
+        let root_layout = layout_tree.get_layout(root.id()).expect("root layout");
+        let text_layout = layout_tree
+            .get_layout(registry.id_for_path(&[0]).expect("text id"))
+            .expect("text layout");
+
+        assert_eq!(text_layout.bounds.x, 0.0);
+        assert_eq!(text_layout.bounds.width, root_layout.bounds.width);
     }
 }

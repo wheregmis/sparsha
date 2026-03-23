@@ -14,6 +14,7 @@ mod draw_surface;
 mod for_each;
 mod into_widget;
 mod list;
+mod provider;
 mod scroll;
 mod scroll_model;
 mod semantics;
@@ -29,7 +30,7 @@ pub use accessibility::{AccessibilityAction, AccessibilityInfo, AccessibilityRol
 pub use animation::{lerp_color, AnimationEasing, ImplicitAnimation, Tween};
 pub use button::{Button, ButtonState, ButtonStyle};
 pub use checkbox::{Checkbox, CheckboxStyle};
-pub use container::Container;
+pub use container::{Container, CrossAxisAlignment, MainAxisAlignment};
 pub use context::{
     BuildContext, EventCommands, EventContext, LayoutContext, PaintCommands, PaintContext,
 };
@@ -37,6 +38,7 @@ pub use draw_surface::{DrawSurface, DrawSurfaceContext};
 pub use for_each::ForEach;
 pub use into_widget::IntoWidget;
 pub use list::{List, ListDirection};
+pub use provider::Provider;
 pub use scroll::{Scroll, ScrollDirection, ScrollbarStyle};
 pub use semantics::Semantics;
 pub use text::{Text, TextAlign, TextVariant};

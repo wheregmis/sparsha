@@ -72,10 +72,10 @@ pub use component::{component, Component, ComponentContext, TaskHook};
 pub use router::{hash_to_path, path_to_hash, Navigator, Route, Router, RouterTransition};
 pub use sparsha_widgets::{
     current_theme, current_viewport, lerp_color, AccessibilityAction, AccessibilityInfo,
-    AccessibilityRole, AnimationEasing, ForEach, ImplicitAnimation, IntoWidget, Semantics,
-    TextArea, TextAreaStyle, TextEditorState, TextInput, TextInputStyle, Theme, ThemeColors,
-    ThemeControls, ThemeRadii, ThemeSpacing, ThemeTypography, Tween, ViewportClass, ViewportInfo,
-    ViewportOrientation, WidgetChildMode,
+    AccessibilityRole, AnimationEasing, CrossAxisAlignment, ForEach, ImplicitAnimation, IntoWidget,
+    MainAxisAlignment, Provider, Semantics, TextArea, TextAreaStyle, TextEditorState, TextInput,
+    TextInputStyle, Theme, ThemeColors, ThemeControls, ThemeRadii, ThemeSpacing, ThemeTypography,
+    Tween, ViewportClass, ViewportInfo, ViewportOrientation, WidgetChildMode,
 };
 pub use tasks::{
     Generation, TaskHandle, TaskId, TaskKey, TaskPayload, TaskPolicy, TaskResult,
@@ -102,11 +102,12 @@ pub mod prelude {
     pub use sparsha_widgets::{
         current_theme, current_viewport, lerp_color, AccessibilityAction, AccessibilityInfo,
         AccessibilityRole, AnimationEasing, BuildContext, Button, ButtonStyle, Checkbox,
-        CheckboxStyle, Container, DrawSurface, EventCommands, ForEach, ImplicitAnimation,
-        IntoWidget, List, ListDirection, Scroll, ScrollDirection, Semantics, Text, TextAlign,
-        TextArea, TextAreaStyle, TextEditorState, TextInput, TextInputStyle, TextVariant, Theme,
-        ThemeColors, ThemeControls, ThemeRadii, ThemeSpacing, ThemeTypography, Tween,
-        ViewportClass, ViewportInfo, ViewportOrientation, Widget, WidgetChildMode,
+        CheckboxStyle, Container, CrossAxisAlignment, DrawSurface, EventCommands, ForEach,
+        ImplicitAnimation, IntoWidget, List, ListDirection, MainAxisAlignment, Provider, Scroll,
+        ScrollDirection, Semantics, Text, TextAlign, TextArea, TextAreaStyle, TextEditorState,
+        TextInput, TextInputStyle, TextVariant, Theme, ThemeColors, ThemeControls, ThemeRadii,
+        ThemeSpacing, ThemeTypography, Tween, ViewportClass, ViewportInfo, ViewportOrientation,
+        Widget, WidgetChildMode,
     };
 }
 

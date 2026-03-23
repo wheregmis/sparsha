@@ -112,12 +112,17 @@ fn structural_widgets_do_not_reintroduce_parallel_public_builders() {
     let scroll = read_repo_file("crates/sparsha-widgets/src/scroll.rs");
     let semantics = read_repo_file("crates/sparsha-widgets/src/semantics.rs");
     let list = read_repo_file("crates/sparsha-widgets/src/list.rs");
+    let provider = read_repo_file("crates/sparsha-widgets/src/provider.rs");
 
     assert!(!container.contains("pub fn new("));
     assert!(!container.contains("impl Default for Container {"));
     assert!(!container.contains("start_fn(name = builder"));
     assert!(container.contains("pub fn row() -> Self"));
     assert!(container.contains("pub fn column() -> Self"));
+    assert!(container.contains("pub enum MainAxisAlignment"));
+    assert!(container.contains("pub enum CrossAxisAlignment"));
+    assert!(container.contains("pub fn main_axis_alignment("));
+    assert!(container.contains("pub fn cross_axis_alignment("));
 
     assert!(!scroll.contains("pub fn new("));
     assert!(!scroll.contains("impl Default for Scroll {"));
@@ -136,6 +141,8 @@ fn structural_widgets_do_not_reintroduce_parallel_public_builders() {
     assert!(!list.contains("impl Default for List {"));
     assert!(list.contains("pub fn empty() -> Self"));
     assert!(list.contains("start_fn(name = virtualized_builder"));
+    assert!(provider.contains("pub fn new(value: T, child: impl IntoWidget) -> Self"));
+    assert!(provider.contains("ctx.push_context(self.value.clone())"));
 }
 
 #[test]
@@ -208,17 +215,28 @@ fn leaf_widgets_do_not_reintroduce_legacy_public_constructors() {
 fn shipped_surface_documents_the_bon_authoring_paths() {
     let readme = read_repo_file("README.md");
     let api_surface = read_repo_file("docs/api-surface.md");
+    let examples_readme = read_repo_file("examples/README.md");
     let todo = read_repo_file("examples/todo/src/main.rs");
     let showcase = read_repo_file("examples/showcase/src/main.rs");
     let component_module = read_repo_file("crates/sparsha/src/component.rs");
+    let widgets_lib = read_repo_file("crates/sparsha-widgets/src/lib.rs");
 
     assert!(readme.contains("component().render(...).call()"));
     assert!(readme.contains("App::builder()"));
     assert!(readme.contains("Router::builder()"));
     assert!(api_surface.contains("Container::column()"));
     assert!(api_surface.contains("Container::row()"));
+    assert!(api_surface.contains("Container::main_axis_alignment(...)"));
+    assert!(api_surface.contains("Container::cross_axis_alignment(...)"));
     assert!(api_surface.contains("Scroll::vertical(...)"));
     assert!(api_surface.contains("List::empty()"));
+    assert!(api_surface.contains("Provider::new(...)"));
+    assert!(api_surface.contains("ComponentContext::use_context::<T>() -> Option<T>"));
+    assert!(api_surface.contains("use_context_or(...)"));
+    assert!(api_surface.contains("use_context_or_else(...)"));
+    assert!(api_surface.contains("viewport()"));
+    assert!(api_surface.contains("navigator()"));
+    assert!(api_surface.contains("task_runtime()"));
     assert!(api_surface.contains("Semantics::new(...)"));
     assert!(api_surface.contains("List::virtualized_builder()"));
     assert!(api_surface.contains("TextVariant::Header"));
@@ -227,5 +245,26 @@ fn shipped_surface_documents_the_bon_authoring_paths() {
     assert!(showcase.contains("Router::builder()"));
     assert!(showcase.contains("component()\n"));
     assert!(component_module.contains("#[builder]"));
+    assert!(component_module.contains("pub fn use_context<T: Clone + 'static>(&self) -> Option<T>"));
+    assert!(component_module
+        .contains("pub fn use_context_or<T: Clone + 'static>(&self, default: T) -> T"));
+    assert!(component_module.contains(
+        "pub fn use_context_or_else<T: Clone + 'static>(&self, default: impl FnOnce() -> T) -> T"
+    ));
+    assert!(component_module.contains("self.build.context::<T>()"));
+    assert!(widgets_lib.contains("pub use provider::Provider;"));
+    assert!(widgets_lib.contains("CrossAxisAlignment"));
+    assert!(widgets_lib.contains("MainAxisAlignment"));
     assert!(readme.contains("Button::builder()"));
+    assert!(readme.contains("Provider::new("));
+    assert!(readme.contains("main_axis_alignment(MainAxisAlignment::Center)"));
+    assert!(readme.contains("cross_axis_alignment(CrossAxisAlignment::Center)"));
+    assert!(examples_readme.contains("Provider::new(...)"));
+    assert!(examples_readme.contains("cx.use_context::<T>()"));
+    assert!(examples_readme.contains("cx.use_context_or(...)"));
+    assert!(examples_readme.contains("cx.use_context_or_else(...)"));
+    assert!(examples_readme.contains("Container::main_axis_alignment(...)"));
+    assert!(examples_readme.contains("Container::cross_axis_alignment(...)"));
+    assert!(readme.contains("cx.viewport()"));
+    assert!(examples_readme.contains("cx.viewport()"));
 }

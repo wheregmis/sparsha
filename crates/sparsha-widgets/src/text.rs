@@ -40,6 +40,7 @@ pub struct Text {
     italic: bool,
     align: TextAlign,
     variant: TextVariant,
+    fill_width: bool,
 }
 
 impl Text {
@@ -53,6 +54,7 @@ impl Text {
             italic: false,
             align: TextAlign::Left,
             variant: TextVariant::Body,
+            fill_width: false,
         }
     }
 
@@ -101,6 +103,7 @@ impl Text {
         bold: Option<bool>,
         #[builder(default)] italic: bool,
         #[builder(default = TextAlign::Left)] align: TextAlign,
+        #[builder(default)] fill_width: bool,
     ) -> Self {
         let mut text = Self::with_content(content);
         text.variant = variant;
@@ -112,6 +115,7 @@ impl Text {
         ));
         text.italic = italic;
         text.align = align;
+        text.fill_width = fill_width;
         text
     }
 }
@@ -126,7 +130,17 @@ impl Widget for Text {
     }
 
     fn style(&self) -> Style {
-        Style::default()
+        Style {
+            size: Size {
+                width: if self.fill_width {
+                    percent(1.0)
+                } else {
+                    auto()
+                },
+                height: auto(),
+            },
+            ..Style::default()
+        }
     }
 
     fn paint(&self, ctx: &mut PaintContext) {
@@ -239,6 +253,7 @@ mod tests {
             .bold(false)
             .italic(true)
             .align(TextAlign::Center)
+            .fill_width(true)
             .build();
 
         assert_eq!(text.content, "Builder");
@@ -248,5 +263,15 @@ mod tests {
         assert!(!text.bold);
         assert!(text.italic);
         assert_eq!(text.align, TextAlign::Center);
+        assert!(text.fill_width);
+    }
+
+    #[test]
+    fn fill_width_updates_layout_style() {
+        let intrinsic = Text::builder().content("Intrinsic").build();
+        let stretched = Text::builder().content("Block").fill_width(true).build();
+
+        assert_eq!(intrinsic.style().size.width, auto());
+        assert_eq!(stretched.style().size.width, percent(1.0));
     }
 }

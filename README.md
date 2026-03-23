@@ -29,6 +29,7 @@ The built-in widget layer currently supports:
 - `TextArea`
 - `List`
 - `Scroll`
+- `Provider`
 - `DrawSurface`
 - `Semantics`
 
@@ -38,6 +39,8 @@ Notable current behavior:
 - `List` supports both simple owned-children mode and fixed-extent virtualization for large data sets
 - Default widget sizing and focus-ring behavior are aligned through shared theme control tokens
 - Normal app screens can be authored as bon-backed function components via `component().render(...).call()` and `ComponentContext`
+- Subtree-scoped typed values can be provided with `Provider::new(...)` and read in components via `cx.use_context::<T>()`, `cx.use_context_or(...)`, or `cx.use_context_or_else(...)`
+- Built-in framework resources stay on dedicated component accessors such as `cx.viewport()`, `cx.navigator()`, and `cx.task_runtime()`
 
 ## Web Story
 
@@ -78,7 +81,8 @@ fn main() -> Result<(), sparsha::AppRunError> {
                 .routes(vec![Route::new("/", || {
                     Container::column()
                         .fill()
-                        .center()
+                        .main_axis_alignment(MainAxisAlignment::Center)
+                        .cross_axis_alignment(CrossAxisAlignment::Center)
                         .gap(16.0)
                         .child(
                             Text::builder()
@@ -118,6 +122,8 @@ fn main() -> Result<(), sparsha::AppRunError> {
 Run the native examples:
 
 ```bash
+cargo run -p counter
+cargo run -p layout-probe
 cargo run -p kitchen-sink
 cargo run -p fractal-clock --release
 cargo run -p hybrid-overlay
@@ -155,6 +161,24 @@ Run the full local release-readiness suite:
 
 Direct per-example `trunk serve` still works for local iteration, but the root scripts are the canonical checked-in build and verification path. More detail lives in [examples/README.md](examples/README.md).
 
+## Context
+
+```rust
+use sparsha::prelude::*;
+
+let tree = Provider::new(
+    ThemeMode::Dark,
+    component()
+        .render(|cx| {
+            let mode = cx.use_context_or(ThemeMode::Light);
+            Text::builder().content(format!("Mode: {mode:?}")).build()
+        })
+        .call(),
+);
+```
+
+For shared mutable behavior, provide a `Signal` or another handle type as the context value rather than a large mutable struct.
+
 ## Verification
 
 Canonical verification entrypoints:
@@ -171,7 +195,7 @@ Canonical verification entrypoints:
 
 - `cargo check --workspace`
 - `cargo test --workspace`
-- `cargo check -p kitchen-sink -p fractal-clock -p hybrid-overlay -p showcase -p todo --target wasm32-unknown-unknown`
+- `cargo check -p counter -p layout-probe -p kitchen-sink -p fractal-clock -p hybrid-overlay -p showcase -p todo --target wasm32-unknown-unknown`
 
 `web-smoke.sh` builds `examples/showcase`, serves its generated `dist/` output, and runs the Playwright showcase smoke against that page.
 

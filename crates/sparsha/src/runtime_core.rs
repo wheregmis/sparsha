@@ -120,6 +120,7 @@ impl RuntimeHost<'_> {
             ) {
                 build_ctx.set_path(path);
                 widget.rebuild(build_ctx);
+                widget.enter_build_scope(build_ctx);
                 let child_keys: Vec<_> = (0..widget.children().len())
                     .map(|index| widget.child_path_key(index))
                     .collect();
@@ -128,6 +129,7 @@ impl RuntimeHost<'_> {
                     rebuild_widget(child.as_mut(), build_ctx, path);
                     path.pop();
                 }
+                widget.exit_build_scope(build_ctx);
             }
 
             fn persist_widget_state(
@@ -137,6 +139,7 @@ impl RuntimeHost<'_> {
             ) {
                 build_ctx.set_path(path);
                 widget.persist_build_state(build_ctx);
+                widget.enter_build_scope(build_ctx);
                 let child_keys: Vec<_> = (0..widget.children().len())
                     .map(|index| widget.child_path_key(index))
                     .collect();
@@ -145,6 +148,7 @@ impl RuntimeHost<'_> {
                     persist_widget_state(child.as_ref(), build_ctx, path);
                     path.pop();
                 }
+                widget.exit_build_scope(build_ctx);
             }
 
             let mut build_ctx = BuildContext::default();

@@ -6,6 +6,52 @@ use sparsha_input::InputEvent;
 use sparsha_layout::WidgetId;
 use taffy::prelude::*;
 
+/// Flutter-style alignment along a flex container's main axis.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MainAxisAlignment {
+    #[default]
+    Start,
+    Center,
+    End,
+    SpaceBetween,
+    SpaceAround,
+    SpaceEvenly,
+}
+
+impl MainAxisAlignment {
+    fn into_justify_content(self) -> JustifyContent {
+        match self {
+            Self::Start => JustifyContent::FlexStart,
+            Self::Center => JustifyContent::Center,
+            Self::End => JustifyContent::FlexEnd,
+            Self::SpaceBetween => JustifyContent::SpaceBetween,
+            Self::SpaceAround => JustifyContent::SpaceAround,
+            Self::SpaceEvenly => JustifyContent::SpaceEvenly,
+        }
+    }
+}
+
+/// Flutter-style alignment along a flex container's cross axis.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CrossAxisAlignment {
+    #[default]
+    Start,
+    Center,
+    End,
+    Stretch,
+}
+
+impl CrossAxisAlignment {
+    fn into_align_items(self) -> AlignItems {
+        match self {
+            Self::Start => AlignItems::FlexStart,
+            Self::Center => AlignItems::Center,
+            Self::End => AlignItems::FlexEnd,
+            Self::Stretch => AlignItems::Stretch,
+        }
+    }
+}
+
 /// A container widget that lays out children using flexbox.
 pub struct Container {
     id: WidgetId,
@@ -129,10 +175,22 @@ impl Container {
         self
     }
 
+    /// Set alignment along the flex container's main axis.
+    pub fn main_axis_alignment(mut self, alignment: MainAxisAlignment) -> Self {
+        self.style.justify_content = Some(alignment.into_justify_content());
+        self
+    }
+
+    /// Set alignment along the flex container's cross axis.
+    pub fn cross_axis_alignment(mut self, alignment: CrossAxisAlignment) -> Self {
+        self.style.align_items = Some(alignment.into_align_items());
+        self
+    }
+
     /// Center children both horizontally and vertically.
     pub fn center(mut self) -> Self {
-        self.style.align_items = Some(AlignItems::Center);
-        self.style.justify_content = Some(JustifyContent::Center);
+        self.style.align_items = Some(CrossAxisAlignment::Center.into_align_items());
+        self.style.justify_content = Some(MainAxisAlignment::Center.into_justify_content());
         self
     }
 
@@ -321,5 +379,25 @@ mod tests {
         assert_eq!(container.corner_radius, 10.0);
         assert_eq!(container.border_width, 1.0);
         assert_eq!(container.border_color, Color::from_hex(0xCBD5E1));
+    }
+
+    #[test]
+    fn axis_alignment_helpers_map_to_flexbox_alignment() {
+        let centered = Container::column()
+            .main_axis_alignment(MainAxisAlignment::Center)
+            .cross_axis_alignment(CrossAxisAlignment::Center);
+
+        assert_eq!(centered.style.justify_content, Some(JustifyContent::Center));
+        assert_eq!(centered.style.align_items, Some(AlignItems::Center));
+
+        let distributed = Container::row()
+            .main_axis_alignment(MainAxisAlignment::SpaceEvenly)
+            .cross_axis_alignment(CrossAxisAlignment::Stretch);
+
+        assert_eq!(
+            distributed.style.justify_content,
+            Some(JustifyContent::SpaceEvenly)
+        );
+        assert_eq!(distributed.style.align_items, Some(AlignItems::Stretch));
     }
 }

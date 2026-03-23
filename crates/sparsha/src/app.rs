@@ -46,7 +46,7 @@ use wgpu::{Device, Queue};
 #[cfg(not(target_arch = "wasm32"))]
 use winit::event::WindowEvent;
 #[cfg(not(target_arch = "wasm32"))]
-use winit::event_loop::EventLoopProxy;
+use winit::event_loop::{ControlFlow, EventLoopProxy};
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::{Arc, Mutex};
@@ -380,6 +380,7 @@ struct AppState {
     navigator: crate::router::Navigator,
     platform: NativePlatform,
     window: &'static winit::window::Window,
+    configured_logical_size: winit::dpi::LogicalSize<f32>,
     device: Device,
     queue: Queue,
     surface_state: SurfaceState<'static>,
@@ -400,6 +401,8 @@ struct AppState {
     mouse_pos: glam::Vec2,
     modifiers: Modifiers,
     scale_factor: f32,
+    startup_surface_metrics_pending: bool,
+    has_presented_frame: bool,
     ime_composing: bool,
     needs_layout: bool,
     needs_repaint: bool,
@@ -408,7 +411,12 @@ struct AppState {
 #[cfg(not(target_arch = "wasm32"))]
 impl AppState {
     fn logical_viewport(&self) -> ViewportInfo {
-        native_viewport_info(self.surface_state.size, self.scale_factor)
+        native_viewport_info_for_state(
+            self.surface_state.size,
+            self.scale_factor,
+            self.configured_logical_size,
+            self.startup_surface_metrics_pending,
+        )
     }
 
     fn focused_text_editor_state(&self) -> Option<&sparsha_widgets::TextEditorState> {
@@ -519,6 +527,15 @@ impl AppRunner {
             has_capture,
             &snapshot,
         );
+    }
+
+    fn update_control_flow(&self, event_loop: &winit::event_loop::ActiveEventLoop) {
+        let control_flow = self
+            .state
+            .as_ref()
+            .map(|state| native_control_flow_for_state(state.has_presented_frame))
+            .unwrap_or(ControlFlow::Wait);
+        event_loop.set_control_flow(control_flow);
     }
 
     fn handle_accessibility_action(
@@ -746,6 +763,70 @@ fn native_viewport_info(size: winit::dpi::PhysicalSize<u32>, scale_factor: f32) 
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+fn native_viewport_info_for_state(
+    size: winit::dpi::PhysicalSize<u32>,
+    scale_factor: f32,
+    configured_logical_size: winit::dpi::LogicalSize<f32>,
+    startup_surface_metrics_pending: bool,
+) -> ViewportInfo {
+    if startup_surface_metrics_pending {
+        ViewportInfo::new(
+            configured_logical_size.width,
+            configured_logical_size.height,
+        )
+    } else {
+        native_viewport_info(size, scale_factor)
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn native_control_flow_for_state(has_presented_frame: bool) -> ControlFlow {
+    if has_presented_frame {
+        ControlFlow::Wait
+    } else {
+        ControlFlow::Poll
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SurfaceAcquireFailure {
+    Outdated,
+    Lost,
+    Timeout,
+    Occluded,
+    Validation,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SurfaceAcquireRecovery {
+    ReconfigureAndRetry,
+    Retry,
+    Abort,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn surface_acquire_recovery(
+    failure: SurfaceAcquireFailure,
+    has_presented_frame: bool,
+) -> SurfaceAcquireRecovery {
+    match failure {
+        SurfaceAcquireFailure::Outdated | SurfaceAcquireFailure::Lost => {
+            SurfaceAcquireRecovery::ReconfigureAndRetry
+        }
+        SurfaceAcquireFailure::Timeout | SurfaceAcquireFailure::Occluded
+            if !has_presented_frame =>
+        {
+            SurfaceAcquireRecovery::Retry
+        }
+        SurfaceAcquireFailure::Timeout
+        | SurfaceAcquireFailure::Occluded
+        | SurfaceAcquireFailure::Validation => SurfaceAcquireRecovery::Abort,
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 #[allow(deprecated)]
 fn set_native_ime_allowed(window: &winit::window::Window, allowed: bool) {
     window.set_ime_allowed(allowed);
@@ -764,6 +845,8 @@ impl winit::application::ApplicationHandler<NativeUserEvent> for AppRunner {
                 self.config.width,
                 self.config.height,
             ));
+        let configured_logical_size =
+            winit::dpi::LogicalSize::new(self.config.width as f32, self.config.height as f32);
 
         let window = event_loop.create_window(window_attributes);
         let window = match window {
@@ -808,9 +891,11 @@ impl winit::application::ApplicationHandler<NativeUserEvent> for AppRunner {
             });
 
             set_current_theme(self.theme.resolve_theme());
-            set_current_viewport(native_viewport_info(
+            set_current_viewport(native_viewport_info_for_state(
                 surface_state.size,
                 window.scale_factor() as f32,
+                configured_logical_size,
+                true,
             ));
             self.router.initialize(None);
             let router = self.router.clone();
@@ -823,6 +908,7 @@ impl winit::application::ApplicationHandler<NativeUserEvent> for AppRunner {
                 navigator: self.router.navigator(),
                 platform: NativePlatform::new(platform_id),
                 window,
+                configured_logical_size,
                 device,
                 queue,
                 surface_state,
@@ -843,13 +929,12 @@ impl winit::application::ApplicationHandler<NativeUserEvent> for AppRunner {
                 mouse_pos: glam::Vec2::ZERO,
                 modifiers: Modifiers::default(),
                 scale_factor: window.scale_factor() as f32,
+                startup_surface_metrics_pending: true,
+                has_presented_frame: false,
                 ime_composing: false,
                 needs_layout: true,
                 needs_repaint: true,
             });
-
-            // Build initial layout
-            self.build_layout();
 
             if let Some(state) = self.state.as_mut() {
                 let activation_handler =
@@ -861,15 +946,23 @@ impl winit::application::ApplicationHandler<NativeUserEvent> for AppRunner {
                     self.event_loop_proxy.clone(),
                 );
                 state.platform.set_accessibility_adapter(adapter);
+
+                // AccessKit requires the adapter to exist before the window is shown, but
+                // we still delay the first layout until after the window becomes visible so
+                // macOS reports the correct startup viewport metrics.
                 state.window.set_visible(true);
                 state.sync_window_metrics();
             }
+
+            // Build initial layout with the visible window's current metrics.
+            self.build_layout();
 
             self.refresh_accessibility();
             // Trigger the very first frame; some platforms won't emit an initial redraw.
             if let Some(state) = self.state.as_ref() {
                 state.window.request_redraw();
             }
+            self.update_control_flow(event_loop);
         }
     }
 
@@ -892,6 +985,7 @@ impl winit::application::ApplicationHandler<NativeUserEvent> for AppRunner {
             WindowEvent::Resized(size) => {
                 if let Some(state) = self.state.as_mut() {
                     if size.width > 0 && size.height > 0 {
+                        state.startup_surface_metrics_pending = false;
                         state
                             .surface_state
                             .resize(&state.device, size.width, size.height);
@@ -902,6 +996,7 @@ impl winit::application::ApplicationHandler<NativeUserEvent> for AppRunner {
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
                 if let Some(state) = self.state.as_mut() {
                     state.scale_factor = scale_factor as f32;
+                    state.startup_surface_metrics_pending = false;
                     state.needs_layout = true;
                 }
             }
@@ -1091,13 +1186,83 @@ impl winit::application::ApplicationHandler<NativeUserEvent> for AppRunner {
                         state.surface_state.reconfigure(&state.device);
                         frame
                     }
-                    wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
-                        state.surface_state.reconfigure(&state.device);
+                    wgpu::CurrentSurfaceTexture::Outdated => {
+                        match surface_acquire_recovery(
+                            SurfaceAcquireFailure::Outdated,
+                            state.has_presented_frame,
+                        ) {
+                            SurfaceAcquireRecovery::ReconfigureAndRetry => {
+                                state.needs_repaint = true;
+                                state.surface_state.reconfigure(&state.device);
+                                state.window.request_redraw();
+                            }
+                            SurfaceAcquireRecovery::Retry => {
+                                state.needs_repaint = true;
+                                state.window.request_redraw();
+                            }
+                            SurfaceAcquireRecovery::Abort => {}
+                        }
                         return;
                     }
-                    wgpu::CurrentSurfaceTexture::Timeout
-                    | wgpu::CurrentSurfaceTexture::Occluded
-                    | wgpu::CurrentSurfaceTexture::Validation => {
+                    wgpu::CurrentSurfaceTexture::Lost => {
+                        match surface_acquire_recovery(
+                            SurfaceAcquireFailure::Lost,
+                            state.has_presented_frame,
+                        ) {
+                            SurfaceAcquireRecovery::ReconfigureAndRetry => {
+                                state.needs_repaint = true;
+                                state.surface_state.reconfigure(&state.device);
+                                state.window.request_redraw();
+                            }
+                            SurfaceAcquireRecovery::Retry => {
+                                state.needs_repaint = true;
+                                state.window.request_redraw();
+                            }
+                            SurfaceAcquireRecovery::Abort => {}
+                        }
+                        return;
+                    }
+                    wgpu::CurrentSurfaceTexture::Timeout => {
+                        match surface_acquire_recovery(
+                            SurfaceAcquireFailure::Timeout,
+                            state.has_presented_frame,
+                        ) {
+                            SurfaceAcquireRecovery::ReconfigureAndRetry => {
+                                state.needs_repaint = true;
+                                state.surface_state.reconfigure(&state.device);
+                                state.window.request_redraw();
+                            }
+                            SurfaceAcquireRecovery::Retry => {
+                                state.needs_repaint = true;
+                                state.window.request_redraw();
+                            }
+                            SurfaceAcquireRecovery::Abort => {}
+                        }
+                        return;
+                    }
+                    wgpu::CurrentSurfaceTexture::Occluded => {
+                        match surface_acquire_recovery(
+                            SurfaceAcquireFailure::Occluded,
+                            state.has_presented_frame,
+                        ) {
+                            SurfaceAcquireRecovery::ReconfigureAndRetry => {
+                                state.needs_repaint = true;
+                                state.surface_state.reconfigure(&state.device);
+                                state.window.request_redraw();
+                            }
+                            SurfaceAcquireRecovery::Retry => {
+                                state.needs_repaint = true;
+                                state.window.request_redraw();
+                            }
+                            SurfaceAcquireRecovery::Abort => {}
+                        }
+                        return;
+                    }
+                    wgpu::CurrentSurfaceTexture::Validation => {
+                        let _ = surface_acquire_recovery(
+                            SurfaceAcquireFailure::Validation,
+                            state.has_presented_frame,
+                        );
                         return;
                     }
                 };
@@ -1129,6 +1294,8 @@ impl winit::application::ApplicationHandler<NativeUserEvent> for AppRunner {
 
                 state.queue.submit(Some(encoder.finish()));
                 frame.present();
+                state.has_presented_frame = true;
+                self.update_control_flow(event_loop);
             }
             _ => {}
         }
@@ -1194,6 +1361,7 @@ impl winit::application::ApplicationHandler<NativeUserEvent> for AppRunner {
                 state.window.request_redraw();
             }
         }
+        self.update_control_flow(_event_loop);
     }
 }
 
@@ -1425,5 +1593,77 @@ mod tests {
         assert_eq!(viewport.width, 800.0);
         assert_eq!(viewport.height, 1200.0);
         assert_eq!(viewport.class, ViewportClass::Tablet);
+    }
+
+    #[test]
+    fn native_viewport_info_prefers_configured_logical_size_for_retina_startup_bug() {
+        use winit::dpi::{LogicalSize, PhysicalSize};
+
+        let viewport = native_viewport_info_for_state(
+            PhysicalSize::new(959, 639),
+            2.0,
+            LogicalSize::new(960.0, 640.0),
+            true,
+        );
+
+        assert_eq!(viewport.width, 960.0);
+        assert_eq!(viewport.height, 640.0);
+    }
+
+    #[test]
+    fn native_viewport_info_uses_physical_metrics_after_startup_sync() {
+        use winit::dpi::{LogicalSize, PhysicalSize};
+
+        let viewport = native_viewport_info_for_state(
+            PhysicalSize::new(1920, 1280),
+            2.0,
+            LogicalSize::new(960.0, 640.0),
+            false,
+        );
+
+        assert_eq!(viewport.width, 960.0);
+        assert_eq!(viewport.height, 640.0);
+    }
+
+    #[test]
+    fn native_control_flow_polls_until_first_present() {
+        assert_eq!(native_control_flow_for_state(false), ControlFlow::Poll);
+        assert_eq!(native_control_flow_for_state(true), ControlFlow::Wait);
+    }
+
+    #[test]
+    fn surface_acquire_recovery_retries_before_first_present() {
+        assert_eq!(
+            surface_acquire_recovery(SurfaceAcquireFailure::Outdated, false),
+            SurfaceAcquireRecovery::ReconfigureAndRetry
+        );
+        assert_eq!(
+            surface_acquire_recovery(SurfaceAcquireFailure::Lost, false),
+            SurfaceAcquireRecovery::ReconfigureAndRetry
+        );
+        assert_eq!(
+            surface_acquire_recovery(SurfaceAcquireFailure::Timeout, false),
+            SurfaceAcquireRecovery::Retry
+        );
+        assert_eq!(
+            surface_acquire_recovery(SurfaceAcquireFailure::Occluded, false),
+            SurfaceAcquireRecovery::Retry
+        );
+    }
+
+    #[test]
+    fn surface_acquire_recovery_stops_retrying_timeout_after_first_present() {
+        assert_eq!(
+            surface_acquire_recovery(SurfaceAcquireFailure::Timeout, true),
+            SurfaceAcquireRecovery::Abort
+        );
+        assert_eq!(
+            surface_acquire_recovery(SurfaceAcquireFailure::Occluded, true),
+            SurfaceAcquireRecovery::Abort
+        );
+        assert_eq!(
+            surface_acquire_recovery(SurfaceAcquireFailure::Validation, false),
+            SurfaceAcquireRecovery::Abort
+        );
     }
 }

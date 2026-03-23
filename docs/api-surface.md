@@ -11,8 +11,10 @@ Stable for 1.0:
 - `Router`, `Route`, `Navigator`, `hash_to_path`, `path_to_hash`
 - authoring lanes:
   - primary composition lane: bon-backed `App::builder()`, `Router::builder()`, `component().render(...).call()`, plus a semantic structural/widget split:
-    - structural tree widgets use semantic constructors plus fluent child/content composition, for example `Container::column()`, `Container::row()`, `Scroll::vertical(...)`, `Scroll::horizontal(...)`, `List::empty()`, and `Semantics::new(...)`
+    - structural tree widgets use semantic constructors plus fluent child/content composition, for example `Container::column()`, `Container::row()`, `Container::main_axis_alignment(...)`, `Container::cross_axis_alignment(...)`, `Scroll::vertical(...)`, `Scroll::horizontal(...)`, `List::empty()`, `Provider::new(...)`, and `Semantics::new(...)`
     - config-heavy and leaf widgets use bon builders such as `Text::builder()`, `Button::builder()`, `Checkbox::builder()`, `TextInput::builder()`, `TextArea::builder()`, and `List::virtualized_builder()`
+    - function components can read provider-scoped subtree values through `ComponentContext::use_context::<T>() -> Option<T>`, `use_context_or(...)`, and `use_context_or_else(...)`
+    - built-in framework resources remain on dedicated component accessors such as `viewport()`, `navigator()`, and `task_runtime()`
     - responsive text roles stay on the builder surface through `Text::builder().variant(TextVariant::Header)` rather than shortcut constructors
   - specialized lane: dedicated primitives such as `ForEach`, `DrawSurface`, animation helpers, and theme/style value types
   - expert lane: low-level `Widget` and context APIs for manual custom widgets
@@ -38,7 +40,8 @@ Contributor rule:
 
 - new public authoring APIs must declare which lane they belong to
 - normal UI composition must not gain parallel public entrypoints that overlap in behavior
-- prefer `new()` for structural widgets that primarily accumulate child trees; prefer bon builders for config-heavy widgets where typestate/defaulting materially improves clarity and safety
+- prefer semantic constructors for structural widgets that primarily accumulate child trees; prefer bon builders for config-heavy widgets where typestate/defaulting materially improves clarity and safety
+- when using `Provider`, prefer passing `Signal` or other shared handles for mutable behavior rather than large mutable structs by value
 
 ## `sparsha-core`
 
@@ -112,11 +115,11 @@ Stable for 1.0:
 
 Stable for 1.0:
 
-- widgets/helpers: `Container`, `Button`, `Checkbox`, `Text`, `TextInput`, `List`, `Scroll`, `DrawSurface`, `ForEach`
+- widgets/helpers: `Container`, `Button`, `Checkbox`, `Text`, `TextInput`, `List`, `Scroll`, `Provider`, `DrawSurface`, `ForEach`
 - editing/accessibility widgets: `TextArea`, `Semantics`
 - accessibility metadata types: `AccessibilityInfo`, `AccessibilityRole`, `AccessibilityAction`
 - `IntoWidget`
-- widget/theme/context types re-exported from the crate root
+- widget/theme/context types re-exported from the crate root, including `MainAxisAlignment` and `CrossAxisAlignment`
 - `styles`, `taffy`, and `WidgetId` convenience re-exports
 
 Internal/provisional:

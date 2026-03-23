@@ -4,17 +4,36 @@ use sparsha::prelude::*;
 fn bon_component_surface_builds_from_the_public_crate_root() {
     let runtime = sparsha::signals::RuntimeHandle::new();
     runtime.run_with_current(|| {
-        let mut host = component()
-            .render(|cx: &mut ComponentContext<'_>| {
-                let count = cx.signal(1usize);
-                Text::builder()
-                    .content(format!("Count: {}", count.get()))
-                    .build()
-            })
-            .call();
+        let mut host = Provider::new(
+            String::from("outer"),
+            component()
+                .render(|cx: &mut ComponentContext<'_>| {
+                    let count = cx.signal(1usize);
+                    let label = cx.use_context_or_else(|| String::from("missing"));
+                    Text::builder()
+                        .content(format!("{label}: {}", count.get()))
+                        .build()
+                })
+                .call(),
+        );
 
         let mut build = BuildContext::default();
-        host.rebuild(&mut build);
+        fn rebuild(widget: &mut dyn Widget, build: &mut BuildContext, path: &mut Vec<usize>) {
+            build.set_path(path);
+            widget.rebuild(build);
+            widget.enter_build_scope(build);
+            let child_keys: Vec<_> = (0..widget.children().len())
+                .map(|index| widget.child_path_key(index))
+                .collect();
+            for (index, child) in widget.children_mut().iter_mut().enumerate() {
+                path.push(child_keys[index]);
+                rebuild(child.as_mut(), build, path);
+                path.pop();
+            }
+            widget.exit_build_scope(build);
+        }
+        let mut path = Vec::new();
+        rebuild(&mut host, &mut build, &mut path);
 
         assert_eq!(host.children().len(), 1);
     });
@@ -50,9 +69,18 @@ fn semantic_structural_widget_surface_compiles_from_the_public_crate_root() {
         let email_state = Signal::new(String::new());
         let checked_state = Signal::new(false);
         let _tree = Container::column()
+            .main_axis_alignment(MainAxisAlignment::Center)
+            .cross_axis_alignment(CrossAxisAlignment::Center)
             .gap(12.0)
             .padding(16.0)
-            .child(Text::builder().content("hello").bold(true).build())
+            .child(
+                Text::builder()
+                    .content("hello")
+                    .bold(true)
+                    .fill_width(true)
+                    .align(TextAlign::Center)
+                    .build(),
+            )
             .child(
                 Button::builder()
                     .label("save")
@@ -99,5 +127,24 @@ fn semantic_structural_widget_surface_compiles_from_the_public_crate_root() {
                 Semantics::new(Text::builder().content("semantic label").build())
                     .label("Semantic label"),
             );
+    });
+}
+
+#[test]
+fn provider_surface_compiles_from_the_public_crate_root() {
+    let runtime = sparsha::signals::RuntimeHandle::new();
+    runtime.run_with_current(|| {
+        let _tree = Provider::new(
+            String::from("outer"),
+            Provider::new(
+                String::from("inner"),
+                component()
+                    .render(|cx| {
+                        let label = cx.use_context_or(String::from("missing"));
+                        Text::builder().content(label).build()
+                    })
+                    .call(),
+            ),
+        );
     });
 }

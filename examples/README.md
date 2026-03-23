@@ -4,21 +4,25 @@
 
 Each example is a normal Cargo binary. The examples are intended to demonstrate the stable crate-root APIs rather than internal modules.
 
-The canonical authoring surface uses a semantic split: `App::builder()`, `Router::builder()`, and `component().render(...).call()` stay bon-first; structural tree widgets use semantic constructors such as `Container::column()`, `Container::row()`, `Scroll::vertical(...)`, `Scroll::horizontal(...)`, `List::empty()`, and `Semantics::new(...)`; config-heavy widgets use bon builders such as `Text::builder()`, `Button::builder()`, and `List::virtualized_builder()` for the fixed-row virtualized path. Typography variants stay on that same path through `Text::builder().variant(TextVariant::Header)`.
+The canonical authoring surface uses a semantic split: `App::builder()`, `Router::builder()`, and `component().render(...).call()` stay bon-first; subtree-scoped typed values use `Provider::new(...)` plus `cx.use_context::<T>()`, `cx.use_context_or(...)`, or `cx.use_context_or_else(...)`, while built-in framework resources stay on dedicated accessors like `cx.viewport()` and `cx.navigator()`; structural tree widgets use semantic constructors such as `Container::column()`, `Container::row()`, `Container::main_axis_alignment(...)`, `Container::cross_axis_alignment(...)`, `Scroll::vertical(...)`, `Scroll::horizontal(...)`, `List::empty()`, and `Semantics::new(...)`; config-heavy widgets use bon builders such as `Text::builder()`, `Button::builder()`, and `List::virtualized_builder()` for the fixed-row virtualized path. Typography variants stay on that same path through `Text::builder().variant(TextVariant::Header)`.
 
 ## Included Examples
 
 | Example | What it shows |
 |---|---|
+| `counter` | Flutter-style starter counter with app bar, centered count, and a bottom-right `+` action |
+| `layout-probe` | Center-crosshair layout probe for diagnosing viewport, alignment, and paint-scaling bugs |
 | `kitchen-sink` | Polished core widgets, theming, two-axis scroll, text editing, and virtualized lists |
 | `fractal-clock` | Draw-heavy rendering with `DrawSurface` and reactive state |
 | `hybrid-overlay` | DOM-backed UI with a hybrid GPU surface on the web path |
-| `showcase` | Hash-routed public preview surface with component samples and manual rendering checks |
-| `todo` | Bon-backed function components, signals, keyed `ForEach`, routing, and background task hooks in a small app |
+| `showcase` | Hash-routed public preview surface with component samples, nested `Provider` context demos, and manual rendering checks |
+| `todo` | Bon-backed function components, `Provider` context defaults, signals, keyed `ForEach`, routing, and background task hooks in a small app |
 
 ## Native
 
 ```bash
+cargo run -p counter
+cargo run -p layout-probe
 cargo run -p kitchen-sink
 cargo run -p fractal-clock --release
 cargo run -p hybrid-overlay
@@ -91,4 +95,4 @@ From the repo root, run:
 ./scripts/release-readiness.sh
 ```
 
-That covers the native workspace checks, wasm compile checks for all five example binaries, the showcase-focused browser smoke suite, and the lightweight perf/startup smoke path used in release readiness. Hosted automation lives in `.github/workflows/ci.yml`, `.github/workflows/release-readiness.yml`, and `.github/workflows/showcase-pages.yml`.
+That covers the native workspace checks, wasm compile checks for all eight example binaries, the showcase-focused browser smoke suite, and the lightweight perf/startup smoke path used in release readiness. Hosted automation lives in `.github/workflows/ci.yml`, `.github/workflows/release-readiness.yml`, and `.github/workflows/showcase-pages.yml`.

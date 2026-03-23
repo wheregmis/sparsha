@@ -107,6 +107,12 @@ struct ShowcaseLayout {
     viewport: ViewportInfo,
 }
 
+#[derive(Clone, Copy)]
+struct ContextSectionLabel(&'static str);
+
+#[derive(Clone, Copy)]
+struct ContextTone(&'static str);
+
 impl ShowcaseLayout {
     fn new(viewport: ViewportInfo) -> Self {
         Self { viewport }
@@ -618,6 +624,7 @@ fn build_components_page(layout: ShowcaseLayout) -> Container {
         ))
         .child(build_animation_card(layout))
         .child(build_controls_card(layout))
+        .child(build_context_card(layout))
         .child(build_typography_card(layout))
         .child(build_inputs_card(layout))
         .child(build_viewport_card(layout))
@@ -699,6 +706,93 @@ fn section_card(
                 .build(),
         )
         .child(content)
+}
+
+fn context_preview(
+    title: &'static str,
+    detail: &'static str,
+    outer_tone: &'static str,
+    inner_tone: &'static str,
+    width: f32,
+) -> Box<dyn Widget> {
+    Provider::new(
+        ContextSectionLabel("Shared section label"),
+        Provider::new(
+            ContextTone(outer_tone),
+            Provider::new(
+                ContextTone(inner_tone),
+                component()
+                    .render(move |cx| {
+                        let theme = cx.theme();
+                        let section = cx.use_context_or(ContextSectionLabel("Missing section")).0;
+                        let tone = cx.use_context_or_else(|| ContextTone("Missing tone")).0;
+                        Container::column()
+                            .width(width)
+                            .gap(8.0)
+                            .padding(14.0)
+                            .background(theme.colors.surface_variant)
+                            .border(1.0, theme.colors.border)
+                            .corner_radius(12.0)
+                            .child(
+                                Text::builder()
+                                    .content(title)
+                                    .font_size(14.0)
+                                    .bold(true)
+                                    .build(),
+                            )
+                            .child(
+                                Text::builder()
+                                    .content(detail)
+                                    .font_size(13.0)
+                                    .color(theme.colors.text_muted)
+                                    .build(),
+                            )
+                            .child(
+                                Text::builder()
+                                    .content(format!("Section: {section}"))
+                                    .font_size(12.0)
+                                    .color(theme.colors.text_muted)
+                                    .build(),
+                            )
+                            .child(
+                                Text::builder()
+                                    .content(format!("Nearest tone: {tone}"))
+                                    .font_size(12.0)
+                                    .color(theme.colors.primary)
+                                    .build(),
+                            )
+                    })
+                    .call(),
+            ),
+        ),
+    )
+    .into_widget()
+}
+
+fn build_context_card(layout: ShowcaseLayout) -> Container {
+    let preview_width = if layout.is_mobile() { 220.0 } else { 248.0 };
+    section_card(
+        "Context",
+        "Typed providers scope values to a subtree. Both previews inherit the shared section label,\nwhile the nested tone provider wins when the same type appears twice.",
+        Container::row()
+            .gap(12.0)
+            .wrap()
+            .child(context_preview(
+                "Base Provider",
+                "Inner and outer tone match, so the resolved value stays on the base provider.",
+                "Ocean",
+                "Ocean",
+                preview_width,
+            ))
+            .child(context_preview(
+                "Nested Override",
+                "The nested provider shadows the outer tone because context lookup is nearest-ancestor wins.",
+                "Ocean",
+                "Ember",
+                preview_width,
+            )),
+        layout,
+    )
 }
 
 fn build_controls_card(layout: ShowcaseLayout) -> Container {

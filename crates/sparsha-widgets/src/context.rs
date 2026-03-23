@@ -29,12 +29,52 @@ struct BuildStateStoreOps {
     store_boxed_state: BuildStateStoreBoxedStateFn,
 }
 
+#[derive(Default)]
+struct ResourceEntry {
+    root: Option<Box<dyn Any>>,
+    contexts: Vec<Box<dyn Any>>,
+}
+
+impl ResourceEntry {
+    fn set_root(&mut self, value: Box<dyn Any>) {
+        self.root = Some(value);
+    }
+
+    fn push_context(&mut self, value: Box<dyn Any>) {
+        self.contexts.push(value);
+    }
+
+    fn pop_context(&mut self) -> bool {
+        self.contexts.pop().is_some()
+    }
+
+    fn context<T: Clone + 'static>(&self) -> Option<T> {
+        self.contexts
+            .last()
+            .and_then(|value| value.downcast_ref::<T>())
+            .cloned()
+    }
+
+    fn resource<T: Clone + 'static>(&self) -> Option<T> {
+        self.context::<T>().or_else(|| {
+            self.root
+                .as_ref()
+                .and_then(|value| value.downcast_ref::<T>())
+                .cloned()
+        })
+    }
+
+    fn is_empty(&self) -> bool {
+        self.root.is_none() && self.contexts.is_empty()
+    }
+}
+
 /// Context for rebuilding dynamic widget children.
 #[derive(Default)]
 pub struct BuildContext {
     path: Vec<usize>,
     theme: Option<Theme>,
-    resources: HashMap<TypeId, Box<dyn Any>>,
+    resources: HashMap<TypeId, ResourceEntry>,
     state_store: Option<BuildStateStoreOps>,
 }
 
@@ -62,18 +102,52 @@ impl BuildContext {
         self.theme.clone().unwrap_or_else(crate::current_theme)
     }
 
-    /// Insert a typed resource for rebuild-time consumers.
+    /// Insert or replace a root typed resource for rebuild-time consumers.
     #[doc(hidden)]
     pub fn insert_resource<T: 'static>(&mut self, value: T) {
-        self.resources.insert(TypeId::of::<T>(), Box::new(value));
+        self.resources
+            .entry(TypeId::of::<T>())
+            .or_default()
+            .set_root(Box::new(value));
     }
 
-    /// Fetch a cloned rebuild-time resource.
+    /// Push a subtree-scoped typed context value for rebuild-time consumers.
+    #[doc(hidden)]
+    pub fn push_context<T: 'static>(&mut self, value: T) {
+        self.resources
+            .entry(TypeId::of::<T>())
+            .or_default()
+            .push_context(Box::new(value));
+    }
+
+    /// Pop the nearest subtree-scoped typed context value.
+    #[doc(hidden)]
+    pub fn pop_context<T: 'static>(&mut self) {
+        let type_id = TypeId::of::<T>();
+        let Some(entry) = self.resources.get_mut(&type_id) else {
+            return;
+        };
+        let popped = entry.pop_context();
+        debug_assert!(popped, "attempted to pop missing scoped context");
+        if entry.is_empty() {
+            self.resources.remove(&type_id);
+        }
+    }
+
+    /// Fetch the nearest cloned provider-scoped context value for this subtree scope.
+    pub fn context<T: Clone + 'static>(&self) -> Option<T> {
+        self.resources
+            .get(&TypeId::of::<T>())
+            .and_then(ResourceEntry::context::<T>)
+    }
+
+    /// Fetch the nearest cloned rebuild-time resource for this subtree scope.
+    ///
+    /// Provider-scoped values shadow root runtime resources of the same type.
     pub fn resource<T: Clone + 'static>(&self) -> Option<T> {
         self.resources
             .get(&TypeId::of::<T>())
-            .and_then(|value| value.downcast_ref::<T>())
-            .cloned()
+            .and_then(ResourceEntry::resource::<T>)
     }
 
     /// Attach runtime-owned component state storage.
@@ -135,6 +209,83 @@ impl BuildContext {
             (store.mark_path_used)(store.ptr, &path);
             (store.store_boxed_state)(store.ptr, path, state);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::BuildContext;
+
+    #[test]
+    fn root_resource_lookup_works() {
+        let mut ctx = BuildContext::default();
+        ctx.insert_resource(String::from("root"));
+
+        assert_eq!(ctx.resource::<String>().as_deref(), Some("root"));
+        assert_eq!(ctx.context::<String>(), None);
+    }
+
+    #[test]
+    fn nested_context_scope_shadows_parent() {
+        let mut ctx = BuildContext::default();
+        ctx.push_context(String::from("root"));
+        ctx.push_context(String::from("child"));
+
+        assert_eq!(ctx.context::<String>().as_deref(), Some("child"));
+        assert_eq!(ctx.resource::<String>().as_deref(), Some("child"));
+    }
+
+    #[test]
+    fn pop_context_restores_parent_value() {
+        let mut ctx = BuildContext::default();
+        ctx.push_context(String::from("root"));
+        ctx.push_context(String::from("child"));
+        ctx.pop_context::<String>();
+
+        assert_eq!(ctx.context::<String>().as_deref(), Some("root"));
+        assert_eq!(ctx.resource::<String>().as_deref(), Some("root"));
+    }
+
+    #[test]
+    fn sibling_subtrees_do_not_leak_context_values() {
+        let mut ctx = BuildContext::default();
+        ctx.push_context(String::from("root"));
+
+        ctx.push_context(String::from("left"));
+        assert_eq!(ctx.context::<String>().as_deref(), Some("left"));
+        assert_eq!(ctx.resource::<String>().as_deref(), Some("left"));
+        ctx.pop_context::<String>();
+
+        assert_eq!(ctx.context::<String>().as_deref(), Some("root"));
+        assert_eq!(ctx.resource::<String>().as_deref(), Some("root"));
+
+        ctx.push_context(String::from("right"));
+        assert_eq!(ctx.context::<String>().as_deref(), Some("right"));
+        assert_eq!(ctx.resource::<String>().as_deref(), Some("right"));
+        ctx.pop_context::<String>();
+
+        assert_eq!(ctx.context::<String>().as_deref(), Some("root"));
+        assert_eq!(ctx.resource::<String>().as_deref(), Some("root"));
+    }
+
+    #[test]
+    fn context_lookup_ignores_root_runtime_resources() {
+        let mut ctx = BuildContext::default();
+        ctx.insert_resource(String::from("root"));
+
+        assert_eq!(ctx.context::<String>(), None);
+        assert_eq!(ctx.resource::<String>().as_deref(), Some("root"));
+    }
+
+    #[test]
+    fn pop_context_does_not_remove_root_resource() {
+        let mut ctx = BuildContext::default();
+        ctx.insert_resource(String::from("root"));
+        ctx.push_context(String::from("child"));
+        ctx.pop_context::<String>();
+
+        assert_eq!(ctx.context::<String>(), None);
+        assert_eq!(ctx.resource::<String>().as_deref(), Some("root"));
     }
 }
 

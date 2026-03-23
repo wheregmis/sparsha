@@ -1,0 +1,12 @@
+[package]
+name = "layout-probe"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "layout-probe"
+path = "src/main.rs"
+
+[dependencies]
+sparsha = { path = "../../crates/sparsha" }
+env_logger = { workspace = true }

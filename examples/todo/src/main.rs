@@ -23,11 +23,29 @@ fn main() -> Result<(), sparsha::AppRunError> {
             Router::builder()
                 .routes(vec![
                     Route::new("/", move || {
-                        component()
-                            .render(move |cx| todo_app(cx, theme_mode))
-                            .call()
+                        Provider::new(
+                            TodoPageTitle("Todo"),
+                            Provider::new(
+                                TodoPageSubtitle(
+                                    "Sparsha native + web example using signal-driven state.",
+                                ),
+                                component()
+                                    .render(move |cx| todo_app(cx, theme_mode))
+                                    .call(),
+                            ),
+                        )
                     }),
-                    Route::new("/about", || component().render(todo_about).call()),
+                    Route::new("/about", || {
+                        Provider::new(
+                            TodoPageTitle("About Todo"),
+                            Provider::new(
+                                TodoPageSubtitle(
+                                    "This example stays intentionally small: one task screen, one about route, shared theme state, and the same component code on native and web.",
+                                ),
+                                component().render(todo_about).call(),
+                            ),
+                        )
+                    }),
                 ])
                 .transition(RouterTransition::slide_overlay())
                 .fallback("/")
@@ -65,6 +83,12 @@ fn todo_light_theme() -> Theme {
 fn todo_dark_theme() -> Theme {
     apply_todo_brand(Theme::dark())
 }
+
+#[derive(Clone, Copy)]
+struct TodoPageTitle(&'static str);
+
+#[derive(Clone, Copy)]
+struct TodoPageSubtitle(&'static str);
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum Filter {
@@ -356,6 +380,12 @@ fn todo_app(cx: &mut ComponentContext<'_>, theme_mode: Signal<ThemeMode>) -> Con
     let model = cx.signal(TodoModel::default());
     let analysis = cx.use_task("todo.input-analysis", "analyze_text");
     let navigator = cx.navigator();
+    let page_title = cx.use_context_or(TodoPageTitle("Todo")).0;
+    let page_subtitle = cx
+        .use_context_or_else(|| {
+            TodoPageSubtitle("Sparsha native + web example using signal-driven state.")
+        })
+        .0;
     let snapshot = model.get();
     let theme = cx.theme();
     let is_dark = theme_mode.get() == ThemeMode::Dark;
@@ -416,7 +446,7 @@ fn todo_app(cx: &mut ComponentContext<'_>, theme_mode: Signal<ThemeMode>) -> Con
                 .align_items(taffy::prelude::AlignItems::Center)
                 .child(
                     Text::builder()
-                        .content("Todo")
+                        .content(page_title)
                         .font_size(28.0)
                         .bold(true)
                         .color(theme.colors.text_primary)
@@ -426,7 +456,7 @@ fn todo_app(cx: &mut ComponentContext<'_>, theme_mode: Signal<ThemeMode>) -> Con
         )
         .child(
             Text::builder()
-                .content("Sparsha native + web example using signal-driven state.")
+                .content(page_subtitle)
                 .font_size(13.0)
                 .color(subdued_text)
                 .build(),
@@ -471,6 +501,13 @@ fn todo_app(cx: &mut ComponentContext<'_>, theme_mode: Signal<ThemeMode>) -> Con
 fn todo_about(cx: &mut ComponentContext<'_>) -> Container {
     let theme = cx.theme();
     let navigator = cx.navigator();
+    let page_title = cx.use_context_or(TodoPageTitle("About Todo")).0;
+    let page_subtitle = cx.use_context_or_else(|| {
+        TodoPageSubtitle(
+            "This example stays intentionally small: one task screen, one about route, shared theme state, and the same component code on native and web.",
+        )
+    })
+    .0;
     Container::column()
         .fill()
         .padding(32.0)
@@ -483,7 +520,7 @@ fn todo_about(cx: &mut ComponentContext<'_>) -> Container {
                 .corner_radius(16.0)
                 .child(
                     Text::builder()
-                        .content("About Todo")
+                        .content(page_title)
                         .font_size(28.0)
                         .bold(true)
                         .color(theme.colors.text_primary)
@@ -491,9 +528,7 @@ fn todo_about(cx: &mut ComponentContext<'_>) -> Container {
                 )
                 .child(
                     Text::builder()
-                        .content(
-                            "This example stays intentionally small: one task screen, one about route, shared theme state, and the same component code on native and web.",
-                        )
+                        .content(page_subtitle)
                         .font_size(16.0)
                         .color(theme.colors.text_muted)
                         .build(),

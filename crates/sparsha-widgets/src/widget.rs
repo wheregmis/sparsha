@@ -55,6 +55,18 @@ pub trait Widget {
         // Default: no-op
     }
 
+    /// Enter a rebuild-time scoped resource boundary for descendants.
+    #[doc(hidden)]
+    fn enter_build_scope(&self, _ctx: &mut super::BuildContext) {
+        // Default: no-op
+    }
+
+    /// Exit a rebuild-time scoped resource boundary for descendants.
+    #[doc(hidden)]
+    fn exit_build_scope(&self, _ctx: &mut super::BuildContext) {
+        // Default: no-op
+    }
+
     /// Handle an input event.
     fn event(&mut self, ctx: &mut super::EventContext, event: &InputEvent) {
         let _ = (ctx, event);

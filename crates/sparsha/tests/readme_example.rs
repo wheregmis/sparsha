@@ -10,27 +10,32 @@ fn readme_example_builds_against_the_frozen_surface() {
             .theme(Theme::light())
             .router(
                 Router::builder()
-                    .routes(vec![Route::new("/", || {
+                .routes(vec![Route::new("/", || {
+                    Provider::new(
+                        ThemeMode::Light,
                         component()
                             .render(|cx| {
                                 let task = cx.use_task("readme.example", "echo");
                                 let _ = task.pending();
+                                let mode = cx.use_context_or(ThemeMode::Light);
                                 Container::column()
                                     .fill()
-                                    .center()
+                                    .main_axis_alignment(MainAxisAlignment::Center)
+                                    .cross_axis_alignment(CrossAxisAlignment::Center)
                                     .gap(16.0)
                                     .child(
                                         Text::builder()
-                                            .content("Build UI with a GPU-first stack.")
+                                            .content(format!("Build UI with a GPU-first stack. Mode: {mode:?}"))
                                             .build(),
                                     )
                                     .child(Button::builder().label("Click me").build())
                                     .child(TextInput::builder().placeholder("Type here...").build())
                             })
-                            .call()
-                    })])
-                    .fallback("/")
-                    .build(),
+                            .call(),
+                    )
+                })])
+                .fallback("/")
+                .build(),
             );
         Ok(())
     };

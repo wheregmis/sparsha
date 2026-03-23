@@ -889,13 +889,26 @@ impl WebAppState {
             )
         });
 
-        if outcome.commands.request_focus || outcome.commands.clear_focus {
+        let clear_text_focus_on_pointer_down = matches!(event, InputEvent::PointerDown { .. })
+            && !outcome.commands.request_focus
+            && !outcome.commands.clear_focus
+            && self.focused_text_editor_state().is_some();
+
+        if outcome.commands.request_focus
+            || outcome.commands.clear_focus
+            || clear_text_focus_on_pointer_down
+        {
+            let next_focus_path = if clear_text_focus_on_pointer_down {
+                None
+            } else {
+                outcome.focus_path.clone()
+            };
             let focus_changed = apply_focus_change(
                 self.root_widget.as_mut(),
                 &mut self.focus_manager,
                 &self.widget_registry,
                 &mut self.focused_path,
-                outcome.focus_path.clone(),
+                next_focus_path,
             );
             if focus_changed {
                 self.ime_composing = false;
@@ -1165,7 +1178,6 @@ fn install_event_listeners(
         let on_down = Closure::wrap(Box::new(move |event: MouseEvent| {
             let pos = mouse_pos(&root_for_event, &event);
             let button = mouse_button(event.button());
-            root_for_event.focus().ok();
             let mut state_ref = state.borrow_mut();
             state_ref.mouse_pos = pos;
             state_ref.handle_event(InputEvent::PointerDown { pos, button });
@@ -1197,7 +1209,6 @@ fn install_event_listeners(
                 return;
             }
             state_ref.active_touch_id = Some(touch_id);
-            root_for_event.focus().ok();
             state_ref.mouse_pos = pos;
             state_ref.handle_event(InputEvent::PointerDown {
                 pos,

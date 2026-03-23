@@ -15,7 +15,7 @@ fn readme_example_builds_against_the_frozen_surface() {
                             .render(|cx| {
                                 let task = cx.use_task("readme.example", "echo");
                                 let _ = task.pending();
-                                Container::new()
+                                Container::column()
                                     .fill()
                                     .center()
                                     .gap(16.0)

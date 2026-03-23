@@ -4,7 +4,7 @@
 
 Each example is a normal Cargo binary. The examples are intended to demonstrate the stable crate-root APIs rather than internal modules.
 
-The canonical authoring surface is balanced rather than uniform: `App::builder()`, `Router::builder()`, and `component().render(...).call()` stay bon-first; structural tree widgets stay ergonomic with `Container::new()`, `Scroll::new()`, and `Semantics::new(...)`; config-heavy widgets use bon builders such as `Text::builder()`, `Button::builder()`, and `List::virtualized_builder()` for the fixed-row virtualized path. Typography variants stay on that same path through `Text::builder().variant(TextVariant::Header)`.
+The canonical authoring surface uses a semantic split: `App::builder()`, `Router::builder()`, and `component().render(...).call()` stay bon-first; structural tree widgets use semantic constructors such as `Container::column()`, `Container::row()`, `Scroll::vertical(...)`, `Scroll::horizontal(...)`, `List::empty()`, and `Semantics::new(...)`; config-heavy widgets use bon builders such as `Text::builder()`, `Button::builder()`, and `List::virtualized_builder()` for the fixed-row virtualized path. Typography variants stay on that same path through `Text::builder().variant(TextVariant::Header)`.
 
 ## Included Examples
 

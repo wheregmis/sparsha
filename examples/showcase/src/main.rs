@@ -294,43 +294,37 @@ fn showcase_shell(route: ShowcaseRoute, navigator: Navigator, viewport: Viewport
     let layout = ShowcaseLayout::new(viewport);
     let theme = current_theme();
     if layout.shell_is_stacked() {
-        return Container::new()
+        return Container::column()
             .size(
                 layout.viewport.width.max(1.0),
                 layout.viewport.height.max(1.0),
             )
             .background(theme.colors.background)
-            .column()
             .align_items(AlignItems::Center)
             .child(build_top_bar(route, navigator, layout))
             .child(
-                Scroll::new()
-                    .vertical()
-                    .fill()
-                    .width(layout.content_width())
-                    .flex_grow(1.0)
-                    .content(
-                        Container::new()
-                            .column()
-                            .fill_width()
-                            .child(build_sidebar(route, layout))
-                            .child(build_route_page(route, layout)),
-                    ),
+                Scroll::vertical(
+                    Container::column()
+                        .fill_width()
+                        .child(build_sidebar(route, layout))
+                        .child(build_route_page(route, layout)),
+                )
+                .fill()
+                .width(layout.content_width())
+                .flex_grow(1.0),
             );
     }
 
-    Container::new()
+    Container::column()
         .size(
             layout.viewport.width.max(1.0),
             layout.viewport.height.max(1.0),
         )
         .background(theme.colors.background)
-        .column()
         .align_items(AlignItems::Center)
         .child(build_top_bar(route, navigator, layout))
         .child(
-            Container::new()
-                .row()
+            Container::row()
                 .fill()
                 .width(layout.content_width())
                 .flex_grow(1.0)
@@ -342,8 +336,7 @@ fn showcase_shell(route: ShowcaseRoute, navigator: Navigator, viewport: Viewport
 
 fn build_top_bar(route: ShowcaseRoute, navigator: Navigator, layout: ShowcaseLayout) -> Container {
     let theme = current_theme();
-    let buttons = Container::new()
-        .row()
+    let buttons = Container::row()
         .gap(10.0)
         .wrap()
         .align_items(AlignItems::Center)
@@ -363,13 +356,11 @@ fn build_top_bar(route: ShowcaseRoute, navigator: Navigator, layout: ShowcaseLay
         ));
 
     let top_bar = if layout.is_mobile() {
-        Container::new()
-            .column()
+        Container::column()
             .gap(12.0)
             .align_items(AlignItems::FlexStart)
             .child(
-                Container::new()
-                    .column()
+                Container::column()
                     .gap(4.0)
                     .child(
                         Text::builder()
@@ -388,13 +379,11 @@ fn build_top_bar(route: ShowcaseRoute, navigator: Navigator, layout: ShowcaseLay
             )
             .child(buttons)
     } else {
-        Container::new()
-            .row()
+        Container::row()
             .align_items(AlignItems::Center)
             .justify_content(JustifyContent::SpaceBetween)
             .child(
-                Container::new()
-                    .column()
+                Container::column()
                     .gap(4.0)
                     .child(
                         Text::builder()
@@ -414,7 +403,7 @@ fn build_top_bar(route: ShowcaseRoute, navigator: Navigator, layout: ShowcaseLay
             .child(buttons)
     };
 
-    Container::new()
+    Container::column()
         .width(layout.content_width())
         .padding(layout.top_bar_padding())
         .background(theme.colors.surface_done)
@@ -477,8 +466,7 @@ fn route_button(
 fn sidebar_content(route: ShowcaseRoute, layout: ShowcaseLayout) -> Container {
     let theme = current_theme();
     let sidebar = match route {
-        ShowcaseRoute::Components => Container::new()
-            .column()
+        ShowcaseRoute::Components => Container::column()
             .gap(18.0)
             .child(sidebar_block(
                 "In scope",
@@ -502,8 +490,7 @@ fn sidebar_content(route: ShowcaseRoute, layout: ShowcaseLayout) -> Container {
                     "Kitchen sink still handles broader regression work.",
                 ],
             )),
-        ShowcaseRoute::Rendering => Container::new()
-            .column()
+        ShowcaseRoute::Rendering => Container::column()
             .gap(18.0)
             .child(sidebar_block(
                 "Look for",
@@ -526,8 +513,7 @@ fn sidebar_content(route: ShowcaseRoute, layout: ShowcaseLayout) -> Container {
             )),
     };
 
-    Container::new()
-        .column()
+    Container::column()
         .gap(if layout.is_mobile() { 16.0 } else { 20.0 })
         .padding(layout.section_padding())
         .child(
@@ -559,15 +545,15 @@ fn build_sidebar(route: ShowcaseRoute, layout: ShowcaseLayout) -> Container {
     let theme = current_theme();
     let content = sidebar_content(route, layout);
     if layout.is_desktop() {
-        Container::new()
+        Container::column()
             .width(layout.sidebar_width())
             .fill_height()
             .flex_shrink(0.0)
             .background(theme.colors.surface)
             .border(1.0, theme.colors.border)
-            .child(Scroll::new().vertical().fill_height().content(content))
+            .child(Scroll::vertical(content).fill_height())
     } else {
-        Container::new()
+        Container::column()
             .fill_width()
             .background(theme.colors.surface)
             .border(1.0, theme.colors.border)
@@ -577,8 +563,7 @@ fn build_sidebar(route: ShowcaseRoute, layout: ShowcaseLayout) -> Container {
 
 fn sidebar_block(title: &'static str, lines: &[&'static str]) -> Container {
     let theme = current_theme();
-    let mut block = Container::new()
-        .column()
+    let mut block = Container::column()
         .gap(10.0)
         .padding(14.0)
         .background(theme.colors.surface_variant)
@@ -606,14 +591,12 @@ fn sidebar_block(title: &'static str, lines: &[&'static str]) -> Container {
 }
 
 fn build_main_area(route: ShowcaseRoute, layout: ShowcaseLayout) -> Scroll {
-    Scroll::new()
-        .vertical()
+    Scroll::vertical(build_route_page(route, layout))
         .fill_width()
         .fill_height()
         .flex_grow(1.0)
         .flex_shrink(1.0)
         .width((layout.content_width() - layout.sidebar_width()).max(0.0))
-        .content(build_route_page(route, layout))
 }
 
 fn build_route_page(route: ShowcaseRoute, layout: ShowcaseLayout) -> Container {
@@ -624,8 +607,7 @@ fn build_route_page(route: ShowcaseRoute, layout: ShowcaseLayout) -> Container {
 }
 
 fn build_components_page(layout: ShowcaseLayout) -> Container {
-    Container::new()
-        .column()
+    Container::column()
         .gap(layout.page_gap())
         .padding(layout.page_padding())
         .fill_width()
@@ -642,8 +624,7 @@ fn build_components_page(layout: ShowcaseLayout) -> Container {
 }
 
 fn build_rendering_page(layout: ShowcaseLayout) -> Container {
-    Container::new()
-        .column()
+    Container::column()
         .gap(if layout.is_mobile() { 12.0 } else { 14.0 })
         .padding(layout.page_padding())
         .fill_width()
@@ -658,8 +639,7 @@ fn build_rendering_page(layout: ShowcaseLayout) -> Container {
 
 fn page_intro(route: ShowcaseRoute, detail: &'static str, layout: ShowcaseLayout) -> Container {
     let theme = current_theme();
-    Container::new()
-        .column()
+    Container::column()
         .fill_width()
         .gap(10.0)
         .padding(layout.section_padding())
@@ -697,8 +677,7 @@ fn section_card(
     layout: ShowcaseLayout,
 ) -> Container {
     let theme = current_theme();
-    Container::new()
-        .column()
+    Container::column()
         .fill_width()
         .gap(layout.card_gap())
         .padding(layout.section_padding())
@@ -748,12 +727,10 @@ fn build_controls_card(layout: ShowcaseLayout) -> Container {
             .render(move |cx| {
                 let checked = cx.signal(true);
                 let is_checked = checked.get();
-                Container::new()
-                    .column()
+                Container::column()
                     .gap(16.0)
                     .child(
-                        Container::new()
-                            .row()
+                        Container::row()
                             .gap(12.0)
                             .wrap()
                             .child(
@@ -772,8 +749,7 @@ fn build_controls_card(layout: ShowcaseLayout) -> Container {
                             .child(Button::builder().label("Disabled State").disabled(true).build()),
                     )
                     .child(
-                        Container::new()
-                            .row()
+                        Container::row()
                             .gap(12.0)
                             .align_items(AlignItems::Center)
                             .child(
@@ -814,8 +790,7 @@ fn build_animation_card(layout: ShowcaseLayout) -> Container {
     section_card(
         "Animations",
         "The showcase now carries the same motion language as the rest of the examples.\nPage swaps use router slide transitions, and this preview uses the normal widget animation helpers for a short on-load handoff.",
-        Container::new()
-            .column()
+        Container::column()
             .gap(16.0)
             .child(MotionPreview::new())
             .child(
@@ -834,9 +809,9 @@ fn build_animation_card(layout: ShowcaseLayout) -> Container {
 fn rendering_hint_row(layout: ShowcaseLayout) -> Container {
     let theme = current_theme();
     let row = if layout.is_mobile() {
-        Container::new().column().gap(12.0).fill_width()
+        Container::column().gap(12.0).fill_width()
     } else {
-        Container::new().row().gap(12.0).wrap().fill_width()
+        Container::row().gap(12.0).wrap().fill_width()
     };
 
     row.child(rendering_hint_chip(
@@ -863,8 +838,7 @@ fn rendering_hint_chip(
     layout: ShowcaseLayout,
 ) -> Container {
     let theme = current_theme();
-    let chip = Container::new()
-        .column()
+    let chip = Container::column()
         .gap(6.0)
         .padding(14.0)
         .min_size(if layout.is_mobile() { 0.0 } else { 220.0 }, 0.0)
@@ -898,12 +872,10 @@ fn build_typography_card(layout: ShowcaseLayout) -> Container {
     section_card(
         "Typography",
         "A small read on heading, body, and caption scales inside the same surface.\nThis makes the default rhythm easy to judge at a glance.",
-        Container::new()
-            .column()
+        Container::column()
             .gap(14.0)
             .child(
-                Container::new()
-                    .column()
+                Container::column()
                     .gap(10.0)
                     .padding(16.0)
                     .background(theme.colors.surface_variant)
@@ -958,8 +930,7 @@ fn build_inputs_card(layout: ShowcaseLayout) -> Container {
                 let email_value = email.get();
                 let notes_value = notes.get();
 
-                Container::new()
-                    .column()
+                Container::column()
                     .gap(16.0)
                     .child(
                         Semantics::new(
@@ -1005,8 +976,7 @@ fn build_inputs_card(layout: ShowcaseLayout) -> Container {
 fn build_viewport_card(layout: ShowcaseLayout) -> Container {
     let theme = current_theme();
     let samples = if layout.is_desktop() {
-        Container::new()
-            .row()
+        Container::row()
             .gap(16.0)
             .fill_width()
             .child(build_scroll_sample().flex_grow(1.0).min_size(0.0, 250.0))
@@ -1016,8 +986,7 @@ fn build_viewport_card(layout: ShowcaseLayout) -> Container {
                     .min_size(0.0, 250.0),
             )
     } else {
-        Container::new()
-            .column()
+        Container::column()
             .gap(16.0)
             .fill_width()
             .child(build_scroll_sample().min_size(0.0, 250.0))
@@ -1027,8 +996,7 @@ fn build_viewport_card(layout: ShowcaseLayout) -> Container {
     section_card(
         "Viewport",
         "A wide two-axis scroll sample sits next to a compact virtualized list.\nThis keeps the page honest about the core viewport primitives.",
-        Container::new()
-            .column()
+        Container::column()
             .gap(16.0)
             .child(samples)
             .child(
@@ -1046,8 +1014,7 @@ fn build_viewport_card(layout: ShowcaseLayout) -> Container {
 
 fn build_scroll_sample() -> Container {
     let theme = current_theme();
-    Container::new()
-        .column()
+    Container::column()
         .gap(10.0)
         .child(
             Text::builder()
@@ -1057,27 +1024,21 @@ fn build_scroll_sample() -> Container {
                 .build(),
         )
         .child(
-            Container::new()
+            Container::column()
                 .height(220.0)
                 .background(theme.colors.surface_variant)
                 .border(1.0, theme.colors.border)
                 .corner_radius(12.0)
                 .child(
-                    Semantics::new(
-                        Scroll::new()
-                            .direction(ScrollDirection::Both)
-                            .fill()
-                            .content(build_scroll_canvas()),
-                    )
-                    .label("Showcase two-axis scroll area"),
+                    Semantics::new(Scroll::both(build_scroll_canvas()).fill())
+                        .label("Showcase two-axis scroll area"),
                 ),
         )
 }
 
 fn build_scroll_canvas() -> Container {
     let theme = current_theme();
-    let mut row = Container::new()
-        .row()
+    let mut row = Container::row()
         .gap(14.0)
         .padding(16.0)
         .size(560.0, 280.0)
@@ -1090,8 +1051,7 @@ fn build_scroll_canvas() -> Container {
             theme.colors.primary_hovered.with_alpha(0.18)
         };
         row = row.child(
-            Container::new()
-                .column()
+            Container::column()
                 .gap(12.0)
                 .width(116.0)
                 .child(sample_tile(&format!("Lane {}", column + 1), accent, 72.0))
@@ -1109,7 +1069,7 @@ fn build_scroll_canvas() -> Container {
 
 fn sample_tile(label: &str, color: Color, height: f32) -> Container {
     let theme = current_theme();
-    Container::new()
+    Container::column()
         .height(height)
         .padding(14.0)
         .background(color)
@@ -1126,8 +1086,7 @@ fn sample_tile(label: &str, color: Color, height: f32) -> Container {
 
 fn build_virtual_list_sample() -> Container {
     let theme = current_theme();
-    Container::new()
-        .column()
+    Container::column()
         .gap(10.0)
         .child(
             Text::builder()
@@ -1137,7 +1096,7 @@ fn build_virtual_list_sample() -> Container {
                 .build(),
         )
         .child(
-            Container::new()
+            Container::column()
                 .height(220.0)
                 .background(theme.colors.surface_variant)
                 .border(1.0, theme.colors.border)
@@ -1150,7 +1109,7 @@ fn build_virtual_list_sample() -> Container {
                             .item_builder(|index| {
                                 let theme = current_theme();
                                 Box::new(
-                                    Container::new()
+                                    Container::column()
                                         .fill_width()
                                         .height(38.0)
                                         .padding(10.0)
@@ -1185,8 +1144,8 @@ fn rendering_atlas_card(layout: ShowcaseLayout) -> Container {
     section_card(
         "Rendering atlas",
         "Three small diagnostics in one frame: pixel alignment, stroke + clip, and text balance.",
-        Container::new().column().child(
-            Container::new()
+        Container::column().child(
+            Container::column()
                 .padding(RENDERING_ATLAS_CARD_PADDING)
                 .background(Color::from_hex(0x0B0E13))
                 .border(1.0, theme.colors.border)

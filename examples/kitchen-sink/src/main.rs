@@ -28,9 +28,8 @@ fn main() -> Result<(), sparsha::AppRunError> {
 
 fn build_ui() -> Box<dyn Widget> {
     Box::new(
-        Container::new()
+        Container::row()
             .fill()
-            .row()
             .child(build_sidebar())
             .child(build_main_area()),
     )
@@ -39,8 +38,7 @@ fn build_ui() -> Box<dyn Widget> {
 /// Left sidebar with button gallery and text samples
 fn build_sidebar() -> Container {
     let theme = current_theme();
-    Container::new()
-        .column()
+    Container::column()
         .gap(32.0)
         .padding(24.0)
         .width(250.0)
@@ -54,8 +52,7 @@ fn build_sidebar() -> Container {
                 .build(),
         )
         .child(
-            Container::new()
-                .column()
+            Container::column()
                 .gap(12.0)
                 .child(
                     Text::builder()
@@ -88,8 +85,7 @@ fn build_sidebar() -> Container {
                 ),
         )
         .child(
-            Container::new()
-                .column()
+            Container::column()
                 .gap(16.0)
                 .child(
                     Text::builder()
@@ -119,21 +115,18 @@ fn build_sidebar() -> Container {
 
 /// Main content area with scrollable sections
 fn build_main_area() -> Scroll {
-    Scroll::new()
-        .vertical()
-        .flex_grow(1.0)
-        .fill_height()
-        .content(
-            Container::new()
-                .column()
-                .gap(32.0)
-                .padding(32.0)
-                .fill_width()
-                .child(build_input_section())
-                .child(build_container_section())
-                .child(build_animation_section())
-                .child(build_scroll_section()),
-        )
+    Scroll::vertical(
+        Container::column()
+            .gap(32.0)
+            .padding(32.0)
+            .fill_width()
+            .child(build_input_section())
+            .child(build_container_section())
+            .child(build_animation_section())
+            .child(build_scroll_section()),
+    )
+    .flex_grow(1.0)
+    .fill_height()
 }
 
 /// Input fields section
@@ -141,8 +134,7 @@ fn build_input_section() -> Container {
     let theme = current_theme();
     section(
         "Input, Focus, And Editing",
-        Container::new()
-            .column()
+        Container::column()
             .gap(12.0)
             .fill_width()
             .child(
@@ -155,8 +147,7 @@ fn build_input_section() -> Container {
                     .build(),
             )
             .child(
-                Container::new()
-                    .row()
+                Container::row()
                     .gap(12.0)
                     .align_start()
                     .child(
@@ -195,8 +186,7 @@ fn build_input_section() -> Container {
 /// Nested and overlapping containers section
 fn build_container_section() -> Container {
     let theme = current_theme();
-    Container::new()
-        .column()
+    Container::column()
         .gap(16.0)
         .padding(24.0)
         .background(theme.colors.surface)
@@ -210,17 +200,17 @@ fn build_container_section() -> Container {
                 .build(),
         )
         .child(
-            Container::new()
+            Container::column()
                 .padding(16.0)
                 .background(theme.colors.primary.with_alpha(0.18))
                 .corner_radius(8.0)
                 .child(
-                    Container::new()
+                    Container::column()
                         .padding(16.0)
                         .background(theme.colors.surface_variant.with_alpha(0.9))
                         .corner_radius(8.0)
                         .child(
-                            Container::new()
+                            Container::column()
                                 .padding(16.0)
                                 .background(theme.colors.primary_hovered.with_alpha(0.35))
                                 .corner_radius(8.0)
@@ -238,11 +228,11 @@ fn build_container_section() -> Container {
 
 fn build_scroll_section() -> Container {
     let theme = current_theme();
-    let mut scroll_content = Container::new().column().gap(8.0);
+    let mut scroll_content = Container::column().gap(8.0);
 
     for i in 0..20 {
         scroll_content = scroll_content.child(
-            Container::new()
+            Container::column()
                 .padding(12.0)
                 .min_size(0.0, 40.0)
                 .background(if i % 2 == 0 {
@@ -263,8 +253,7 @@ fn build_scroll_section() -> Container {
 
     section(
         "Scrolling And Lists",
-        Container::new()
-            .column()
+        Container::column()
             .gap(16.0)
             .fill_width()
             .child(
@@ -277,34 +266,31 @@ fn build_scroll_section() -> Container {
                     .build(),
             )
             .child(
-                Container::new()
-                    .row()
+                Container::row()
                     .gap(16.0)
                     .fill_width()
                     .child(
-                        Container::new()
+                        Container::column()
                             .flex_grow(1.0)
                             .min_size(0.0, 260.0)
                             .height(260.0)
                             .child(
                                 Semantics::new(
-                                    Scroll::new()
-                                        .direction(ScrollDirection::Both)
-                                        .fill()
-                                        .content(
-                                            Container::new()
-                                                .size(720.0, 420.0)
-                                                .padding(16.0)
-                                                .background(theme.colors.surface)
-                                                .border(1.0, theme.colors.border)
-                                                .child(scroll_content),
-                                        ),
+                                    Scroll::both(
+                                        Container::column()
+                                            .size(720.0, 420.0)
+                                            .padding(16.0)
+                                            .background(theme.colors.surface)
+                                            .border(1.0, theme.colors.border)
+                                            .child(scroll_content),
+                                    )
+                                    .fill(),
                                 )
                                 .label("Kitchen sink two-axis scroll area"),
                             ),
                     )
                     .child(
-                        Container::new()
+                        Container::column()
                             .flex_grow(1.0)
                             .min_size(0.0, 260.0)
                             .height(260.0)
@@ -316,7 +302,7 @@ fn build_scroll_section() -> Container {
                                         .item_builder(|index| {
                                             let theme = current_theme();
                                             Box::new(
-                                                Container::new()
+                                                Container::column()
                                                     .fill_width()
                                                     .min_size(0.0, 44.0)
                                                     .padding(12.0)
@@ -352,8 +338,7 @@ fn build_scroll_section() -> Container {
 fn build_animation_section() -> Container {
     section(
         "Animations",
-        Container::new()
-            .column()
+        Container::column()
             .gap(16.0)
             .fill_width()
             .child(
@@ -412,8 +397,7 @@ fn build_animation_section() -> Container {
 
 fn section(title: &str, content: impl Widget + 'static) -> Container {
     let theme = current_theme();
-    Container::new()
-        .column()
+    Container::column()
         .gap(16.0)
         .padding(24.0)
         .background(theme.colors.surface)

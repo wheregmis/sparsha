@@ -281,7 +281,7 @@ pub struct App {
 fn default_app_router() -> Router {
     Router::builder()
         .routes(vec![crate::router::Route::new("/", || {
-            sparsha_widgets::Container::new().fill()
+            sparsha_widgets::Container::column().fill()
         })])
         .fallback("/")
         .build()

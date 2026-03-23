@@ -76,7 +76,7 @@ fn main() -> Result<(), sparsha::AppRunError> {
         .router(
             Router::builder()
                 .routes(vec![Route::new("/", || {
-                    Container::new()
+                    Container::column()
                         .fill()
                         .center()
                         .gap(16.0)

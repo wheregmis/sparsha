@@ -211,8 +211,8 @@ struct VirtualizedListBuildState {
 }
 
 impl List {
-    /// Create a new empty vertical list.
-    pub fn new() -> Self {
+    /// Create an empty owned vertical list.
+    pub fn empty() -> Self {
         Self {
             id: WidgetId::default(),
             mode: ListMode::Owned(Vec::new()),
@@ -457,12 +457,6 @@ impl List {
             list = list.fill();
         }
         list
-    }
-}
-
-impl Default for List {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -750,7 +744,7 @@ mod tests {
 
     #[test]
     fn list_runtime_item_operations_work() {
-        let mut list = List::new().vertical();
+        let mut list = List::empty().vertical();
         assert!(list.is_empty());
 
         list.push_item(Text::builder().content("A").build());
@@ -767,7 +761,7 @@ mod tests {
 
     #[test]
     fn list_set_items_replaces_children() {
-        let mut list = List::new();
+        let mut list = List::empty();
         list.set_items(vec![
             Box::new(Text::builder().content("One").build()),
             Box::new(Text::builder().content("Two").build()),
@@ -853,7 +847,7 @@ mod tests {
     fn mutating_virtualized_list_materializes_owned_mode() {
         let mut list = List::virtualized(3, 20.0, |index| {
             Box::new(
-                Container::new().child(Text::builder().content(format!("Row {index}")).build()),
+                Container::column().child(Text::builder().content(format!("Row {index}")).build()),
             )
         });
         list.push_item(Text::builder().content("Extra").build());
@@ -863,7 +857,7 @@ mod tests {
 
     #[test]
     fn configuration_methods_update_style() {
-        let list = List::new()
+        let list = List::empty()
             .direction(ListDirection::Horizontal)
             .gap(10.0)
             .padding(12.0)

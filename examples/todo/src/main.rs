@@ -233,8 +233,7 @@ fn filter_button(label: &str, model: Signal<TodoModel>, filter: Filter, current:
 }
 
 fn filter_row(model: Signal<TodoModel>, current: Filter) -> Container {
-    Container::new()
-        .row()
+    Container::row()
         .fill_width()
         .gap(8.0)
         .child(filter_button("All", model, Filter::All, current))
@@ -261,8 +260,7 @@ fn back_to_todo_button(navigator: Navigator) -> Button {
 }
 
 fn footer_actions(model: Signal<TodoModel>, navigator: Navigator) -> Container {
-    Container::new()
-        .row()
+    Container::row()
         .gap(10.0)
         .child(about_button(navigator))
         .child(clear_completed_button(model))
@@ -282,8 +280,7 @@ fn todo_row(model: Signal<TodoModel>, todo: TodoItem) -> Container {
     };
 
     let id = todo.id;
-    Container::new()
-        .row()
+    Container::row()
         .fill_width()
         .gap(12.0)
         .padding(12.0)
@@ -299,7 +296,7 @@ fn todo_row(model: Signal<TodoModel>, todo: TodoItem) -> Container {
                 .build(),
         )
         .child(
-            Container::new().flex_grow(1.0).child(
+            Container::column().flex_grow(1.0).child(
                 Text::builder()
                     .content(todo.text)
                     .font_size(15.0)
@@ -325,8 +322,7 @@ fn input_row(model: Signal<TodoModel>, draft: String, analysis: TaskHook) -> Con
     let model_for_submit = model;
     let model_for_add = model;
 
-    Container::new()
-        .row()
+    Container::row()
         .fill_width()
         .gap(10.0)
         .align_items(taffy::prelude::AlignItems::Center)
@@ -383,7 +379,7 @@ fn todo_app(cx: &mut ComponentContext<'_>, theme_mode: Signal<ThemeMode>) -> Con
     let visible: Vec<TodoItem> = snapshot.filtered_todos().cloned().collect();
 
     let todo_list = if visible.is_empty() {
-        Container::new()
+        Container::column()
             .padding(14.0)
             .background(card_bg)
             .corner_radius(8.0)
@@ -407,16 +403,14 @@ fn todo_app(cx: &mut ComponentContext<'_>, theme_mode: Signal<ThemeMode>) -> Con
         .into_widget()
     };
 
-    let content = Container::new()
-        .column()
+    let content = Container::column()
         .gap(14.0)
         .padding(26.0)
         .width(720.0)
         .background(panel_bg)
         .corner_radius(14.0)
         .child(
-            Container::new()
-                .row()
+            Container::row()
                 .fill_width()
                 .space_between()
                 .align_items(taffy::prelude::AlignItems::Center)
@@ -446,16 +440,9 @@ fn todo_app(cx: &mut ComponentContext<'_>, theme_mode: Signal<ThemeMode>) -> Con
         )
         .child(input_row(model, snapshot.draft.clone(), analysis))
         .child(filter_row(model, snapshot.filter))
+        .child(Scroll::vertical(todo_list).fill_width().height(340.0))
         .child(
-            Scroll::new()
-                .vertical()
-                .fill_width()
-                .height(340.0)
-                .content(todo_list),
-        )
-        .child(
-            Container::new()
-                .row()
+            Container::row()
                 .fill_width()
                 .space_between()
                 .align_items(taffy::prelude::AlignItems::Center)
@@ -474,7 +461,7 @@ fn todo_app(cx: &mut ComponentContext<'_>, theme_mode: Signal<ThemeMode>) -> Con
                 .child(footer_actions(model, navigator)),
         );
 
-    Container::new()
+    Container::column()
         .fill()
         .center()
         .background(shell_bg)
@@ -484,13 +471,12 @@ fn todo_app(cx: &mut ComponentContext<'_>, theme_mode: Signal<ThemeMode>) -> Con
 fn todo_about(cx: &mut ComponentContext<'_>) -> Container {
     let theme = cx.theme();
     let navigator = cx.navigator();
-    Container::new()
+    Container::column()
         .fill()
         .padding(32.0)
         .background(theme.colors.background)
         .child(
-            Container::new()
-                .column()
+            Container::column()
                 .gap(16.0)
                 .padding(24.0)
                 .background(theme.colors.surface)

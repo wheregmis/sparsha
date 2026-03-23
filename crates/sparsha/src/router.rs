@@ -275,7 +275,7 @@ impl Router {
         }
 
         Box::new(
-            Container::new()
+            Container::column()
                 .fill()
                 .center()
                 .child(Text::builder().content("No routes registered").build()),
@@ -718,7 +718,7 @@ mod tests {
     use sparsha_widgets::{AccessibilityAction, BuildContext, TextInput, ViewportInfo};
 
     fn screen(name: &'static str) -> Container {
-        Container::new().child(Text::builder().content(name).build())
+        Container::column().child(Text::builder().content(name).build())
     }
 
     fn with_runtime(f: impl FnOnce()) {

@@ -17,21 +17,14 @@ pub struct Container {
     border_color: Color,
 }
 
-impl Default for Container {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl Container {
-    /// Create a new empty container.
-    pub fn new() -> Self {
+    fn with_direction(direction: FlexDirection) -> Self {
         Self {
             id: WidgetId::default(),
             children: Vec::new(),
             style: Style {
                 display: Display::Flex,
-                flex_direction: FlexDirection::Column,
+                flex_direction: direction,
                 ..Default::default()
             },
             background: None,
@@ -39,6 +32,16 @@ impl Container {
             border_width: 0.0,
             border_color: Color::TRANSPARENT,
         }
+    }
+
+    /// Create a row container.
+    pub fn row() -> Self {
+        Self::with_direction(FlexDirection::Row)
+    }
+
+    /// Create a column container.
+    pub fn column() -> Self {
+        Self::with_direction(FlexDirection::Column)
     }
 
     /// Add a child widget.
@@ -61,18 +64,6 @@ impl Container {
     /// Set the flex direction.
     pub fn direction(mut self, direction: FlexDirection) -> Self {
         self.style.flex_direction = direction;
-        self
-    }
-
-    /// Make this a row container.
-    pub fn row(mut self) -> Self {
-        self.style.flex_direction = FlexDirection::Row;
-        self
-    }
-
-    /// Make this a column container.
-    pub fn column(mut self) -> Self {
-        self.style.flex_direction = FlexDirection::Column;
         self
     }
 
@@ -299,7 +290,7 @@ mod tests {
 
     #[test]
     fn configuration_methods_update_style_and_visuals() {
-        let mut container = Container::new()
+        let mut container = Container::column()
             .direction(FlexDirection::Row)
             .gap(12.0)
             .padding(16.0)

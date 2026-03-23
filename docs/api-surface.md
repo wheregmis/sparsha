@@ -10,8 +10,8 @@ Stable for 1.0:
 - `AppRunError`
 - `Router`, `Route`, `Navigator`, `hash_to_path`, `path_to_hash`
 - authoring lanes:
-  - primary composition lane: bon-backed `App::builder()`, `Router::builder()`, `component().render(...).call()`, plus a balanced widget surface:
-    - structural tree widgets stay on `new()` plus fluent child/content composition, for example `Container::new()`, `Scroll::new()`, and `Semantics::new(...)`
+  - primary composition lane: bon-backed `App::builder()`, `Router::builder()`, `component().render(...).call()`, plus a semantic structural/widget split:
+    - structural tree widgets use semantic constructors plus fluent child/content composition, for example `Container::column()`, `Container::row()`, `Scroll::vertical(...)`, `Scroll::horizontal(...)`, `List::empty()`, and `Semantics::new(...)`
     - config-heavy and leaf widgets use bon builders such as `Text::builder()`, `Button::builder()`, `Checkbox::builder()`, `TextInput::builder()`, `TextArea::builder()`, and `List::virtualized_builder()`
     - responsive text roles stay on the builder surface through `Text::builder().variant(TextVariant::Header)` rather than shortcut constructors
   - specialized lane: dedicated primitives such as `ForEach`, `DrawSurface`, animation helpers, and theme/style value types

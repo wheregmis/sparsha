@@ -22,7 +22,7 @@
 //!         .router(
 //!             Router::builder()
 //!                 .routes(vec![Route::new("/", || {
-//!                     Container::new()
+//!                     Container::column()
 //!                         .child(Button::builder().label("Click me!").build())
 //!                 })])
 //!                 .fallback("/")

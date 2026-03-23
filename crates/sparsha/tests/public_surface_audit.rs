@@ -113,11 +113,28 @@ fn structural_widgets_do_not_reintroduce_parallel_public_builders() {
     let semantics = read_repo_file("crates/sparsha-widgets/src/semantics.rs");
     let list = read_repo_file("crates/sparsha-widgets/src/list.rs");
 
+    assert!(!container.contains("pub fn new("));
+    assert!(!container.contains("impl Default for Container {"));
     assert!(!container.contains("start_fn(name = builder"));
+    assert!(container.contains("pub fn row() -> Self"));
+    assert!(container.contains("pub fn column() -> Self"));
+
+    assert!(!scroll.contains("pub fn new("));
+    assert!(!scroll.contains("impl Default for Scroll {"));
     assert!(!scroll.contains("start_fn(name = builder"));
+    assert!(!scroll.contains("pub fn content("));
+    assert!(!scroll.contains("pub fn vertical(mut self)"));
+    assert!(!scroll.contains("pub fn horizontal(mut self)"));
+    assert!(scroll.contains("pub fn vertical(widget: impl IntoWidget) -> Self"));
+    assert!(scroll.contains("pub fn horizontal(widget: impl IntoWidget) -> Self"));
+    assert!(scroll.contains("pub fn both(widget: impl IntoWidget) -> Self"));
+
     assert!(!semantics.contains("start_fn(name = builder"));
+    assert!(!list.contains("pub fn new("));
     assert!(!list.contains("fn builder_init("));
     assert!(!list.contains("pub fn with_items("));
+    assert!(!list.contains("impl Default for List {"));
+    assert!(list.contains("pub fn empty() -> Self"));
     assert!(list.contains("start_fn(name = virtualized_builder"));
 }
 
@@ -198,8 +215,10 @@ fn shipped_surface_documents_the_bon_authoring_paths() {
     assert!(readme.contains("component().render(...).call()"));
     assert!(readme.contains("App::builder()"));
     assert!(readme.contains("Router::builder()"));
-    assert!(api_surface.contains("Container::new()"));
-    assert!(api_surface.contains("Scroll::new()"));
+    assert!(api_surface.contains("Container::column()"));
+    assert!(api_surface.contains("Container::row()"));
+    assert!(api_surface.contains("Scroll::vertical(...)"));
+    assert!(api_surface.contains("List::empty()"));
     assert!(api_surface.contains("Semantics::new(...)"));
     assert!(api_surface.contains("List::virtualized_builder()"));
     assert!(api_surface.contains("TextVariant::Header"));

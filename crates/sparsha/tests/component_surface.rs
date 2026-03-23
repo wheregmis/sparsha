@@ -44,13 +44,12 @@ fn bon_app_and_router_builders_compile_from_the_public_crate_root() {
 }
 
 #[test]
-fn balanced_widget_surface_compiles_from_the_public_crate_root() {
+fn semantic_structural_widget_surface_compiles_from_the_public_crate_root() {
     let runtime = sparsha::signals::RuntimeHandle::new();
     runtime.run_with_current(|| {
         let email_state = Signal::new(String::new());
         let checked_state = Signal::new(false);
-        let _tree = Container::new()
-            .column()
+        let _tree = Container::column()
             .gap(12.0)
             .padding(16.0)
             .child(Text::builder().content("hello").bold(true).build())
@@ -83,19 +82,18 @@ fn balanced_widget_surface_compiles_from_the_public_crate_root() {
                     .build(),
             )
             .child(
-                Scroll::new()
-                    .direction(ScrollDirection::Vertical)
-                    .height(120.0)
-                    .content(
-                        List::virtualized_builder()
-                            .item_count(20)
-                            .item_extent(28.0)
-                            .item_builder(|index| {
-                                Box::new(Text::builder().content(format!("row {index}")).build())
-                            })
-                            .direction(ListDirection::Vertical)
-                            .build(),
-                    ),
+                Scroll::vertical(
+                    List::virtualized_builder()
+                        .item_count(20)
+                        .item_extent(28.0)
+                        .item_builder(|index| {
+                            Box::new(Text::builder().content(format!("row {index}")).build())
+                        })
+                        .direction(ListDirection::Vertical)
+                        .build(),
+                )
+                .height(120.0)
+                .direction(ScrollDirection::Vertical),
             )
             .child(
                 Semantics::new(Text::builder().content("semantic label").build())

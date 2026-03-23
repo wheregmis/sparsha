@@ -1156,7 +1156,7 @@ mod tests {
         let (button_a, _, _) = FocusProbe::new(true);
         let (button_b, _, _) = FocusProbe::new(true);
         let (label, _, _) = FocusProbe::new(false);
-        let mut root = Container::new()
+        let mut root = Container::column()
             .child(button_a)
             .child(label)
             .child(button_b);
@@ -1219,7 +1219,7 @@ mod tests {
     fn focus_callbacks_only_fire_on_logical_change() {
         let (first, first_focuses, first_blurs) = FocusProbe::new(true);
         let (second, second_focuses, second_blurs) = FocusProbe::new(true);
-        let mut root = Container::new().child(first).child(second);
+        let mut root = Container::column().child(first).child(second);
         let (_, registry) = build_registry(&mut root);
         let mut focus_manager = FocusManager::new();
         let mut focused_path = None;
@@ -1256,7 +1256,9 @@ mod tests {
     fn pointer_capture_routes_move_and_up_to_owner() {
         let (capture_widget, seen_capture_moves) = FocusProbe::capture_probe();
         let (other_widget, _, _) = FocusProbe::new(true);
-        let mut root = Container::new().child(capture_widget).child(other_widget);
+        let mut root = Container::column()
+            .child(capture_widget)
+            .child(other_widget);
         let (layout_tree, registry) = build_registry(&mut root);
         let focused_id = registry.id_for_path(&[0]).unwrap();
 
@@ -1301,7 +1303,7 @@ mod tests {
     fn scroll_offsets_are_applied_to_descendant_hit_testing() {
         let spacer = ScrollHitProbe::new((200.0, 120.0)).0;
         let (target, seen_scroll) = ScrollHitProbe::new((200.0, 40.0));
-        let content = Container::new().column().child(spacer).child(target);
+        let content = Container::column().child(spacer).child(target);
         let mut root = OffsetScrollProbe::new(glam::vec2(0.0, 100.0), content);
         let (layout_tree, _) = build_registry(&mut root);
 
@@ -1345,7 +1347,7 @@ mod tests {
 
     #[test]
     fn semantics_overrides_merge_into_descendant_accessible_node() {
-        let mut root = Container::new().child(
+        let mut root = Container::column().child(
             Semantics::new(Button::builder().label("Save").build())
                 .label("Explicit accessible label"),
         );
@@ -1360,7 +1362,7 @@ mod tests {
 
     #[test]
     fn accessibility_ids_remain_stable_across_relayout() {
-        let mut root = Container::new()
+        let mut root = Container::column()
             .child(Button::builder().label("Primary").build())
             .child(TextInput::builder().placeholder("Email").build());
         let (layout_tree_a, _) = build_registry(&mut root);

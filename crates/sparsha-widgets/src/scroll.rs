@@ -64,19 +64,12 @@ struct ScrollBuildState {
     model: ScrollModel,
 }
 
-impl Default for Scroll {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl Scroll {
-    /// Create a new scroll container.
-    pub fn new() -> Self {
+    fn with_direction(direction: ScrollDirection) -> Self {
         Self {
             id: WidgetId::default(),
             content: None,
-            direction: ScrollDirection::Vertical,
+            direction,
             model: ScrollModel::default(),
             content_size: std::cell::Cell::new((0.0, 0.0)),
             viewport_size: std::cell::Cell::new((0.0, 0.0)),
@@ -92,6 +85,21 @@ impl Scroll {
             },
             debug_overlay: false,
         }
+    }
+
+    /// Create a vertically scrolling container around the given content.
+    pub fn vertical(widget: impl IntoWidget) -> Self {
+        Self::with_direction(ScrollDirection::Vertical).with_content(widget)
+    }
+
+    /// Create a horizontally scrolling container around the given content.
+    pub fn horizontal(widget: impl IntoWidget) -> Self {
+        Self::with_direction(ScrollDirection::Horizontal).with_content(widget)
+    }
+
+    /// Create a two-axis scrolling container around the given content.
+    pub fn both(widget: impl IntoWidget) -> Self {
+        Self::with_direction(ScrollDirection::Both).with_content(widget)
     }
 
     /// Set width.
@@ -149,8 +157,7 @@ impl Scroll {
         self
     }
 
-    /// Set the content widget.
-    pub fn content(mut self, widget: impl IntoWidget) -> Self {
+    fn with_content(mut self, widget: impl IntoWidget) -> Self {
         self.content = Some(widget.into_widget());
         self
     }
@@ -158,18 +165,6 @@ impl Scroll {
     /// Set the scroll direction.
     pub fn direction(mut self, direction: ScrollDirection) -> Self {
         self.direction = direction;
-        self
-    }
-
-    /// Set to vertical scrolling only.
-    pub fn vertical(mut self) -> Self {
-        self.direction = ScrollDirection::Vertical;
-        self
-    }
-
-    /// Set to horizontal scrolling only.
-    pub fn horizontal(mut self) -> Self {
-        self.direction = ScrollDirection::Horizontal;
         self
     }
 
@@ -724,9 +719,9 @@ mod tests {
 
     #[test]
     fn scroll_widget_track_click_pages_content() {
-        let mut scroll = Scroll::new().vertical().content(
-            Container::new().column().child(
-                Container::new()
+        let mut scroll = Scroll::vertical(
+            Container::column().child(
+                Container::column()
                     .height(320.0)
                     .child(Text::builder().content("Large").build()),
             ),
@@ -746,7 +741,7 @@ mod tests {
 
     #[test]
     fn hover_and_release_update_scrollbar_visual_state() {
-        let mut scroll = Scroll::new();
+        let mut scroll = Scroll::vertical(Container::column());
         scroll.viewport_size.set((120.0, 90.0));
         scroll.content_size.set((120.0, 320.0));
 
@@ -771,9 +766,7 @@ mod tests {
             ..ScrollbarStyle::default()
         };
 
-        let scroll = Scroll::new()
-            .direction(ScrollDirection::Both)
-            .content(Text::builder().content("Content").build())
+        let scroll = Scroll::both(Text::builder().content("Content").build())
             .scrollbar_style(style.clone())
             .width(320.0)
             .height(240.0)

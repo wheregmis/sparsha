@@ -1915,6 +1915,14 @@ mod tests {
         assert_eq!(surface_frames.len(), 1);
         assert_eq!(draw_list.len(), 1);
     }
+
+    #[test]
+    fn route_view_transition_runs_only_after_first_paint() {
+        assert!(!can_start_route_view_transition(false, false));
+        assert!(!can_start_route_view_transition(false, true));
+        assert!(!can_start_route_view_transition(true, false));
+        assert!(can_start_route_view_transition(true, true));
+    }
 }
 
 #[cfg(all(test, target_arch = "wasm32"))]
@@ -1964,14 +1972,6 @@ mod wasm_tests {
         assert!(!should_sync_external_hash("/", "#/"));
         assert!(!should_sync_external_hash("/about", "#/about"));
         assert!(should_sync_external_hash("/", "#/about"));
-    }
-
-    #[test]
-    fn route_view_transition_runs_only_after_first_paint() {
-        assert!(!can_start_route_view_transition(false, false));
-        assert!(!can_start_route_view_transition(false, true));
-        assert!(!can_start_route_view_transition(true, false));
-        assert!(can_start_route_view_transition(true, true));
     }
 
     #[wasm_bindgen_test]

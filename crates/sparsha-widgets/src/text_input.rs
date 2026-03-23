@@ -6,6 +6,7 @@ use crate::{
     current_theme, responsive_theme_controls, responsive_typography, AccessibilityAction,
     AccessibilityInfo, AccessibilityRole, EventContext, PaintContext, Widget,
 };
+use bon::bon;
 use sparsha_core::Color;
 use sparsha_input::{Action, ActionMapper, InputEvent, Key, NamedKey, StandardAction};
 use sparsha_layout::WidgetId;
@@ -75,8 +76,7 @@ struct TextInputBuildState {
 }
 
 impl TextInput {
-    /// Create a new text input.
-    pub fn new() -> Self {
+    fn empty() -> Self {
         Self {
             id: WidgetId::default(),
             editor: EditorCore::new(String::new()),
@@ -91,42 +91,9 @@ impl TextInput {
         }
     }
 
-    /// Set the initial value.
-    pub fn value(mut self, value: impl Into<String>) -> Self {
-        let value = value.into();
-        self.editor.set_text(value.clone());
-        self.declared_value = Some(value);
-        self
-    }
-
-    /// Set the placeholder text.
-    pub fn placeholder(mut self, placeholder: impl Into<String>) -> Self {
-        self.placeholder = placeholder.into();
-        self
-    }
-
-    /// Set the change handler.
-    pub fn on_change(mut self, handler: impl FnMut(&str) + 'static) -> Self {
-        self.on_change = Some(Box::new(handler));
-        self
-    }
-
-    /// Set the submit handler (called on Enter).
-    pub fn on_submit(mut self, handler: impl FnMut(&str) + 'static) -> Self {
-        self.on_submit = Some(Box::new(handler));
-        self
-    }
-
-    /// Set the style.
-    pub fn with_style(mut self, style: TextInputStyle) -> Self {
+    fn style_override(mut self, style: TextInputStyle) -> Self {
         self.style = style;
         self.use_theme_defaults = false;
-        self
-    }
-
-    /// Stretch to fill the parent's available width.
-    pub fn fill_width(mut self) -> Self {
-        self.fill_width = true;
         self
     }
 
@@ -382,9 +349,45 @@ impl TextInput {
     }
 }
 
-impl Default for TextInput {
-    fn default() -> Self {
-        Self::new()
+#[bon]
+impl TextInput {
+    #[builder(
+        start_fn(name = builder, vis = "pub"),
+        finish_fn(name = build, vis = "pub"),
+        builder_type(name = TextInputBuilder, vis = "pub"),
+        state_mod(vis = "pub")
+    )]
+    fn builder_init(
+        #[builder(with = |value: impl Into<String>| value.into())] value: Option<String>,
+        #[builder(into, default = String::new())] placeholder: String,
+        style: Option<TextInputStyle>,
+        #[builder(default)] fill_width: bool,
+        #[builder(with = |handler: impl FnMut(&str) + 'static| Box::new(handler) as TextInputCallback)]
+        on_change: Option<TextInputCallback>,
+        #[builder(with = |handler: impl FnMut(&str) + 'static| Box::new(handler) as TextInputCallback)]
+        on_submit: Option<TextInputCallback>,
+    ) -> Self {
+        let mut input = Self::empty();
+        if let Some(value) = value {
+            input.editor.set_text(value.clone());
+            input.declared_value = Some(value);
+        }
+        if !placeholder.is_empty() {
+            input.placeholder = placeholder;
+        }
+        if let Some(style) = style {
+            input = input.style_override(style);
+        }
+        if fill_width {
+            input.fill_width = true;
+        }
+        if let Some(on_change) = on_change {
+            input.on_change = Some(on_change);
+        }
+        if let Some(on_submit) = on_submit {
+            input.on_submit = Some(on_submit);
+        }
+        input
     }
 }
 
@@ -736,7 +739,7 @@ mod tests {
     #[test]
     fn pointer_click_places_cursor_at_start_middle_end() {
         reset_viewport();
-        let mut input = TextInput::new().value("hello");
+        let mut input = TextInput::builder().value("hello").build();
         input.set_id(Default::default());
         prepare_input_with_cache(&input);
 
@@ -769,7 +772,7 @@ mod tests {
     #[test]
     fn drag_selection_uses_pointer_capture() {
         reset_viewport();
-        let mut input = TextInput::new().value("hello world");
+        let mut input = TextInput::builder().value("hello world").build();
         input.set_id(Default::default());
         prepare_input_with_cache(&input);
 
@@ -807,9 +810,10 @@ mod tests {
             reset_viewport();
             let changes = Arc::new(Mutex::new(Vec::new()));
             let changes_for_cb = Arc::clone(&changes);
-            let mut input = TextInput::new()
+            let mut input = TextInput::builder()
                 .value("hello")
-                .on_change(move |value| changes_for_cb.lock().unwrap().push(value.to_owned()));
+                .on_change(move |value| changes_for_cb.lock().unwrap().push(value.to_owned()))
+                .build();
             input.set_id(Default::default());
 
             let layout = layout_bounds(0.0, 0.0, 240.0, 36.0);
@@ -891,7 +895,7 @@ mod tests {
     #[test]
     fn text_editor_state_matches_cursor_and_selection() {
         reset_viewport();
-        let mut input = TextInput::new().value("hello");
+        let mut input = TextInput::builder().value("hello").build();
         input.editor.select_all();
         let state = input.text_editor_state().expect("text editor state");
         assert_eq!(state.text, "hello");
@@ -902,7 +906,7 @@ mod tests {
     #[test]
     fn pointer_hit_testing_stays_correct_after_scaled_paint() {
         reset_viewport();
-        let mut input = TextInput::new().value("hello world");
+        let mut input = TextInput::builder().value("hello world").build();
         input.set_id(Default::default());
 
         let layout_tree = LayoutTree::new();
@@ -935,7 +939,7 @@ mod tests {
     #[test]
     fn space_text_input_advances_cursor_and_updates_value() {
         reset_viewport();
-        let mut input = TextInput::new().value("hey");
+        let mut input = TextInput::builder().value("hey").build();
         input.set_id(Default::default());
         let layout = layout_bounds(0.0, 0.0, 240.0, 36.0);
         let layout_tree = LayoutTree::new();
@@ -968,7 +972,7 @@ mod tests {
     #[test]
     fn prefix_cache_tracks_trailing_space_width() {
         reset_viewport();
-        let input = TextInput::new().value("a ");
+        let input = TextInput::builder().value("a ").build();
         prepare_input_with_cache(&input);
 
         let prefix = input.prefix_widths.borrow();
@@ -993,11 +997,32 @@ mod tests {
         set_current_theme(theme);
         set_current_viewport(ViewportInfo::new(390.0, 844.0));
 
-        let input = TextInput::new();
+        let input = TextInput::builder().build();
         let style = input.resolved_style();
         let epsilon = f32::EPSILON;
         assert!((style.font_size - 14.0).abs() <= epsilon);
         assert!((style.min_height - 34.0).abs() <= epsilon);
         assert!((style.padding_h - 10.0).abs() <= epsilon);
+    }
+
+    #[test]
+    fn builder_sets_explicit_configuration() {
+        let style = TextInputStyle {
+            min_width: 240.0,
+            ..TextInputStyle::default()
+        };
+
+        let input = TextInput::builder()
+            .value("Builder")
+            .placeholder("Type")
+            .style(style.clone())
+            .fill_width(true)
+            .build();
+
+        assert_eq!(input.get_value(), "Builder");
+        assert_eq!(input.placeholder, "Type");
+        assert_eq!(input.style.min_width, style.min_width);
+        assert!(input.fill_width);
+        assert!(!input.use_theme_defaults);
     }
 }

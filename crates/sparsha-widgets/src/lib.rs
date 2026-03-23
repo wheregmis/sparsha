@@ -39,7 +39,7 @@ pub use into_widget::IntoWidget;
 pub use list::{List, ListDirection};
 pub use scroll::{Scroll, ScrollDirection, ScrollbarStyle};
 pub use semantics::Semantics;
-pub use text::{Text, TextAlign};
+pub use text::{Text, TextAlign, TextVariant};
 pub use text_area::{TextArea, TextAreaStyle};
 pub use text_editor::TextEditorState;
 pub use text_input::{TextInput, TextInputStyle};

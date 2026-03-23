@@ -10,6 +10,7 @@ sparsha-layout = { path = "../sparsha-layout" }
 sparsha-input = { path = "../sparsha-input" }
 sparsha-text = { path = "../sparsha-text" }
 sparsha-render = { path = "../sparsha-render" }
+bon = { workspace = true }
 taffy = { workspace = true }
 log = { workspace = true }
 glam = { workspace = true }

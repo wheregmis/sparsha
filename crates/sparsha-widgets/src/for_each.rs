@@ -164,7 +164,7 @@ mod tests {
         let list = ForEach::new(
             vec![(10usize, "A"), (20usize, "B"), (30usize, "C")],
             |item| item.0,
-            |item| Text::new(item.1),
+            |item| Text::builder().content(item.1).build(),
         );
 
         assert_eq!(list.child_path_key(0), 10);
@@ -179,7 +179,7 @@ mod tests {
         let _ = ForEach::new(
             vec![(10usize, "A"), (10usize, "B")],
             |item| item.0,
-            |item| Text::new(item.1),
+            |item| Text::builder().content(item.1).build(),
         );
     }
 }

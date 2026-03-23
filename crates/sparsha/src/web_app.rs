@@ -52,6 +52,7 @@ pub(crate) fn run_dom_app(
     let document = window
         .document()
         .ok_or(AppRunError::WebEnvironment("document"))?;
+    document.set_title(&config.title);
     let dom_renderer = DomRenderer::mount_to_body(&document)
         .map_err(|err| AppRunError::DomMount(format_js_error(&err)))?;
     let surface_manager = HybridSurfaceManager::new(dom_renderer.root())

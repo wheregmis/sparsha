@@ -10,7 +10,10 @@ Stable for 1.0:
 - `AppRunError`
 - `Router`, `Route`, `Navigator`, `hash_to_path`, `path_to_hash`
 - authoring lanes:
-  - primary composition lane: bon-backed `component`, plus the normal crate-root widget/configuration APIs
+  - primary composition lane: bon-backed `App::builder()`, `Router::builder()`, `component().render(...).call()`, plus a balanced widget surface:
+    - structural tree widgets stay on `new()` plus fluent child/content composition, for example `Container::new()`, `Scroll::new()`, and `Semantics::new(...)`
+    - config-heavy and leaf widgets use bon builders such as `Text::builder()`, `Button::builder()`, `Checkbox::builder()`, `TextInput::builder()`, `TextArea::builder()`, and `List::virtualized_builder()`
+    - responsive text roles stay on the builder surface through `Text::builder().variant(TextVariant::Header)` rather than shortcut constructors
   - specialized lane: dedicated primitives such as `ForEach`, `DrawSurface`, animation helpers, and theme/style value types
   - expert lane: low-level `Widget` and context APIs for manual custom widgets
 - component authoring helpers: `component`, `Component`, `ComponentContext`, `TaskHook`
@@ -35,6 +38,7 @@ Contributor rule:
 
 - new public authoring APIs must declare which lane they belong to
 - normal UI composition must not gain parallel public entrypoints that overlap in behavior
+- prefer `new()` for structural widgets that primarily accumulate child trees; prefer bon builders for config-heavy widgets where typestate/defaulting materially improves clarity and safety
 
 ## `sparsha-core`
 

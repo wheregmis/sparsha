@@ -68,23 +68,34 @@ fn main() -> Result<(), sparsha::AppRunError> {
     #[cfg(target_arch = "wasm32")]
     sparsha::init_web()?;
 
-    App::new()
+    App::builder()
         .title("Hello Sparsha")
-        .size(960, 640)
+        .width(960)
+        .height(640)
         .theme(Theme::light())
         .router(
-            Router::new()
-                .route("/", || {
+            Router::builder()
+                .routes(vec![Route::new("/", || {
                     Container::new()
                         .fill()
                         .center()
                         .gap(16.0)
-                        .child(Text::new("Build UI with a GPU-first stack."))
-                        .child(Button::new("Click me"))
-                        .child(TextInput::new().placeholder("Type here..."))
-                })
-                .fallback("/"),
+                        .child(
+                            Text::builder()
+                                .content("Build UI with a GPU-first stack.")
+                                .build(),
+                        )
+                        .child(Button::builder().label("Click me").build())
+                        .child(
+                            TextInput::builder()
+                                .placeholder("Type here...")
+                                .build(),
+                        )
+                })])
+                .fallback("/")
+                .build(),
         )
+        .build()
         .run()
 }
 ```

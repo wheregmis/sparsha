@@ -5,6 +5,7 @@ use crate::{
     current_theme, responsive_theme_controls, AccessibilityAction, AccessibilityInfo,
     AccessibilityRole, EventContext, PaintContext, Widget,
 };
+use bon::bon;
 use sparsha_core::Color;
 use sparsha_input::InputEvent;
 use sparsha_layout::WidgetId;
@@ -66,8 +67,7 @@ struct CheckboxBuildState {
 }
 
 impl Checkbox {
-    /// Create a new unchecked checkbox.
-    pub fn new() -> Self {
+    fn unchecked() -> Self {
         Self {
             id: WidgetId::default(),
             checked: false,
@@ -81,43 +81,9 @@ impl Checkbox {
         }
     }
 
-    /// Create a checkbox with an initial checked state.
-    pub fn with_checked(checked: bool) -> Self {
-        Self::new().checked(checked)
-    }
-
-    /// Set checked state.
-    pub fn checked(mut self, checked: bool) -> Self {
-        self.checked = checked;
-        self.declared_checked = checked;
-        self
-    }
-
-    /// Set disabled state.
-    pub fn disabled(mut self, disabled: bool) -> Self {
-        self.disabled = disabled;
-        if disabled {
-            self.interaction.clear_interaction();
-        }
-        self
-    }
-
-    /// Set style.
-    pub fn with_style(mut self, style: CheckboxStyle) -> Self {
+    fn style_override(mut self, style: CheckboxStyle) -> Self {
         self.style = style;
         self.use_theme_defaults = false;
-        self
-    }
-
-    /// Set checkbox square size in logical pixels.
-    pub fn size(mut self, size: f32) -> Self {
-        self.size_override = Some(size.max(1.0));
-        self
-    }
-
-    /// Set toggle callback.
-    pub fn on_toggle(mut self, handler: impl FnMut(bool) + 'static) -> Self {
-        self.on_toggle = Some(Box::new(handler));
         self
     }
 
@@ -165,9 +131,36 @@ impl Checkbox {
     }
 }
 
-impl Default for Checkbox {
-    fn default() -> Self {
-        Self::new()
+#[bon]
+impl Checkbox {
+    #[builder(
+        start_fn(name = builder, vis = "pub"),
+        finish_fn(name = build, vis = "pub"),
+        builder_type(name = CheckboxBuilder, vis = "pub"),
+        state_mod(vis = "pub")
+    )]
+    fn builder_init(
+        #[builder(default)] checked: bool,
+        #[builder(default)] disabled: bool,
+        style: Option<CheckboxStyle>,
+        size: Option<f32>,
+        #[builder(with = |handler: impl FnMut(bool) + 'static| Box::new(handler) as Box<dyn FnMut(bool)>)]
+        on_toggle: Option<Box<dyn FnMut(bool)>>,
+    ) -> Self {
+        let mut checkbox = Self::unchecked();
+        checkbox.checked = checked;
+        checkbox.declared_checked = checked;
+        checkbox.disabled = disabled;
+        if let Some(style) = style {
+            checkbox = checkbox.style_override(style);
+        }
+        if let Some(size) = size {
+            checkbox.size_override = Some(size.max(1.0));
+        }
+        if let Some(on_toggle) = on_toggle {
+            checkbox.on_toggle = Some(on_toggle);
+        }
+        checkbox
     }
 }
 
@@ -366,8 +359,9 @@ mod tests {
     fn pointer_toggle_invokes_callback() {
         let toggled = Arc::new(AtomicBool::new(false));
         let toggled_cb = Arc::clone(&toggled);
-        let mut checkbox =
-            Checkbox::new().on_toggle(move |checked| toggled_cb.store(checked, Ordering::SeqCst));
+        let mut checkbox = Checkbox::builder()
+            .on_toggle(move |checked| toggled_cb.store(checked, Ordering::SeqCst))
+            .build();
         checkbox.set_id(Default::default());
 
         let (layout_tree, mut focus, layout) = checkbox_env();
@@ -385,7 +379,7 @@ mod tests {
 
     #[test]
     fn keyboard_activate_toggles_when_focused() {
-        let mut checkbox = Checkbox::new();
+        let mut checkbox = Checkbox::builder().build();
         checkbox.set_id(Default::default());
         let (layout_tree, mut focus, layout) = checkbox_env();
         focus.set_focus(checkbox.id());
@@ -404,7 +398,7 @@ mod tests {
 
     #[test]
     fn disabled_checkbox_ignores_events() {
-        let mut checkbox = Checkbox::new().disabled(true);
+        let mut checkbox = Checkbox::builder().disabled(true).build();
         checkbox.set_id(Default::default());
         let (layout_tree, mut focus, layout) = checkbox_env();
         let mut ctx = mock_event_context(layout, &layout_tree, &mut focus, checkbox.id(), false);
@@ -421,8 +415,22 @@ mod tests {
         set_current_theme(theme);
         set_current_viewport(ViewportInfo::new(390.0, 844.0));
 
-        let checkbox = Checkbox::new();
+        let checkbox = Checkbox::builder().build();
         let style = checkbox.resolved_style();
         assert!(style.size < 18.0);
+    }
+
+    #[test]
+    fn builder_sets_explicit_configuration() {
+        let checkbox = Checkbox::builder()
+            .checked(true)
+            .disabled(true)
+            .size(24.0)
+            .build();
+
+        assert!(checkbox.checked);
+        assert!(checkbox.declared_checked);
+        assert!(checkbox.disabled);
+        assert_eq!(checkbox.size_override, Some(24.0));
     }
 }

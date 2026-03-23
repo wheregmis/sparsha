@@ -1202,7 +1202,7 @@ mod tests {
     fn paint_only_children_are_excluded_from_runtime_metadata() {
         let mut root = ChildModeWrapper::new(
             WidgetChildMode::PaintOnly,
-            TextInput::new().placeholder("Email"),
+            TextInput::builder().placeholder("Email").build(),
         );
         let (layout_tree, registry) = build_registry(&mut root);
 
@@ -1345,8 +1345,10 @@ mod tests {
 
     #[test]
     fn semantics_overrides_merge_into_descendant_accessible_node() {
-        let mut root = Container::new()
-            .child(Semantics::new(Button::new("Save")).label("Explicit accessible label"));
+        let mut root = Container::new().child(
+            Semantics::new(Button::builder().label("Save").build())
+                .label("Explicit accessible label"),
+        );
         let (layout_tree, _) = build_registry(&mut root);
         let tree = collect_accessibility_tree(&root, &layout_tree, None);
 
@@ -1359,8 +1361,8 @@ mod tests {
     #[test]
     fn accessibility_ids_remain_stable_across_relayout() {
         let mut root = Container::new()
-            .child(Button::new("Primary"))
-            .child(TextInput::new().placeholder("Email"));
+            .child(Button::builder().label("Primary").build())
+            .child(TextInput::builder().placeholder("Email").build());
         let (layout_tree_a, _) = build_registry(&mut root);
         let tree_a = collect_accessibility_tree(&root, &layout_tree_a, Some(&vec![1]));
 

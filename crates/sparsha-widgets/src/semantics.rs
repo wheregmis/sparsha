@@ -87,3 +87,28 @@ impl Widget for Semantics {
         true
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Text;
+
+    #[test]
+    fn metadata_methods_populate_accessibility_info() {
+        let semantics = Semantics::new(Text::builder().content("label").build())
+            .label("Button label")
+            .description("Helpful context")
+            .value("42")
+            .role(AccessibilityRole::Button)
+            .hidden(true);
+
+        assert_eq!(semantics.info.label.as_deref(), Some("Button label"));
+        assert_eq!(
+            semantics.info.description.as_deref(),
+            Some("Helpful context")
+        );
+        assert_eq!(semantics.info.value.as_deref(), Some("42"));
+        assert_eq!(semantics.info.role, Some(AccessibilityRole::Button));
+        assert!(semantics.info.hidden);
+    }
+}

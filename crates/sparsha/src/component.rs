@@ -336,7 +336,7 @@ mod tests {
                         let counter = cx.signal(0usize);
                         observed.set(counter.get());
                         counter.set(counter.get() + 1);
-                        Text::new("component")
+                        Text::builder().content("component").build()
                     })
                     .call();
                 host.rebuild(&mut build);
@@ -363,7 +363,7 @@ mod tests {
             let mut host = component()
                 .render(move |cx| {
                     hook_slot.set(Some(cx.use_task("component.test", "echo")));
-                    Text::new("task")
+                    Text::builder().content("task").build()
                 })
                 .call();
             host.rebuild(&mut build);
@@ -408,7 +408,7 @@ mod tests {
             let mut host = component()
                 .render(move |cx| {
                     hook_slot.set(Some(cx.use_task(task_key.get(), "echo")));
-                    Text::new("task")
+                    Text::builder().content("task").build()
                 })
                 .call();
             host.rebuild(&mut build);
@@ -448,7 +448,7 @@ mod tests {
             let mut host = component()
                 .render(move |cx| {
                     observed.set(Some(cx.viewport()));
-                    Text::new("viewport")
+                    Text::builder().content("viewport").build()
                 })
                 .call();
             host.rebuild(&mut build);
@@ -465,7 +465,9 @@ mod tests {
         runtime.run_with_current(|| {
             let mut build = BuildContext::default();
             let mut host = component()
-                .render(|_: &mut ComponentContext<'_>| Text::new("from-builder"))
+                .render(|_: &mut ComponentContext<'_>| {
+                    Text::builder().content("from-builder").build()
+                })
                 .call();
             host.rebuild(&mut build);
             assert_eq!(host.children().len(), 1);

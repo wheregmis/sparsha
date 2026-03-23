@@ -16,7 +16,7 @@ fn button_paint_emits_rect_and_text_commands() {
     let mut text_system = TextSystem::new_headless();
     let mut paint_commands = PaintCommands::default();
 
-    let button = Button::new("OK");
+    let button = Button::builder().label("OK").build();
 
     let mut ctx = PaintContext {
         draw_list: &mut draw_list,
@@ -58,7 +58,7 @@ fn button_text_run_contains_label() {
     let mut text_system = TextSystem::new_headless();
     let mut paint_commands = PaintCommands::default();
 
-    let button = Button::new("Hello");
+    let button = Button::builder().label("Hello").build();
     let mut ctx = PaintContext {
         draw_list: &mut draw_list,
         layout,

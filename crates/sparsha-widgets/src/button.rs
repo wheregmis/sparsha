@@ -5,6 +5,7 @@ use crate::{
     current_theme, responsive_theme_controls, responsive_typography, AccessibilityAction,
     AccessibilityInfo, AccessibilityRole, EventContext, PaintContext, Widget,
 };
+use bon::bon;
 use sparsha_core::Color;
 use sparsha_input::InputEvent;
 use sparsha_layout::WidgetId;
@@ -77,11 +78,10 @@ pub struct Button {
 }
 
 impl Button {
-    /// Create a new button with the given label.
-    pub fn new(label: impl Into<String>) -> Self {
+    fn with_label(label: String) -> Self {
         Self {
             id: WidgetId::default(),
-            label: label.into(),
+            label,
             style_override: None,
             background_override: None,
             text_color_override: None,
@@ -92,42 +92,8 @@ impl Button {
         }
     }
 
-    /// Set the click handler.
-    pub fn on_click(mut self, handler: impl FnMut() + 'static) -> Self {
-        self.on_click = Some(Box::new(handler));
-        self
-    }
-
-    /// Set the button style.
-    pub fn with_style(mut self, style: ButtonStyle) -> Self {
+    fn style_override(mut self, style: ButtonStyle) -> Self {
         self.style_override = Some(style);
-        self
-    }
-
-    /// Set the background color.
-    pub fn background(mut self, color: Color) -> Self {
-        self.background_override = Some(color);
-        self
-    }
-
-    /// Set the text color.
-    pub fn text_color(mut self, color: Color) -> Self {
-        self.text_color_override = Some(color);
-        self
-    }
-
-    /// Set corner radius.
-    pub fn corner_radius(mut self, radius: f32) -> Self {
-        self.corner_radius_override = Some(radius);
-        self
-    }
-
-    /// Disable the button.
-    pub fn disabled(mut self, disabled: bool) -> Self {
-        self.disabled = disabled;
-        if disabled {
-            self.interaction.clear_interaction();
-        }
         self
     }
 
@@ -208,6 +174,39 @@ impl Button {
             ButtonState::Disabled => style.text_color_disabled,
             _ => style.text_color,
         }
+    }
+}
+
+#[bon]
+impl Button {
+    #[builder(
+        start_fn(name = builder, vis = "pub"),
+        finish_fn(name = build, vis = "pub"),
+        builder_type(name = ButtonBuilder, vis = "pub"),
+        state_mod(vis = "pub")
+    )]
+    fn builder_init(
+        #[builder(into)] label: String,
+        style: Option<ButtonStyle>,
+        background: Option<Color>,
+        text_color: Option<Color>,
+        corner_radius: Option<f32>,
+        #[builder(default)] disabled: bool,
+        #[builder(with = |handler: impl FnMut() + 'static| Box::new(handler) as Box<dyn FnMut()>)]
+        on_click: Option<Box<dyn FnMut()>>,
+    ) -> Self {
+        let mut button = Self::with_label(label);
+        if let Some(style) = style {
+            button = button.style_override(style);
+        }
+        button.background_override = background;
+        button.text_color_override = text_color;
+        button.corner_radius_override = corner_radius;
+        button.disabled = disabled;
+        if let Some(on_click) = on_click {
+            button.on_click = Some(on_click);
+        }
+        button
     }
 }
 
@@ -382,7 +381,7 @@ mod tests {
 
     #[test]
     fn state_transition_pointer_move_inside_then_hovered() {
-        let mut button = Button::new("OK");
+        let mut button = Button::builder().label("OK").build();
         let (x, y, w, h) = button_bounds();
         let layout = layout_bounds(x, y, w, h);
         let layout_tree = LayoutTree::new();
@@ -397,7 +396,7 @@ mod tests {
 
     #[test]
     fn state_transition_pointer_move_outside_then_normal() {
-        let mut button = Button::new("OK");
+        let mut button = Button::builder().label("OK").build();
         let (x, y, w, h) = button_bounds();
         let layout = layout_bounds(x, y, w, h);
         let layout_tree = LayoutTree::new();
@@ -416,8 +415,10 @@ mod tests {
     fn click_flow_down_inside_capture_then_up_fires_click() {
         let clicked = Arc::new(AtomicBool::new(false));
         let clicked_clone = Arc::clone(&clicked);
-        let mut button =
-            Button::new("OK").on_click(move || clicked_clone.store(true, Ordering::SeqCst));
+        let mut button = Button::builder()
+            .label("OK")
+            .on_click(move || clicked_clone.store(true, Ordering::SeqCst))
+            .build();
         let (x, y, w, h) = button_bounds();
         let layout = layout_bounds(x, y, w, h);
         let layout_tree = LayoutTree::new();
@@ -445,8 +446,10 @@ mod tests {
     fn primary_pointer_down_up_fires_click() {
         let clicked = Arc::new(AtomicBool::new(false));
         let clicked_clone = Arc::clone(&clicked);
-        let mut button =
-            Button::new("OK").on_click(move || clicked_clone.store(true, Ordering::SeqCst));
+        let mut button = Button::builder()
+            .label("OK")
+            .on_click(move || clicked_clone.store(true, Ordering::SeqCst))
+            .build();
         let (x, y, w, h) = button_bounds();
         let layout = layout_bounds(x, y, w, h);
         let layout_tree = LayoutTree::new();
@@ -465,7 +468,7 @@ mod tests {
 
     #[test]
     fn disabled_button_ignores_events() {
-        let mut button = Button::new("OK").disabled(true);
+        let mut button = Button::builder().label("OK").disabled(true).build();
         let (x, y, w, h) = button_bounds();
         let layout = layout_bounds(x, y, w, h);
         let layout_tree = LayoutTree::new();
@@ -487,8 +490,10 @@ mod tests {
     fn keyboard_activate_with_focus_fires_click() {
         let clicked = Arc::new(AtomicBool::new(false));
         let clicked_clone = Arc::clone(&clicked);
-        let mut button =
-            Button::new("OK").on_click(move || clicked_clone.store(true, Ordering::SeqCst));
+        let mut button = Button::builder()
+            .label("OK")
+            .on_click(move || clicked_clone.store(true, Ordering::SeqCst))
+            .build();
         let (x, y, w, h) = button_bounds();
         let layout = layout_bounds(x, y, w, h);
         let layout_tree = LayoutTree::new();
@@ -515,7 +520,7 @@ mod tests {
         set_current_viewport(ViewportInfo::default());
         set_current_theme(theme.clone());
 
-        let button = Button::new("Theme");
+        let button = Button::builder().label("Theme").build();
         let style = button.resolved_style();
         assert_eq!(style.background, theme.colors.primary);
         assert_eq!(style.font_size, 18.0);
@@ -528,7 +533,10 @@ mod tests {
         set_current_viewport(ViewportInfo::default());
         set_current_theme(theme);
 
-        let button = Button::new("Override").background(Color::from_hex(0xEF4444));
+        let button = Button::builder()
+            .label("Override")
+            .background(Color::from_hex(0xEF4444))
+            .build();
         let style = button.resolved_style();
         assert_eq!(style.background, Color::from_hex(0xEF4444));
     }
@@ -542,10 +550,27 @@ mod tests {
         set_current_theme(theme);
         set_current_viewport(ViewportInfo::new(390.0, 844.0));
 
-        let button = Button::new("Mobile");
+        let button = Button::builder().label("Mobile").build();
         let style = button.resolved_style();
         assert!(style.font_size < 14.0);
         assert!(style.min_height < 38.0);
         assert!(style.padding_h < 12.0);
+    }
+
+    #[test]
+    fn builder_sets_explicit_configuration() {
+        let button = Button::builder()
+            .label("Build")
+            .background(Color::from_hex(0xEF4444))
+            .text_color(Color::from_hex(0xF8FAFC))
+            .corner_radius(10.0)
+            .disabled(true)
+            .build();
+
+        assert_eq!(button.label, "Build");
+        assert_eq!(button.background_override, Some(Color::from_hex(0xEF4444)));
+        assert_eq!(button.text_color_override, Some(Color::from_hex(0xF8FAFC)));
+        assert_eq!(button.corner_radius_override, Some(10.0));
+        assert!(button.disabled);
     }
 }

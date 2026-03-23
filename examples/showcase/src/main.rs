@@ -17,43 +17,48 @@ fn main() -> Result<(), sparsha::AppRunError> {
     let components_slot = navigator_slot.clone();
     let rendering_slot = navigator_slot.clone();
 
-    let router = Router::new()
+    let router = Router::builder()
+        .routes(vec![
+            Route::new("/components", move || {
+                let navigator = components_slot
+                    .borrow()
+                    .clone()
+                    .expect("showcase navigator should be initialized before build");
+                showcase_shell(
+                    ShowcaseRoute::Components,
+                    navigator.clone(),
+                    current_viewport(),
+                )
+            }),
+            Route::new("/rendering", move || {
+                let navigator = rendering_slot
+                    .borrow()
+                    .clone()
+                    .expect("showcase navigator should be initialized before build");
+                showcase_shell(
+                    ShowcaseRoute::Rendering,
+                    navigator.clone(),
+                    current_viewport(),
+                )
+            }),
+        ])
         .transition(RouterTransition::slide_overlay())
-        .route("/components", move || {
-            let navigator = components_slot
-                .borrow()
-                .clone()
-                .expect("showcase navigator should be initialized before build");
-            showcase_shell(
-                ShowcaseRoute::Components,
-                navigator.clone(),
-                current_viewport(),
-            )
-        })
-        .route("/rendering", move || {
-            let navigator = rendering_slot
-                .borrow()
-                .clone()
-                .expect("showcase navigator should be initialized before build");
-            showcase_shell(
-                ShowcaseRoute::Rendering,
-                navigator.clone(),
-                current_viewport(),
-            )
-        })
-        .fallback("/components");
+        .fallback("/components")
+        .build();
 
     *navigator_slot.borrow_mut() = Some(router.navigator());
 
     let theme = showcase_theme();
     let background = theme.colors.background;
 
-    App::new()
+    App::builder()
         .title("Sparsha Showcase")
-        .size(1440, 960)
+        .width(1440)
+        .height(960)
         .background(background)
         .theme(theme)
         .router(router)
+        .build()
         .run()
 }
 
@@ -367,14 +372,18 @@ fn build_top_bar(route: ShowcaseRoute, navigator: Navigator, layout: ShowcaseLay
                     .column()
                     .gap(4.0)
                     .child(
-                        Text::new("Sparsha Showcase")
-                            .size(layout.top_bar_title_size())
-                            .bold(),
+                        Text::builder()
+                            .content("Sparsha Showcase")
+                            .font_size(layout.top_bar_title_size())
+                            .bold(true)
+                            .build(),
                     )
                     .child(
-                        Text::new("A page-ready preview surface for widgets and visual checks.")
-                            .size(13.0)
-                            .color(theme.colors.text_muted),
+                        Text::builder()
+                            .content("A page-ready preview surface for widgets and visual checks.")
+                            .font_size(13.0)
+                            .color(theme.colors.text_muted)
+                            .build(),
                     ),
             )
             .child(buttons)
@@ -388,14 +397,18 @@ fn build_top_bar(route: ShowcaseRoute, navigator: Navigator, layout: ShowcaseLay
                     .column()
                     .gap(4.0)
                     .child(
-                        Text::new("Sparsha Showcase")
-                            .size(layout.top_bar_title_size())
-                            .bold(),
+                        Text::builder()
+                            .content("Sparsha Showcase")
+                            .font_size(layout.top_bar_title_size())
+                            .bold(true)
+                            .build(),
                     )
                     .child(
-                        Text::new("A page-ready preview surface for widgets and visual checks.")
-                            .size(13.0)
-                            .color(theme.colors.text_muted),
+                        Text::builder()
+                            .content("A page-ready preview surface for widgets and visual checks.")
+                            .font_size(13.0)
+                            .color(theme.colors.text_muted)
+                            .build(),
                     ),
             )
             .child(buttons)
@@ -454,9 +467,11 @@ fn route_button(
         min_height: 34.0,
     };
 
-    Button::new(label)
-        .with_style(style)
+    Button::builder()
+        .label(label)
+        .style(style)
         .on_click(move || navigator.go(destination.path()))
+        .build()
 }
 
 fn sidebar_content(route: ShowcaseRoute, layout: ShowcaseLayout) -> Container {
@@ -516,20 +531,26 @@ fn sidebar_content(route: ShowcaseRoute, layout: ShowcaseLayout) -> Container {
         .gap(if layout.is_mobile() { 16.0 } else { 20.0 })
         .padding(layout.section_padding())
         .child(
-            Text::new(route.eyebrow())
-                .size(11.0)
-                .bold()
-                .color(theme.colors.primary),
+            Text::builder()
+                .content(route.eyebrow())
+                .font_size(11.0)
+                .bold(true)
+                .color(theme.colors.primary)
+                .build(),
         )
         .child(
-            Text::new(route.title())
-                .size(if layout.is_mobile() { 20.0 } else { 22.0 })
-                .bold(),
+            Text::builder()
+                .content(route.title())
+                .font_size(if layout.is_mobile() { 20.0 } else { 22.0 })
+                .bold(true)
+                .build(),
         )
         .child(
-            Text::new(route.summary())
-                .size(13.0)
-                .color(theme.colors.text_muted),
+            Text::builder()
+                .content(route.summary())
+                .font_size(13.0)
+                .color(theme.colors.text_muted)
+                .build(),
         )
         .child(sidebar)
 }
@@ -563,13 +584,21 @@ fn sidebar_block(title: &'static str, lines: &[&'static str]) -> Container {
         .background(theme.colors.surface_variant)
         .border(1.0, theme.colors.border)
         .corner_radius(12.0)
-        .child(Text::new(title).size(14.0).bold());
+        .child(
+            Text::builder()
+                .content(title)
+                .font_size(14.0)
+                .bold(true)
+                .build(),
+        );
 
     for line in lines {
         block = block.child(
-            Text::new(format!("• {}", line))
-                .size(13.0)
-                .color(theme.colors.text_muted),
+            Text::builder()
+                .content(format!("• {}", line))
+                .font_size(13.0)
+                .color(theme.colors.text_muted)
+                .build(),
         );
     }
 
@@ -638,17 +667,27 @@ fn page_intro(route: ShowcaseRoute, detail: &'static str, layout: ShowcaseLayout
         .border(1.0, theme.colors.border)
         .corner_radius(16.0)
         .child(
-            Text::new(route.eyebrow())
-                .size(11.0)
-                .bold()
-                .color(theme.colors.primary),
+            Text::builder()
+                .content(route.eyebrow())
+                .font_size(11.0)
+                .bold(true)
+                .color(theme.colors.primary)
+                .build(),
         )
         .child(
-            Text::new(route.title())
-                .size(layout.page_intro_title_size())
-                .bold(),
+            Text::builder()
+                .content(route.title())
+                .font_size(layout.page_intro_title_size())
+                .bold(true)
+                .build(),
         )
-        .child(Text::new(detail).size(14.0).color(theme.colors.text_muted))
+        .child(
+            Text::builder()
+                .content(detail)
+                .font_size(14.0)
+                .color(theme.colors.text_muted)
+                .build(),
+        )
 }
 
 fn section_card(
@@ -666,11 +705,19 @@ fn section_card(
         .background(theme.colors.surface)
         .border(1.0, theme.colors.border)
         .corner_radius(16.0)
-        .child(Text::new(title).size(layout.section_title_size()).bold())
         .child(
-            Text::new(description)
-                .size(13.0)
-                .color(theme.colors.text_muted),
+            Text::builder()
+                .content(title)
+                .font_size(layout.section_title_size())
+                .bold(true)
+                .build(),
+        )
+        .child(
+            Text::builder()
+                .content(description)
+                .font_size(13.0)
+                .color(theme.colors.text_muted)
+                .build(),
         )
         .child(content)
 }
@@ -709,13 +756,20 @@ fn build_controls_card(layout: ShowcaseLayout) -> Container {
                             .row()
                             .gap(12.0)
                             .wrap()
-                            .child(Button::new("Primary Action").on_click(|| {}))
                             .child(
-                                Button::new("Secondary Action")
-                                    .with_style(secondary_style.clone())
-                                    .on_click(|| {}),
+                                Button::builder()
+                                    .label("Primary Action")
+                                    .on_click(|| {})
+                                    .build(),
                             )
-                            .child(Button::new("Disabled State").disabled(true)),
+                            .child(
+                                Button::builder()
+                                    .label("Secondary Action")
+                                    .style(secondary_style.clone())
+                                    .on_click(|| {})
+                                    .build(),
+                            )
+                            .child(Button::builder().label("Disabled State").disabled(true).build()),
                     )
                     .child(
                         Container::new()
@@ -724,20 +778,30 @@ fn build_controls_card(layout: ShowcaseLayout) -> Container {
                             .align_items(AlignItems::Center)
                             .child(
                                 Semantics::new(
-                                    Checkbox::with_checked(is_checked).on_toggle(move |next| {
-                                        checked.set(next);
-                                    }),
+                                    Checkbox::builder()
+                                        .checked(is_checked)
+                                        .on_toggle(move |next| {
+                                            checked.set(next);
+                                        })
+                                        .build(),
                                 )
                                 .label("Showcase interactive checkbox"),
                             )
-                            .child(Text::new("Interactive checkbox").size(14.0)),
+                            .child(
+                                Text::builder()
+                                    .content("Interactive checkbox")
+                                    .font_size(14.0)
+                                    .build(),
+                            ),
                     )
                     .child(
-                        Text::new(
-                            "The goal is to show the default feel quickly.\nDeeper interaction coverage still lives in the other examples.",
-                        )
-                        .size(13.0)
-                        .color(theme.colors.text_muted),
+                        Text::builder()
+                            .content(
+                                "The goal is to show the default feel quickly.\nDeeper interaction coverage still lives in the other examples.",
+                            )
+                            .font_size(13.0)
+                            .color(theme.colors.text_muted)
+                            .build(),
                     )
             })
             .call(),
@@ -755,11 +819,13 @@ fn build_animation_card(layout: ShowcaseLayout) -> Container {
             .gap(16.0)
             .child(MotionPreview::new())
             .child(
-                Text::new(
-                    "Route changes use the shared slide + overlay transition.\nWithin the page, the preview runs a short implicit timeline so motion stays intentional and quiet.",
-                )
-                .size(13.0)
-                .color(theme.colors.text_muted),
+                Text::builder()
+                    .content(
+                        "Route changes use the shared slide + overlay transition.\nWithin the page, the preview runs a short implicit timeline so motion stays intentional and quiet.",
+                    )
+                    .font_size(13.0)
+                    .color(theme.colors.text_muted)
+                    .build(),
             ),
         layout,
     )
@@ -805,8 +871,20 @@ fn rendering_hint_chip(
         .background(theme.colors.surface)
         .border(1.0, theme.colors.border)
         .corner_radius(12.0)
-        .child(Text::new(title).size(14.0).bold())
-        .child(Text::new(detail).size(12.0).color(theme.colors.text_muted));
+        .child(
+            Text::builder()
+                .content(title)
+                .font_size(14.0)
+                .bold(true)
+                .build(),
+        )
+        .child(
+            Text::builder()
+                .content(detail)
+                .font_size(12.0)
+                .color(theme.colors.text_muted)
+                .build(),
+        );
 
     if layout.is_mobile() {
         chip.fill_width()
@@ -831,21 +909,35 @@ fn build_typography_card(layout: ShowcaseLayout) -> Container {
                     .background(theme.colors.surface_variant)
                     .border(1.0, theme.colors.border)
                     .corner_radius(12.0)
-                    .child(Text::header("Sparsh makes the default stack feel intentional."))
                     .child(
-                        Text::new(
-                            "Body copy should stay legible in denser panels without losing hierarchy.",
-                        )
-                        .size(15.0),
+                        Text::builder()
+                            .content("Sparsh makes the default stack feel intentional.")
+                            .variant(TextVariant::Header)
+                            .build(),
                     )
-                    .child(Text::caption("Caption text keeps the secondary story out of the way.")),
+                    .child(
+                        Text::builder()
+                            .content(
+                                "Body copy should stay legible in denser panels without losing hierarchy.",
+                            )
+                            .font_size(15.0)
+                            .build(),
+                    )
+                    .child(
+                        Text::builder()
+                            .content("Caption text keeps the secondary story out of the way.")
+                            .variant(TextVariant::Caption)
+                            .build(),
+                    ),
             )
             .child(
-                Text::new(
-                    "Typography is doing the structural work here.\nThere is no extra ornament needed for the preview.",
-                )
-                .size(13.0)
-                .color(theme.colors.text_muted),
+                Text::builder()
+                    .content(
+                        "Typography is doing the structural work here.\nThere is no extra ornament needed for the preview.",
+                    )
+                    .font_size(13.0)
+                    .color(theme.colors.text_muted)
+                    .build(),
             ),
         layout,
     )
@@ -871,34 +963,38 @@ fn build_inputs_card(layout: ShowcaseLayout) -> Container {
                     .gap(16.0)
                     .child(
                         Semantics::new(
-                            TextInput::new()
-                                .fill_width()
+                            TextInput::builder()
+                                .fill_width(true)
                                 .value(email_value.clone())
                                 .placeholder("Email address")
                                 .on_change(move |value| {
                                     email.set(value.to_owned());
-                                }),
+                                })
+                                .build(),
                         )
                         .label("Showcase single-line input"),
                     )
                     .child(
                         Semantics::new(
-                            TextArea::new()
-                                .fill_width()
+                            TextArea::builder()
+                                .fill_width(true)
                                 .value(notes_value.clone())
                                 .placeholder("Notes")
                                 .on_change(move |value| {
                                     notes.set(value.to_owned());
-                                }),
+                                })
+                                .build(),
                         )
                         .label("Showcase multiline input"),
                     )
                     .child(
-                        Text::new(
-                            "These fields use the same interaction model as the broader examples,\njust in a smaller, more curated setting.",
-                        )
-                        .size(13.0)
-                        .color(theme.colors.text_muted),
+                        Text::builder()
+                            .content(
+                                "These fields use the same interaction model as the broader examples,\njust in a smaller, more curated setting.",
+                            )
+                            .font_size(13.0)
+                            .color(theme.colors.text_muted)
+                            .build(),
                     )
             })
             .call(),
@@ -936,11 +1032,13 @@ fn build_viewport_card(layout: ShowcaseLayout) -> Container {
             .gap(16.0)
             .child(samples)
             .child(
-                Text::new(
-                    "The left sample should pan both ways. The right sample should recycle rows\ninstead of realizing the whole list at once.",
-                )
-                .size(13.0)
-                .color(theme.colors.text_muted),
+                Text::builder()
+                    .content(
+                        "The left sample should pan both ways. The right sample should recycle rows\ninstead of realizing the whole list at once.",
+                    )
+                    .font_size(13.0)
+                    .color(theme.colors.text_muted)
+                    .build(),
             ),
         layout,
     )
@@ -951,7 +1049,13 @@ fn build_scroll_sample() -> Container {
     Container::new()
         .column()
         .gap(10.0)
-        .child(Text::new("Two-axis scroll").size(14.0).bold())
+        .child(
+            Text::builder()
+                .content("Two-axis scroll")
+                .font_size(14.0)
+                .bold(true)
+                .build(),
+        )
         .child(
             Container::new()
                 .height(220.0)
@@ -1011,7 +1115,13 @@ fn sample_tile(label: &str, color: Color, height: f32) -> Container {
         .background(color)
         .border(1.0, theme.colors.border)
         .corner_radius(10.0)
-        .child(Text::new(label).size(14.0).bold())
+        .child(
+            Text::builder()
+                .content(label)
+                .font_size(14.0)
+                .bold(true)
+                .build(),
+        )
 }
 
 fn build_virtual_list_sample() -> Container {
@@ -1019,7 +1129,13 @@ fn build_virtual_list_sample() -> Container {
     Container::new()
         .column()
         .gap(10.0)
-        .child(Text::new("Virtualized list").size(14.0).bold())
+        .child(
+            Text::builder()
+                .content("Virtualized list")
+                .font_size(14.0)
+                .bold(true)
+                .build(),
+        )
         .child(
             Container::new()
                 .height(220.0)
@@ -1028,30 +1144,36 @@ fn build_virtual_list_sample() -> Container {
                 .corner_radius(12.0)
                 .child(
                     Semantics::new(
-                        List::virtualized(240, 38.0, |index| {
-                            let theme = current_theme();
-                            Box::new(
-                                Container::new()
-                                    .fill_width()
-                                    .height(38.0)
-                                    .padding(10.0)
-                                    .background(if index % 2 == 0 {
-                                        theme.colors.surface
-                                    } else {
-                                        theme.colors.surface_done
-                                    })
-                                    .border(1.0, theme.colors.border)
-                                    .corner_radius(8.0)
-                                    .child(
-                                        Text::new(format!("Row {}", index + 1))
-                                            .size(13.0)
-                                            .color(theme.colors.text_primary),
-                                    ),
-                            )
-                        })
-                        .overscan(4)
-                        .vertical()
-                        .fill(),
+                        List::virtualized_builder()
+                            .item_count(240)
+                            .item_extent(38.0)
+                            .item_builder(|index| {
+                                let theme = current_theme();
+                                Box::new(
+                                    Container::new()
+                                        .fill_width()
+                                        .height(38.0)
+                                        .padding(10.0)
+                                        .background(if index % 2 == 0 {
+                                            theme.colors.surface
+                                        } else {
+                                            theme.colors.surface_done
+                                        })
+                                        .border(1.0, theme.colors.border)
+                                        .corner_radius(8.0)
+                                        .child(
+                                            Text::builder()
+                                                .content(format!("Row {}", index + 1))
+                                                .font_size(13.0)
+                                                .color(theme.colors.text_primary)
+                                                .build(),
+                                        ),
+                                )
+                            })
+                            .overscan(4)
+                            .direction(ListDirection::Vertical)
+                            .fill(true)
+                            .build(),
                     )
                     .label("Showcase virtualized list"),
                 ),

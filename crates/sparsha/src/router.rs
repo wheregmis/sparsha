@@ -1,5 +1,6 @@
 //! App router and navigation primitives.
 
+use bon::bon;
 use sparsha_layout::taffy::prelude::{percent, AlignItems, Display, FlexDirection, Size, Style};
 use sparsha_layout::WidgetId;
 use sparsha_signals::Signal;
@@ -145,30 +146,46 @@ pub struct Router {
     state: Signal<RouterState>,
 }
 
+#[bon]
 impl Router {
-    pub fn new() -> Self {
-        Self {
+    #[builder(
+        start_fn(name = builder, vis = "pub"),
+        finish_fn(name = build, vis = "pub"),
+        builder_type(name = RouterBuilder, vis = "pub"),
+        state_mod(vis = "pub")
+    )]
+    fn builder_init(
+        #[builder(default = bon::vec![])] routes: Vec<Route>,
+        #[builder(into, setters(name = fallback))] fallback_path: Option<String>,
+        transition: Option<RouterTransition>,
+    ) -> Self {
+        let mut router = Self {
             routes: Vec::new(),
             fallback_path: None,
             transition: None,
             state: Signal::new(RouterState::new(String::from("/"))),
+        };
+
+        for route in routes {
+            router.add_route(route);
         }
+        if let Some(path) = fallback_path {
+            router.set_fallback(path);
+        }
+        if let Some(transition) = transition {
+            router.set_transition(transition);
+        }
+
+        router
     }
 
-    pub fn route<W>(self, path: impl Into<String>, builder: impl Fn() -> W + 'static) -> Self
-    where
-        W: IntoWidget,
-    {
-        self.add_route(Route::new(path, builder))
-    }
-
-    pub fn add_route(mut self, route: Route) -> Self {
+    fn add_route(&mut self, route: Route) {
         if !is_static_path(route.path()) {
             log::warn!(
                 "ignoring invalid static route pattern '{}': dynamic patterns are not supported",
                 route.path()
             );
-            return self;
+            return;
         }
 
         if let Some(existing) = self.routes.iter_mut().find(|it| it.path == route.path) {
@@ -176,26 +193,22 @@ impl Router {
         } else {
             self.routes.push(route);
         }
-
-        self
     }
 
-    pub fn transition(mut self, transition: RouterTransition) -> Self {
+    fn set_transition(&mut self, transition: RouterTransition) {
         self.transition = Some(transition.sanitized());
-        self
     }
 
-    pub fn fallback(mut self, path: impl Into<String>) -> Self {
+    fn set_fallback(&mut self, path: impl Into<String>) {
         let path = normalize_path(&path.into());
         if !is_static_path(&path) {
             log::warn!(
                 "ignoring invalid fallback route '{}': dynamic patterns are not supported",
                 path
             );
-            return self;
+            return;
         }
         self.fallback_path = Some(path);
-        self
     }
 
     pub fn navigator(&self) -> Navigator {
@@ -265,7 +278,7 @@ impl Router {
             Container::new()
                 .fill()
                 .center()
-                .child(Text::new("No routes registered")),
+                .child(Text::builder().content("No routes registered").build()),
         )
     }
 
@@ -289,12 +302,6 @@ impl Router {
         }
 
         "/"
-    }
-}
-
-impl Default for Router {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -711,7 +718,7 @@ mod tests {
     use sparsha_widgets::{AccessibilityAction, BuildContext, TextInput, ViewportInfo};
 
     fn screen(name: &'static str) -> Container {
-        Container::new().child(Text::new(name))
+        Container::new().child(Text::builder().content(name).build())
     }
 
     fn with_runtime(f: impl FnOnce()) {
@@ -774,13 +781,17 @@ mod tests {
     #[test]
     fn router_transition_is_opt_in() {
         with_runtime(|| {
-            let router = Router::new().route("/", || screen("home")).fallback("/");
+            let router = Router::builder()
+                .routes(vec![Route::new("/", || screen("home"))])
+                .fallback("/")
+                .build();
             assert!(router.transition.is_none());
 
-            let transitioned = Router::new()
-                .route("/", || screen("home"))
+            let transitioned = Router::builder()
+                .routes(vec![Route::new("/", || screen("home"))])
                 .transition(RouterTransition::slide_overlay())
-                .fallback("/");
+                .fallback("/")
+                .build();
             assert_eq!(
                 transitioned.transition,
                 Some(RouterTransition::slide_overlay())
@@ -791,12 +802,14 @@ mod tests {
     #[test]
     fn router_transition_sanitizes_invalid_values() {
         with_runtime(|| {
-            let router = Router::new().transition(RouterTransition {
-                duration_seconds: 0.0,
-                easing: AnimationEasing::Linear,
-                slide_distance: -12.0,
-                overlay_alpha_peak: 4.0,
-            });
+            let router = Router::builder()
+                .transition(RouterTransition {
+                    duration_seconds: 0.0,
+                    easing: AnimationEasing::Linear,
+                    slide_distance: -12.0,
+                    overlay_alpha_peak: 4.0,
+                })
+                .build();
 
             let transition = router.transition.unwrap();
             assert!(transition.duration_seconds > 0.0);
@@ -808,11 +821,14 @@ mod tests {
     #[test]
     fn unknown_route_resolves_to_fallback() {
         with_runtime(|| {
-            let router = Router::new()
-                .route("/", || screen("home"))
-                .route("/settings", || screen("settings"))
+            let router = Router::builder()
+                .routes(vec![
+                    Route::new("/", || screen("home")),
+                    Route::new("/settings", || screen("settings")),
+                ])
                 .transition(RouterTransition::slide_overlay())
-                .fallback("/");
+                .fallback("/")
+                .build();
 
             router.go("/missing");
             assert_eq!(router.current_path(), "/");
@@ -822,11 +838,14 @@ mod tests {
     #[test]
     fn navigation_stack_operations_work() {
         with_runtime(|| {
-            let router = Router::new()
-                .route("/", || screen("home"))
-                .route("/a", || screen("a"))
-                .route("/b", || screen("b"))
-                .fallback("/");
+            let router = Router::builder()
+                .routes(vec![
+                    Route::new("/", || screen("home")),
+                    Route::new("/a", || screen("a")),
+                    Route::new("/b", || screen("b")),
+                ])
+                .fallback("/")
+                .build();
 
             router.go("/a");
             router.push("/b");
@@ -844,11 +863,14 @@ mod tests {
     #[test]
     fn navigation_direction_tracks_history_and_replacements() {
         with_runtime(|| {
-            let router = Router::new()
-                .route("/", || screen("home"))
-                .route("/a", || screen("a"))
-                .route("/b", || screen("b"))
-                .fallback("/");
+            let router = Router::builder()
+                .routes(vec![
+                    Route::new("/", || screen("home")),
+                    Route::new("/a", || screen("a")),
+                    Route::new("/b", || screen("b")),
+                ])
+                .fallback("/")
+                .build();
 
             router.go("/a");
             assert_eq!(router.last_direction(), NavigationDirection::Forward);
@@ -867,10 +889,13 @@ mod tests {
     #[test]
     fn dynamic_patterns_are_ignored() {
         with_runtime(|| {
-            let router = Router::new()
-                .route("/", || screen("home"))
-                .route("/todos/:id", || screen("todo"))
-                .fallback("/");
+            let router = Router::builder()
+                .routes(vec![
+                    Route::new("/", || screen("home")),
+                    Route::new("/todos/:id", || screen("todo")),
+                ])
+                .fallback("/")
+                .build();
 
             router.go("/todos/1");
             assert_eq!(router.current_path(), "/");
@@ -900,9 +925,12 @@ mod tests {
     #[test]
     fn viewport_rebuild_preserves_text_input_state() {
         with_runtime(|| {
-            let router = Router::new()
-                .route("/", || TextInput::new().value("seed"))
-                .fallback("/");
+            let router = Router::builder()
+                .routes(vec![Route::new("/", || {
+                    TextInput::builder().value("seed").build()
+                })])
+                .fallback("/")
+                .build();
             let mut host = RouterHost::new(router);
             let mut store = ComponentStateStore::default();
 

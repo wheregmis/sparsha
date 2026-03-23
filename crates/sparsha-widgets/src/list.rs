@@ -5,6 +5,7 @@ use crate::{
     scroll_model::{ScrollAxes, ScrollModel},
     AccessibilityInfo, AccessibilityRole, EventContext, IntoWidget, PaintContext, Widget,
 };
+use bon::bon;
 use sparsha_core::Rect as CoreRect;
 use sparsha_input::InputEvent;
 use sparsha_layout::WidgetId;
@@ -230,12 +231,20 @@ impl List {
         item_extent: f32,
         builder: impl Fn(usize) -> Box<dyn Widget> + 'static,
     ) -> Self {
+        Self::new_virtualized_with_builder(item_count, item_extent, Box::new(builder))
+    }
+
+    fn new_virtualized_with_builder(
+        item_count: usize,
+        item_extent: f32,
+        builder: ListItemBuilder,
+    ) -> Self {
         Self {
             id: WidgetId::default(),
             mode: ListMode::Virtualized(VirtualizedListState::new(
                 item_count,
                 item_extent,
-                Box::new(builder),
+                builder,
             )),
             direction: ListDirection::Vertical,
             style: Style {
@@ -316,12 +325,6 @@ impl List {
             width: percent(1.0),
             height: percent(1.0),
         };
-        self
-    }
-
-    /// Set list items.
-    pub fn with_items(mut self, items: Vec<Box<dyn Widget>>) -> Self {
-        self.mode = ListMode::Owned(items);
         self
     }
 
@@ -415,6 +418,45 @@ impl List {
             ListDirection::Vertical => bounds.width,
             ListDirection::Horizontal => bounds.height,
         }
+    }
+}
+
+#[bon]
+impl List {
+    #[builder(
+        start_fn(name = virtualized_builder, vis = "pub"),
+        finish_fn(name = build, vis = "pub"),
+        builder_type(name = VirtualizedListBuilder, vis = "pub"),
+        state_mod(name = virtualized_list_builder, vis = "pub")
+    )]
+    fn virtualized_builder_init(
+        item_count: usize,
+        item_extent: f32,
+        #[builder(with = |item_builder: impl Fn(usize) -> Box<dyn Widget> + 'static| Box::new(item_builder) as ListItemBuilder)]
+        item_builder: ListItemBuilder,
+        #[builder(default = ListDirection::Vertical)] direction: ListDirection,
+        #[builder(default = 2)] overscan: usize,
+        padding: Option<f32>,
+        #[builder(default)] fill_width: bool,
+        #[builder(default)] fill_height: bool,
+        #[builder(default)] fill: bool,
+    ) -> Self {
+        let mut list = Self::new_virtualized_with_builder(item_count, item_extent, item_builder)
+            .direction(direction)
+            .overscan(overscan);
+        if let Some(padding) = padding {
+            list = list.padding(padding);
+        }
+        if fill_width {
+            list = list.fill_width();
+        }
+        if fill_height {
+            list = list.fill_height();
+        }
+        if fill {
+            list = list.fill();
+        }
+        list
     }
 }
 
@@ -711,8 +753,8 @@ mod tests {
         let mut list = List::new().vertical();
         assert!(list.is_empty());
 
-        list.push_item(Text::new("A"));
-        list.push_item(Text::new("B"));
+        list.push_item(Text::builder().content("A").build());
+        list.push_item(Text::builder().content("B").build());
         assert_eq!(list.len(), 2);
 
         let removed = list.remove_item(0);
@@ -726,18 +768,23 @@ mod tests {
     #[test]
     fn list_set_items_replaces_children() {
         let mut list = List::new();
-        list.set_items(vec![Box::new(Text::new("One")), Box::new(Text::new("Two"))]);
+        list.set_items(vec![
+            Box::new(Text::builder().content("One").build()),
+            Box::new(Text::builder().content("Two").build()),
+        ]);
         assert_eq!(list.children().len(), 2);
 
-        list.set_items(vec![Box::new(Text::new("Only"))]);
+        list.set_items(vec![Box::new(Text::builder().content("Only").build())]);
         assert_eq!(list.children_mut().len(), 1);
     }
 
     #[test]
     fn virtualized_list_realizes_visible_range_with_overscan() {
-        let mut list = List::virtualized(100, 20.0, |index| Box::new(Text::new(index.to_string())))
-            .overscan(1)
-            .vertical();
+        let mut list = List::virtualized(100, 20.0, |index| {
+            Box::new(Text::builder().content(index.to_string()).build())
+        })
+        .overscan(1)
+        .vertical();
         if let ListMode::Virtualized(state) = &mut list.mode {
             state.viewport_extent.set(60.0);
             state.model.set_offset(0.0, 40.0);
@@ -750,7 +797,9 @@ mod tests {
 
     #[test]
     fn virtualized_list_child_keys_track_logical_indices() {
-        let mut list = List::virtualized(50, 24.0, |index| Box::new(Text::new(index.to_string())));
+        let mut list = List::virtualized(50, 24.0, |index| {
+            Box::new(Text::builder().content(index.to_string()).build())
+        });
         if let ListMode::Virtualized(state) = &mut list.mode {
             state.viewport_extent.set(48.0);
             state.model.set_offset(0.0, 24.0);
@@ -766,8 +815,10 @@ mod tests {
 
     #[test]
     fn virtualized_list_horizontal_scrolls_on_primary_axis() {
-        let mut list = List::virtualized(30, 30.0, |index| Box::new(Text::new(index.to_string())))
-            .horizontal();
+        let mut list = List::virtualized(30, 30.0, |index| {
+            Box::new(Text::builder().content(index.to_string()).build())
+        })
+        .horizontal();
         let layout_tree = LayoutTree::new();
         let mut focus = FocusManager::new();
         list.set_id(Default::default());
@@ -801,10 +852,63 @@ mod tests {
     #[test]
     fn mutating_virtualized_list_materializes_owned_mode() {
         let mut list = List::virtualized(3, 20.0, |index| {
-            Box::new(Container::new().child(Text::new(format!("Row {index}"))))
+            Box::new(
+                Container::new().child(Text::builder().content(format!("Row {index}")).build()),
+            )
         });
-        list.push_item(Text::new("Extra"));
+        list.push_item(Text::builder().content("Extra").build());
         assert_eq!(list.len(), 4);
         assert!(matches!(list.mode, ListMode::Owned(_)));
+    }
+
+    #[test]
+    fn configuration_methods_update_style() {
+        let list = List::new()
+            .direction(ListDirection::Horizontal)
+            .gap(10.0)
+            .padding(12.0)
+            .fill_width()
+            .fill_height();
+
+        assert_eq!(list.direction, ListDirection::Horizontal);
+        assert_eq!(list.style.flex_direction, FlexDirection::Row);
+        assert_eq!(list.style.gap.width, length(10.0));
+        assert_eq!(list.style.padding.left, length(12.0));
+        assert_eq!(list.style.size.width, percent(1.0));
+        assert_eq!(list.style.size.height, percent(1.0));
+    }
+
+    #[test]
+    fn virtualized_builder_matches_positional_constructor() {
+        let built = List::virtualized_builder()
+            .item_count(25)
+            .item_extent(28.0)
+            .item_builder(|index| Box::new(Text::builder().content(index.to_string()).build()))
+            .direction(ListDirection::Horizontal)
+            .overscan(4)
+            .padding(10.0)
+            .fill_width(true)
+            .build();
+
+        let direct = List::virtualized(25, 28.0, |index| {
+            Box::new(Text::builder().content(index.to_string()).build())
+        })
+        .direction(ListDirection::Horizontal)
+        .overscan(4)
+        .padding(10.0)
+        .fill_width();
+
+        assert_eq!(built.direction, direct.direction);
+        assert_eq!(built.style.padding, direct.style.padding);
+        assert_eq!(built.style.size.width, direct.style.size.width);
+
+        match (&built.mode, &direct.mode) {
+            (ListMode::Virtualized(built_state), ListMode::Virtualized(direct_state)) => {
+                assert_eq!(built_state.item_count, direct_state.item_count);
+                assert_eq!(built_state.item_extent, direct_state.item_extent);
+                assert_eq!(built_state.overscan, direct_state.overscan);
+            }
+            _ => panic!("expected virtualized lists"),
+        }
     }
 }

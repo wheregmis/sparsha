@@ -39,11 +39,6 @@ impl ControlState {
         self.hovered = contains;
         was_pressed && contains
     }
-
-    pub(crate) fn clear_interaction(&mut self) {
-        self.hovered = false;
-        self.pressed = false;
-    }
 }
 
 pub(crate) fn focus_ring_bounds(bounds: Rect, scale_factor: f32, controls: &ThemeControls) -> Rect {

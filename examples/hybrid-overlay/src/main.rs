@@ -12,16 +12,19 @@ fn main() -> Result<(), sparsha::AppRunError> {
     #[cfg(not(target_arch = "wasm32"))]
     env_logger::init();
 
-    App::new()
+    App::builder()
         .title("Hybrid Overlay - Sparsha")
-        .size(1280, 800)
+        .width(1280)
+        .height(800)
         .background(Color::from_hex(0x07111D))
         .theme(Theme::light())
         .router(
-            Router::new()
-                .route("/", HybridOverlayDemo::new)
-                .fallback("/"),
+            Router::builder()
+                .routes(vec![Route::new("/", HybridOverlayDemo::new)])
+                .fallback("/")
+                .build(),
         )
+        .build()
         .run()
 }
 

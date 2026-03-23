@@ -16,14 +16,19 @@
 //!     #[cfg(target_arch = "wasm32")]
 //!     sparsha::init_web()?;
 //!
-//!     App::new()
+//!     App::builder()
 //!         .title("My App")
 //!         .theme(Theme::light())
 //!         .router(
-//!             Router::new()
-//!                 .route("/", || Container::new().child(Button::new("Click me!")))
-//!                 .fallback("/"),
+//!             Router::builder()
+//!                 .routes(vec![Route::new("/", || {
+//!                     Container::new()
+//!                         .child(Button::builder().label("Click me!").build())
+//!                 })])
+//!                 .fallback("/")
+//!                 .build(),
 //!         )
+//!         .build()
 //!         .run()
 //! }
 //! ```
@@ -99,9 +104,9 @@ pub mod prelude {
         AccessibilityRole, AnimationEasing, BuildContext, Button, ButtonStyle, Checkbox,
         CheckboxStyle, Container, DrawSurface, EventCommands, ForEach, ImplicitAnimation,
         IntoWidget, List, ListDirection, Scroll, ScrollDirection, Semantics, Text, TextAlign,
-        TextArea, TextAreaStyle, TextEditorState, TextInput, TextInputStyle, Theme, ThemeColors,
-        ThemeControls, ThemeRadii, ThemeSpacing, ThemeTypography, Tween, ViewportClass,
-        ViewportInfo, ViewportOrientation, Widget, WidgetChildMode,
+        TextArea, TextAreaStyle, TextEditorState, TextInput, TextInputStyle, TextVariant, Theme,
+        ThemeColors, ThemeControls, ThemeRadii, ThemeSpacing, ThemeTypography, Tween,
+        ViewportClass, ViewportInfo, ViewportOrientation, Widget, WidgetChildMode,
     };
 }
 

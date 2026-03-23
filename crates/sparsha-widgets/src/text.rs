@@ -4,6 +4,7 @@ use crate::{
     current_theme, responsive_typography, AccessibilityInfo, AccessibilityRole, EventContext,
     PaintContext, Widget,
 };
+use bon::bon;
 use sparsha_core::Color;
 use sparsha_input::InputEvent;
 use sparsha_layout::WidgetId;
@@ -19,8 +20,9 @@ pub enum TextAlign {
     Right,
 }
 
+/// Responsive typography variant.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum TextKind {
+pub enum TextVariant {
     #[default]
     Body,
     Header,
@@ -37,100 +39,34 @@ pub struct Text {
     bold: bool,
     italic: bool,
     align: TextAlign,
-    kind: TextKind,
+    variant: TextVariant,
 }
 
 impl Text {
-    /// Create a new text widget with the given content.
-    pub fn new(content: impl Into<String>) -> Self {
+    fn with_content(content: String) -> Self {
         Self {
             id: WidgetId::default(),
-            content: content.into(),
+            content,
             color: None,
             font_size: None,
             bold: false,
             italic: false,
             align: TextAlign::Left,
-            kind: TextKind::Body,
+            variant: TextVariant::Body,
         }
-    }
-
-    /// Set the text color.
-    pub fn color(mut self, color: Color) -> Self {
-        self.color = Some(color);
-        self
-    }
-
-    /// Set the font size.
-    pub fn size(mut self, size: f32) -> Self {
-        self.font_size = Some(size);
-        self
-    }
-
-    /// Make the text bold.
-    pub fn bold(mut self) -> Self {
-        self.bold = true;
-        self
-    }
-
-    /// Make the text italic.
-    pub fn italic(mut self) -> Self {
-        self.italic = true;
-        self
-    }
-
-    /// Set text alignment.
-    pub fn align(mut self, align: TextAlign) -> Self {
-        self.align = align;
-        self
-    }
-
-    /// Center-align the text.
-    pub fn center(mut self) -> Self {
-        self.align = TextAlign::Center;
-        self
-    }
-
-    /// Right-align the text.
-    pub fn right(mut self) -> Self {
-        self.align = TextAlign::Right;
-        self
-    }
-
-    /// Create a header-style text (larger, bold).
-    pub fn header(content: impl Into<String>) -> Self {
-        let mut text = Self::new(content);
-        text.bold = true;
-        text.kind = TextKind::Header;
-        text
-    }
-
-    /// Create a subheader-style text.
-    pub fn subheader(content: impl Into<String>) -> Self {
-        let mut text = Self::new(content);
-        text.bold = true;
-        text.kind = TextKind::Subheader;
-        text
-    }
-
-    /// Create a small/caption-style text.
-    pub fn caption(content: impl Into<String>) -> Self {
-        let mut text = Self::new(content);
-        text.kind = TextKind::Caption;
-        text
     }
 
     fn text_style(&self) -> TextStyle {
         let theme = current_theme();
         let typography = responsive_typography(&theme);
-        let resolved_size = self.font_size.unwrap_or(match self.kind {
-            TextKind::Body => typography.body_size,
-            TextKind::Header => typography.title_size,
-            TextKind::Subheader => typography.subheader_size,
-            TextKind::Caption => typography.small_size,
+        let resolved_size = self.font_size.unwrap_or(match self.variant {
+            TextVariant::Body => typography.body_size,
+            TextVariant::Header => typography.title_size,
+            TextVariant::Subheader => typography.subheader_size,
+            TextVariant::Caption => typography.small_size,
         });
-        let resolved_color = self.color.unwrap_or(match self.kind {
-            TextKind::Caption => theme.colors.text_muted,
+        let resolved_color = self.color.unwrap_or(match self.variant {
+            TextVariant::Caption => theme.colors.text_muted,
             _ => theme.colors.text_primary,
         });
         let mut style = TextStyle::default()
@@ -146,6 +82,37 @@ impl Text {
         }
 
         style
+    }
+}
+
+#[bon]
+impl Text {
+    #[builder(
+        start_fn(name = builder, vis = "pub"),
+        finish_fn(name = build, vis = "pub"),
+        builder_type(name = TextBuilder, vis = "pub"),
+        state_mod(vis = "pub")
+    )]
+    fn builder_init(
+        #[builder(into)] content: String,
+        #[builder(default = TextVariant::Body)] variant: TextVariant,
+        color: Option<Color>,
+        font_size: Option<f32>,
+        bold: Option<bool>,
+        #[builder(default)] italic: bool,
+        #[builder(default = TextAlign::Left)] align: TextAlign,
+    ) -> Self {
+        let mut text = Self::with_content(content);
+        text.variant = variant;
+        text.color = color;
+        text.font_size = font_size;
+        text.bold = bold.unwrap_or(matches!(
+            variant,
+            TextVariant::Header | TextVariant::Subheader
+        ));
+        text.italic = italic;
+        text.align = align;
+        text
     }
 }
 
@@ -217,7 +184,7 @@ mod tests {
         set_current_viewport(ViewportInfo::default());
         set_current_theme(theme.clone());
 
-        let text = Text::new("Theme text");
+        let text = Text::builder().content("Theme text").build();
         let style = text.text_style();
         assert_eq!(style.font_size, 19.0);
         assert_eq!(style.color, theme.colors.text_primary);
@@ -230,9 +197,11 @@ mod tests {
         set_current_viewport(ViewportInfo::default());
         set_current_theme(theme);
 
-        let text = Text::new("Override")
-            .size(14.0)
-            .color(Color::from_hex(0x22C55E));
+        let text = Text::builder()
+            .content("Override")
+            .font_size(14.0)
+            .color(Color::from_hex(0x22C55E))
+            .build();
         let style = text.text_style();
         assert_eq!(style.font_size, 14.0);
         assert_eq!(style.color, Color::from_hex(0x22C55E));
@@ -246,10 +215,38 @@ mod tests {
         set_current_theme(theme.clone());
         set_current_viewport(ViewportInfo::new(390.0, 844.0));
 
-        let header = Text::header("Header");
-        let caption = Text::caption("Caption");
+        let header = Text::builder()
+            .content("Header")
+            .variant(TextVariant::Header)
+            .build();
+        let caption = Text::builder()
+            .content("Caption")
+            .variant(TextVariant::Caption)
+            .build();
         assert!(header.text_style().font_size < 24.0);
         assert!(caption.text_style().font_size <= 12.0);
         assert_eq!(caption.text_style().color, theme.colors.text_muted);
+        assert!(header.bold);
+    }
+
+    #[test]
+    fn builder_sets_explicit_configuration() {
+        let text = Text::builder()
+            .content("Builder")
+            .variant(TextVariant::Subheader)
+            .color(Color::from_hex(0x22C55E))
+            .font_size(18.0)
+            .bold(false)
+            .italic(true)
+            .align(TextAlign::Center)
+            .build();
+
+        assert_eq!(text.content, "Builder");
+        assert_eq!(text.variant, TextVariant::Subheader);
+        assert_eq!(text.color, Some(Color::from_hex(0x22C55E)));
+        assert_eq!(text.font_size, Some(18.0));
+        assert!(!text.bold);
+        assert!(text.italic);
+        assert_eq!(text.align, TextAlign::Center);
     }
 }

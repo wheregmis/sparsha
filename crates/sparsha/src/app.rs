@@ -15,6 +15,7 @@ use crate::router::RouterHost;
 use crate::runtime_core::{focused_text_editor_state, RuntimeCoreContext, RuntimeHost};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::runtime_widget::{WidgetPath, WidgetRuntimeRegistry};
+use bon::bon;
 use sparsha_core::Color;
 use sparsha_core::WgpuInitError;
 use sparsha_signals::{ReadSignal, Signal};
@@ -277,59 +278,48 @@ pub struct App {
     router: Router,
 }
 
+fn default_app_router() -> Router {
+    Router::builder()
+        .routes(vec![crate::router::Route::new("/", || {
+            sparsha_widgets::Container::new().fill()
+        })])
+        .fallback("/")
+        .build()
+}
+
+#[bon]
 impl App {
-    /// Create a new app with default configuration.
-    pub fn new() -> Self {
+    /// Create a new app with builder configuration.
+    #[builder(
+        start_fn(name = builder, vis = "pub"),
+        finish_fn(name = build, vis = "pub"),
+        builder_type(name = AppBuilder, vis = "pub"),
+        state_mod(vis = "pub")
+    )]
+    fn builder_init(
+        #[builder(into, default = "Sparsha App")] title: String,
+        #[builder(default = 800)] width: u32,
+        #[builder(default = 600)] height: u32,
+        background: Option<Color>,
+        #[builder(into, default = Theme::default())] theme: ThemeInput,
+        #[builder(into)] dark_theme: Option<ThemeInput>,
+        #[builder(into, default = ThemeMode::Light)] theme_mode: ThemeModeInput,
+        #[builder(default = default_app_router())] router: Router,
+    ) -> Self {
+        let mut app_theme = AppTheme::new(theme.into_source());
+        app_theme.dark = dark_theme.map(ThemeInput::into_source);
+        app_theme.mode = theme_mode.into_source();
+
         Self {
-            config: AppConfig::default(),
-            theme: AppTheme::new(ThemeSource::Static(Theme::default())),
-            router: Router::new()
-                .route("/", || sparsha_widgets::Container::new().fill())
-                .fallback("/"),
+            config: AppConfig {
+                title,
+                width,
+                height,
+                background_override: background,
+            },
+            theme: app_theme,
+            router,
         }
-    }
-
-    /// Set the window title.
-    pub fn title(mut self, title: impl Into<String>) -> Self {
-        self.config.title = title.into();
-        self
-    }
-
-    /// Set the initial window size.
-    pub fn size(mut self, width: u32, height: u32) -> Self {
-        self.config.width = width;
-        self.config.height = height;
-        self
-    }
-
-    /// Set the background color.
-    pub fn background(mut self, color: Color) -> Self {
-        self.config.background_override = Some(color);
-        self
-    }
-
-    /// Set application theme source.
-    pub fn theme<T: Into<ThemeInput>>(mut self, theme: T) -> Self {
-        self.theme.light = theme.into().into_source();
-        self
-    }
-
-    /// Set dark theme source.
-    pub fn dark_theme<T: Into<ThemeInput>>(mut self, theme: T) -> Self {
-        self.theme.dark = Some(theme.into().into_source());
-        self
-    }
-
-    /// Set theme mode source.
-    pub fn theme_mode<T: Into<ThemeModeInput>>(mut self, mode: T) -> Self {
-        self.theme.mode = mode.into().into_source();
-        self
-    }
-
-    /// Set the app router.
-    pub fn router(mut self, router: Router) -> Self {
-        self.router = router;
-        self
     }
 
     /// Run the application.
@@ -371,12 +361,6 @@ impl App {
     #[cfg(target_arch = "wasm32")]
     pub fn run(self) -> Result<(), AppRunError> {
         crate::web_app::run_dom_app(self.config, self.theme, self.router)
-    }
-}
-
-impl Default for App {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -1271,6 +1255,41 @@ mod tests {
             app_theme.resolve_background(Some(Color::from_hex(0xFEF3C7))),
             Color::from_hex(0xFEF3C7)
         );
+    }
+
+    #[test]
+    fn app_builder_defaults_match_the_default_app_shape() {
+        let runtime = RuntimeHandle::new();
+        runtime.run_with_current(|| {
+            let app = App::builder().build();
+
+            assert_eq!(app.config.title, "Sparsha App");
+            assert_eq!(app.config.width, 800);
+            assert_eq!(app.config.height, 600);
+            assert_eq!(app.config.background_override, None);
+            assert_eq!(app.router.current_path(), "/");
+        });
+    }
+
+    #[test]
+    fn app_builder_applies_configuration_overrides() {
+        let runtime = RuntimeHandle::new();
+        runtime.run_with_current(|| {
+            let background = Color::from_hex(0x111827);
+            let app = App::builder()
+                .title("Builder App")
+                .width(1024)
+                .height(768)
+                .background(background)
+                .theme(Theme::dark())
+                .build();
+
+            assert_eq!(app.config.title, "Builder App");
+            assert_eq!(app.config.width, 1024);
+            assert_eq!(app.config.height, 768);
+            assert_eq!(app.config.background_override, Some(background));
+            assert_eq!(app.theme.resolve_theme(), Theme::dark());
+        });
     }
 
     #[test]

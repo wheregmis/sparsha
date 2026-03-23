@@ -11,11 +11,18 @@ fn main() -> Result<(), sparsha::AppRunError> {
     #[cfg(not(target_arch = "wasm32"))]
     env_logger::init();
 
-    App::new()
+    App::builder()
         .title("Kitchen Sink - Sparsha")
-        .size(1200, 900)
+        .width(1200)
+        .height(900)
         .theme(Theme::dark())
-        .router(Router::new().route("/", build_ui).fallback("/"))
+        .router(
+            Router::builder()
+                .routes(vec![Route::new("/", build_ui)])
+                .fallback("/")
+                .build(),
+        )
+        .build()
         .run()
 }
 
@@ -40,34 +47,73 @@ fn build_sidebar() -> Container {
         .fill_height()
         .background(theme.colors.surface)
         .border(1.0, theme.colors.border)
-        .child(Text::header("Kitchen Sink"))
+        .child(
+            Text::builder()
+                .content("Kitchen Sink")
+                .variant(TextVariant::Header)
+                .build(),
+        )
         .child(
             Container::new()
                 .column()
                 .gap(12.0)
-                .child(Text::caption("Buttons"))
-                .child(Button::new("Primary Action").on_click(|| {
-                    log::info!("Primary action clicked");
-                }))
                 .child(
-                    Button::new("Secondary Action")
+                    Text::builder()
+                        .content("Buttons")
+                        .variant(TextVariant::Caption)
+                        .build(),
+                )
+                .child(
+                    Button::builder()
+                        .label("Primary Action")
+                        .on_click(|| {
+                            log::info!("Primary action clicked");
+                        })
+                        .build(),
+                )
+                .child(
+                    Button::builder()
+                        .label("Secondary Action")
                         .corner_radius(10.0)
                         .on_click(|| {
                             log::info!("Secondary action clicked");
-                        }),
+                        })
+                        .build(),
                 )
-                .child(Button::new("Disabled State").disabled(true)),
+                .child(
+                    Button::builder()
+                        .label("Disabled State")
+                        .disabled(true)
+                        .build(),
+                ),
         )
         .child(
             Container::new()
                 .column()
                 .gap(16.0)
-                .child(Text::caption("Typography"))
-                .child(Text::header("Heading Text"))
-                .child(Text::new(
-                    "Body text example that wraps\nto fit the sidebar.",
-                ))
-                .child(Text::caption("Small caption text")),
+                .child(
+                    Text::builder()
+                        .content("Typography")
+                        .variant(TextVariant::Caption)
+                        .build(),
+                )
+                .child(
+                    Text::builder()
+                        .content("Heading Text")
+                        .variant(TextVariant::Header)
+                        .build(),
+                )
+                .child(
+                    Text::builder()
+                        .content("Body text example that wraps\nto fit the sidebar.")
+                        .build(),
+                )
+                .child(
+                    Text::builder()
+                        .content("Small caption text")
+                        .variant(TextVariant::Caption)
+                        .build(),
+                ),
         )
 }
 
@@ -100,36 +146,48 @@ fn build_input_section() -> Container {
             .gap(12.0)
             .fill_width()
             .child(
-                Text::new(
-                    "Use Tab and Shift+Tab to move through the checkbox, single-line fields, and multiline editor. Native and web now share copy, cut, paste, undo, redo, word movement, and IME composition behavior.",
-                )
-                .size(13.0)
-                .color(theme.colors.text_muted),
+                Text::builder()
+                    .content(
+                        "Use Tab and Shift+Tab to move through the checkbox, single-line fields, and multiline editor. Native and web now share copy, cut, paste, undo, redo, word movement, and IME composition behavior.",
+                    )
+                    .font_size(13.0)
+                    .color(theme.colors.text_muted)
+                    .build(),
             )
             .child(
                 Container::new()
                     .row()
                     .gap(12.0)
                     .align_start()
-                    .child(Semantics::new(Checkbox::with_checked(true)).label(
-                        "Focusable checkbox in the same tab order",
-                    ))
-                    .child(Text::new("Focusable checkbox in the same tab order")),
+                    .child(
+                        Semantics::new(Checkbox::builder().checked(true).build())
+                            .label("Focusable checkbox in the same tab order"),
+                    )
+                    .child(
+                        Text::builder()
+                            .content("Focusable checkbox in the same tab order")
+                            .build(),
+                    ),
             )
             .child(
-                TextInput::new()
-                    .fill_width()
-                    .placeholder("Single-line input with clipboard + undo"),
+                TextInput::builder()
+                    .fill_width(true)
+                    .placeholder("Single-line input with clipboard + undo")
+                    .build(),
             )
             .child(
-                TextInput::new()
-                    .fill_width()
-                    .placeholder("Email address..."),
+                TextInput::builder()
+                    .fill_width(true)
+                    .placeholder("Email address...")
+                    .build(),
             )
             .child(
-                TextArea::new()
-                    .fill_width()
-                    .placeholder("Multiline notes...\nTry Enter, arrow keys, word movement, and paste."),
+                TextArea::builder()
+                    .fill_width(true)
+                    .placeholder(
+                        "Multiline notes...\nTry Enter, arrow keys, word movement, and paste.",
+                    )
+                    .build(),
             ),
     )
 }
@@ -144,7 +202,13 @@ fn build_container_section() -> Container {
         .background(theme.colors.surface)
         .border(1.0, theme.colors.border)
         .corner_radius(12.0)
-        .child(Text::new("Nested Containers").size(18.0).bold())
+        .child(
+            Text::builder()
+                .content("Nested Containers")
+                .font_size(18.0)
+                .bold(true)
+                .build(),
+        )
         .child(
             Container::new()
                 .padding(16.0)
@@ -160,7 +224,13 @@ fn build_container_section() -> Container {
                                 .padding(16.0)
                                 .background(theme.colors.primary_hovered.with_alpha(0.35))
                                 .corner_radius(8.0)
-                                .child(Text::new("Level 3").size(14.0).color(Color::WHITE)),
+                                .child(
+                                    Text::builder()
+                                        .content("Level 3")
+                                        .font_size(14.0)
+                                        .color(Color::WHITE)
+                                        .build(),
+                                ),
                         ),
                 ),
         )
@@ -182,7 +252,12 @@ fn build_scroll_section() -> Container {
                 })
                 .corner_radius(4.0)
                 .border(1.0, theme.colors.border)
-                .child(Text::new(format!("Item {}", i + 1)).size(14.0)),
+                .child(
+                    Text::builder()
+                        .content(format!("Item {}", i + 1))
+                        .font_size(14.0)
+                        .build(),
+                ),
         );
     }
 
@@ -193,11 +268,13 @@ fn build_scroll_section() -> Container {
             .gap(16.0)
             .fill_width()
             .child(
-                Text::new(
-                    "The left demo is a regular two-axis scroll container. The right demo is a fixed-row virtualized list that only realizes the visible range.",
-                )
-                .size(13.0)
-                .color(theme.colors.text_muted),
+                Text::builder()
+                    .content(
+                        "The left demo is a regular two-axis scroll container. The right demo is a fixed-row virtualized list that only realizes the visible range.",
+                    )
+                    .font_size(13.0)
+                    .color(theme.colors.text_muted)
+                    .build(),
             )
             .child(
                 Container::new()
@@ -233,29 +310,37 @@ fn build_scroll_section() -> Container {
                             .height(260.0)
                             .child(
                                 Semantics::new(
-                                    List::virtualized(500, 44.0, |index| {
-                                        let theme = current_theme();
-                                        Box::new(
-                                            Container::new()
-                                                .fill_width()
-                                                .min_size(0.0, 44.0)
-                                                .padding(12.0)
-                                                .background(if index % 2 == 0 {
-                                                    theme.colors.surface
-                                                } else {
-                                                    theme.colors.surface_variant
-                                                })
-                                                .border(1.0, theme.colors.border)
-                                                .corner_radius(8.0)
-                                                .child(Text::new(format!(
-                                                    "Virtual row {}",
-                                                    index + 1
-                                                ))),
-                                        )
-                                    })
-                                    .overscan(3)
-                                    .vertical()
-                                    .fill(),
+                                    List::virtualized_builder()
+                                        .item_count(500)
+                                        .item_extent(44.0)
+                                        .item_builder(|index| {
+                                            let theme = current_theme();
+                                            Box::new(
+                                                Container::new()
+                                                    .fill_width()
+                                                    .min_size(0.0, 44.0)
+                                                    .padding(12.0)
+                                                    .background(if index % 2 == 0 {
+                                                        theme.colors.surface
+                                                    } else {
+                                                        theme.colors.surface_variant
+                                                    })
+                                                    .border(1.0, theme.colors.border)
+                                                    .corner_radius(8.0)
+                                                    .child(
+                                                        Text::builder()
+                                                            .content(format!(
+                                                                "Virtual row {}",
+                                                                index + 1
+                                                            ))
+                                                            .build(),
+                                                    ),
+                                            )
+                                        })
+                                        .overscan(3)
+                                        .direction(ListDirection::Vertical)
+                                        .fill(true)
+                                        .build(),
                                 )
                                 .label("Kitchen sink virtualized list"),
                             ),
@@ -272,13 +357,15 @@ fn build_animation_section() -> Container {
             .gap(16.0)
             .fill_width()
             .child(
-                Text::new(
-                    "Implicit animation: route-card fade uses ImplicitAnimation.\n\
+                Text::builder()
+                    .content(
+                        "Implicit animation: route-card fade uses ImplicitAnimation.\n\
                      Explicit animation: draw surface updates using elapsed_time.\n\
                      Page transitions: router cross-fade overlay between routes.",
-                )
-                .size(13.0)
-                .color(current_theme().colors.text_muted),
+                    )
+                    .font_size(13.0)
+                    .color(current_theme().colors.text_muted)
+                    .build(),
             )
             .child(
                 DrawSurface::new(|ctx| {
@@ -332,6 +419,12 @@ fn section(title: &str, content: impl Widget + 'static) -> Container {
         .background(theme.colors.surface)
         .border(1.0, theme.colors.border)
         .corner_radius(16.0)
-        .child(Text::new(title).size(18.0).bold())
+        .child(
+            Text::builder()
+                .content(title)
+                .font_size(18.0)
+                .bold(true)
+                .build(),
+        )
         .child(content)
 }

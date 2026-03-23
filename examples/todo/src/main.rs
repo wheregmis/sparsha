@@ -12,23 +12,28 @@ fn main() -> Result<(), sparsha::AppRunError> {
 
     let theme_mode = Signal::new(ThemeMode::Light);
 
-    App::new()
+    App::builder()
         .title("Sparsha Todo")
-        .size(960, 720)
+        .width(960)
+        .height(720)
         .theme(todo_light_theme())
         .dark_theme(todo_dark_theme())
         .theme_mode(theme_mode)
         .router(
-            Router::new()
+            Router::builder()
+                .routes(vec![
+                    Route::new("/", move || {
+                        component()
+                            .render(move |cx| todo_app(cx, theme_mode))
+                            .call()
+                    }),
+                    Route::new("/about", || component().render(todo_about).call()),
+                ])
                 .transition(RouterTransition::slide_overlay())
-                .route("/", move || {
-                    component()
-                        .render(move |cx| todo_app(cx, theme_mode))
-                        .call()
-                })
-                .route("/about", || component().render(todo_about).call())
-                .fallback("/"),
+                .fallback("/")
+                .build(),
         )
+        .build()
         .run()
 }
 
@@ -184,19 +189,24 @@ fn analysis_summary(task: &TaskHook) -> String {
 
 fn toggle_theme_button(theme_mode: Signal<ThemeMode>) -> Button {
     let label = switch_label(theme_mode.get());
-    Button::new(label).on_click(move || {
-        theme_mode.with_mut(|mode| {
-            *mode = toggle_mode(*mode);
-        });
-    })
+    Button::builder()
+        .label(label)
+        .on_click(move || {
+            theme_mode.with_mut(|mode| {
+                *mode = toggle_mode(*mode);
+            });
+        })
+        .build()
 }
 
 fn secondary_button(label: &str, on_click: impl FnMut() + 'static) -> Button {
     let theme = current_theme();
-    Button::new(label)
+    Button::builder()
+        .label(label)
         .background(theme.colors.surface_variant)
         .text_color(theme.colors.text_primary)
         .on_click(on_click)
+        .build()
 }
 
 fn filter_button(label: &str, model: Signal<TodoModel>, filter: Filter, current: Filter) -> Button {
@@ -212,12 +222,14 @@ fn filter_button(label: &str, model: Signal<TodoModel>, filter: Filter, current:
     } else {
         theme.colors.text_primary
     };
-    Button::new(label)
+    Button::builder()
+        .label(label)
         .background(background)
         .text_color(text_color)
         .on_click(move || {
             apply_action(model, TodoAction::SetFilter(filter));
         })
+        .build()
 }
 
 fn filter_row(model: Signal<TodoModel>, current: Filter) -> Container {
@@ -278,21 +290,32 @@ fn todo_row(model: Signal<TodoModel>, todo: TodoItem) -> Container {
         .background(row_bg)
         .corner_radius(10.0)
         .align_items(taffy::prelude::AlignItems::Center)
-        .child(Checkbox::with_checked(todo.done).on_toggle(move |_| {
-            apply_action(model, TodoAction::Toggle(id));
-        }))
         .child(
-            Container::new()
-                .flex_grow(1.0)
-                .child(Text::new(todo.text).size(15.0).color(text_color)),
+            Checkbox::builder()
+                .checked(todo.done)
+                .on_toggle(move |_| {
+                    apply_action(model, TodoAction::Toggle(id));
+                })
+                .build(),
         )
         .child(
-            Button::new("Delete")
+            Container::new().flex_grow(1.0).child(
+                Text::builder()
+                    .content(todo.text)
+                    .font_size(15.0)
+                    .color(text_color)
+                    .build(),
+            ),
+        )
+        .child(
+            Button::builder()
+                .label("Delete")
                 .background(theme.colors.error)
                 .text_color(Color::WHITE)
                 .on_click(move || {
                     apply_action(model, TodoAction::Delete(id));
-                }),
+                })
+                .build(),
         )
 }
 
@@ -308,9 +331,9 @@ fn input_row(model: Signal<TodoModel>, draft: String, analysis: TaskHook) -> Con
         .gap(10.0)
         .align_items(taffy::prelude::AlignItems::Center)
         .child(
-            TextInput::new()
+            TextInput::builder()
                 .value(draft)
-                .fill_width()
+                .fill_width(true)
                 .placeholder("Add a task...")
                 .on_change(move |value| {
                     apply_action(model_for_change, TodoAction::SetDraft(value.to_owned()));
@@ -318,15 +341,18 @@ fn input_row(model: Signal<TodoModel>, draft: String, analysis: TaskHook) -> Con
                 })
                 .on_submit(move |_| {
                     apply_action(model_for_submit, TodoAction::AddDraft);
-                }),
+                })
+                .build(),
         )
         .child(
-            Button::new("Add")
+            Button::builder()
+                .label("Add")
                 .background(theme.colors.primary)
                 .text_color(Color::WHITE)
                 .on_click(move || {
                     apply_action(model_for_add, TodoAction::AddDraft);
-                }),
+                })
+                .build(),
         )
 }
 
@@ -362,9 +388,11 @@ fn todo_app(cx: &mut ComponentContext<'_>, theme_mode: Signal<ThemeMode>) -> Con
             .background(card_bg)
             .corner_radius(8.0)
             .child(
-                Text::new("No tasks for this filter yet.")
-                    .size(14.0)
-                    .color(subdued_text),
+                Text::builder()
+                    .content("No tasks for this filter yet.")
+                    .font_size(14.0)
+                    .color(subdued_text)
+                    .build(),
             )
             .into_widget()
     } else {
@@ -393,19 +421,29 @@ fn todo_app(cx: &mut ComponentContext<'_>, theme_mode: Signal<ThemeMode>) -> Con
                 .space_between()
                 .align_items(taffy::prelude::AlignItems::Center)
                 .child(
-                    Text::new("Todo")
-                        .size(28.0)
-                        .bold()
-                        .color(theme.colors.text_primary),
+                    Text::builder()
+                        .content("Todo")
+                        .font_size(28.0)
+                        .bold(true)
+                        .color(theme.colors.text_primary)
+                        .build(),
                 )
                 .child(toggle_theme_button(theme_mode)),
         )
         .child(
-            Text::new("Sparsha native + web example using signal-driven state.")
-                .size(13.0)
-                .color(subdued_text),
+            Text::builder()
+                .content("Sparsha native + web example using signal-driven state.")
+                .font_size(13.0)
+                .color(subdued_text)
+                .build(),
         )
-        .child(Text::new(analysis_text).size(12.0).color(analysis_color))
+        .child(
+            Text::builder()
+                .content(analysis_text)
+                .font_size(12.0)
+                .color(analysis_color)
+                .build(),
+        )
         .child(input_row(model, snapshot.draft.clone(), analysis))
         .child(filter_row(model, snapshot.filter))
         .child(
@@ -422,14 +460,16 @@ fn todo_app(cx: &mut ComponentContext<'_>, theme_mode: Signal<ThemeMode>) -> Con
                 .space_between()
                 .align_items(taffy::prelude::AlignItems::Center)
                 .child(
-                    Text::new(format!(
-                        "{} active / {} done / {} total",
-                        active_count,
-                        done_count,
-                        snapshot.todos.len()
-                    ))
-                    .size(13.0)
-                    .color(subdued_text),
+                    Text::builder()
+                        .content(format!(
+                            "{} active / {} done / {} total",
+                            active_count,
+                            done_count,
+                            snapshot.todos.len()
+                        ))
+                        .font_size(13.0)
+                        .color(subdued_text)
+                        .build(),
                 )
                 .child(footer_actions(model, navigator)),
         );
@@ -456,24 +496,30 @@ fn todo_about(cx: &mut ComponentContext<'_>) -> Container {
                 .background(theme.colors.surface)
                 .corner_radius(16.0)
                 .child(
-                    Text::new("About Todo")
-                        .size(28.0)
-                        .bold()
-                        .color(theme.colors.text_primary),
+                    Text::builder()
+                        .content("About Todo")
+                        .font_size(28.0)
+                        .bold(true)
+                        .color(theme.colors.text_primary)
+                        .build(),
                 )
                 .child(
-                    Text::new(
-                        "This example stays intentionally small: one task screen, one about route, shared theme state, and the same component code on native and web.",
-                    )
-                    .size(16.0)
-                    .color(theme.colors.text_muted),
+                    Text::builder()
+                        .content(
+                            "This example stays intentionally small: one task screen, one about route, shared theme state, and the same component code on native and web.",
+                        )
+                        .font_size(16.0)
+                        .color(theme.colors.text_muted)
+                        .build(),
                 )
                 .child(
-                    Text::new(
-                        "Use the About button in the task footer or switch between `#/` and `#/about` in the browser to verify routing parity.",
-                    )
-                    .size(14.0)
-                    .color(theme.colors.primary),
+                    Text::builder()
+                        .content(
+                            "Use the About button in the task footer or switch between `#/` and `#/about` in the browser to verify routing parity.",
+                        )
+                        .font_size(14.0)
+                        .color(theme.colors.primary)
+                        .build(),
                 )
                 .child(back_to_todo_button(navigator)),
         )

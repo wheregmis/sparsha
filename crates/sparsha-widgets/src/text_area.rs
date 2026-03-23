@@ -8,6 +8,7 @@ use crate::{
     responsive_typography, AccessibilityAction, AccessibilityInfo, AccessibilityRole, EventContext,
     PaintContext, Widget,
 };
+use bon::bon;
 use sparsha_core::Color;
 use sparsha_input::{Action, ActionMapper, InputEvent, Key, NamedKey, StandardAction};
 use sparsha_layout::WidgetId;
@@ -45,7 +46,7 @@ struct TextAreaBuildState {
 }
 
 impl TextArea {
-    pub fn new() -> Self {
+    fn empty() -> Self {
         Self {
             id: WidgetId::default(),
             editor: EditorCore::new(String::new()),
@@ -66,31 +67,9 @@ impl TextArea {
         }
     }
 
-    pub fn value(mut self, value: impl Into<String>) -> Self {
-        let value = value.into();
-        self.editor.set_text(value.clone());
-        self.declared_value = Some(value);
-        self
-    }
-
-    pub fn placeholder(mut self, placeholder: impl Into<String>) -> Self {
-        self.placeholder = placeholder.into();
-        self
-    }
-
-    pub fn on_change(mut self, handler: impl FnMut(&str) + 'static) -> Self {
-        self.on_change = Some(Box::new(handler));
-        self
-    }
-
-    pub fn with_style(mut self, style: TextAreaStyle) -> Self {
+    fn style_override(mut self, style: TextAreaStyle) -> Self {
         self.style = style;
         self.use_theme_defaults = false;
-        self
-    }
-
-    pub fn fill_width(mut self) -> Self {
-        self.fill_width = true;
         self
     }
 
@@ -317,9 +296,36 @@ impl TextArea {
     }
 }
 
-impl Default for TextArea {
-    fn default() -> Self {
-        Self::new()
+#[bon]
+impl TextArea {
+    #[builder(
+        start_fn(name = builder, vis = "pub"),
+        finish_fn(name = build, vis = "pub"),
+        builder_type(name = TextAreaBuilder, vis = "pub"),
+        state_mod(vis = "pub")
+    )]
+    fn builder_init(
+        #[builder(with = |value: impl Into<String>| value.into())] value: Option<String>,
+        #[builder(into, default = String::new())] placeholder: String,
+        style: Option<TextAreaStyle>,
+        #[builder(default)] fill_width: bool,
+        #[builder(with = |handler: impl FnMut(&str) + 'static| Box::new(handler) as TextAreaCallback)]
+        on_change: Option<TextAreaCallback>,
+    ) -> Self {
+        let mut area = Self::empty();
+        if let Some(value) = value {
+            area.editor.set_text(value.clone());
+            area.declared_value = Some(value);
+        }
+        area.placeholder = placeholder;
+        if let Some(style) = style {
+            area = area.style_override(style);
+        }
+        area.fill_width = fill_width;
+        if let Some(on_change) = on_change {
+            area.on_change = Some(on_change);
+        }
+        area
     }
 }
 
@@ -754,7 +760,7 @@ mod tests {
     #[test]
     fn enter_inserts_newline_and_vertical_navigation_moves_cursor() {
         reset_viewport();
-        let mut area = TextArea::new().value("hello");
+        let mut area = TextArea::builder().value("hello").build();
         area.set_id(Default::default());
         let layout = layout_bounds(0.0, 0.0, 280.0, 120.0);
         let layout_tree = LayoutTree::new();
@@ -793,7 +799,7 @@ mod tests {
     fn paste_and_undo_work_for_multiline_content() {
         with_shortcut_profile(ShortcutProfile::ControlPrimary, || {
             reset_viewport();
-            let mut area = TextArea::new();
+            let mut area = TextArea::builder().build();
             area.set_id(Default::default());
             let layout = layout_bounds(0.0, 0.0, 280.0, 120.0);
             let layout_tree = LayoutTree::new();
@@ -829,7 +835,7 @@ mod tests {
     #[test]
     fn pointer_hit_testing_stays_correct_after_scaled_paint() {
         reset_viewport();
-        let mut area = TextArea::new().value("line one\nline two");
+        let mut area = TextArea::builder().value("line one\nline two").build();
         area.set_id(Default::default());
 
         let layout_tree = LayoutTree::new();
@@ -868,7 +874,7 @@ mod tests {
     #[test]
     fn trailing_space_text_input_advances_cursor() {
         reset_viewport();
-        let mut area = TextArea::new().value("hello");
+        let mut area = TextArea::builder().value("hello").build();
         area.set_id(Default::default());
         let layout = layout_bounds(0.0, 0.0, 280.0, 120.0);
         let layout_tree = LayoutTree::new();
@@ -901,7 +907,7 @@ mod tests {
     #[test]
     fn line_metrics_track_trailing_space_width() {
         reset_viewport();
-        let area = TextArea::new().value("a \nline");
+        let area = TextArea::builder().value("a \nline").build();
         prepare_area_with_cache(&area);
 
         let metrics = area.line_metrics.borrow();
@@ -929,10 +935,31 @@ mod tests {
         set_current_theme(theme);
         set_current_viewport(ViewportInfo::new(390.0, 844.0));
 
-        let area = TextArea::new();
+        let area = TextArea::builder().build();
         let style = area.resolved_style();
         assert!(style.font_size < 16.0);
         assert!(style.min_height < 96.0);
         assert!(style.padding_v < 8.0);
+    }
+
+    #[test]
+    fn builder_sets_explicit_configuration() {
+        let style = TextAreaStyle {
+            min_height: 140.0,
+            ..TextAreaStyle::default()
+        };
+
+        let area = TextArea::builder()
+            .value("Builder")
+            .placeholder("More text")
+            .style(style.clone())
+            .fill_width(true)
+            .build();
+
+        assert_eq!(area.get_value(), "Builder");
+        assert_eq!(area.placeholder, "More text");
+        assert_eq!(area.style.min_height, style.min_height);
+        assert!(area.fill_width);
+        assert!(!area.use_theme_defaults);
     }
 }

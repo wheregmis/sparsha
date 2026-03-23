@@ -292,3 +292,43 @@ impl Widget for Container {
         &mut self.children
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn configuration_methods_update_style_and_visuals() {
+        let mut container = Container::new()
+            .direction(FlexDirection::Row)
+            .gap(12.0)
+            .padding(16.0)
+            .background(Color::from_hex(0x0F172A))
+            .corner_radius(10.0)
+            .border(1.0, Color::from_hex(0xCBD5E1))
+            .align_items(AlignItems::Center)
+            .justify_content(JustifyContent::SpaceBetween)
+            .width(320.0)
+            .height(180.0)
+            .flex_grow(1.0)
+            .flex_shrink(0.0)
+            .wrap();
+        container.style.min_size.width = length(200.0);
+        container.style.min_size.height = length(120.0);
+
+        assert_eq!(container.style.flex_direction, FlexDirection::Row);
+        assert_eq!(container.style.gap.width, length(12.0));
+        assert_eq!(container.style.padding.left, length(16.0));
+        assert_eq!(container.style.size.width, length(320.0));
+        assert_eq!(container.style.size.height, length(180.0));
+        assert_eq!(container.style.min_size.width, length(200.0));
+        assert_eq!(container.style.min_size.height, length(120.0));
+        assert_eq!(container.style.flex_grow, 1.0);
+        assert_eq!(container.style.flex_shrink, 0.0);
+        assert_eq!(container.style.flex_wrap, taffy::FlexWrap::Wrap);
+        assert_eq!(container.background, Some(Color::from_hex(0x0F172A)));
+        assert_eq!(container.corner_radius, 10.0);
+        assert_eq!(container.border_width, 1.0);
+        assert_eq!(container.border_color, Color::from_hex(0xCBD5E1));
+    }
+}

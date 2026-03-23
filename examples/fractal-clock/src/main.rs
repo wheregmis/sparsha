@@ -17,12 +17,19 @@ fn main() -> Result<(), sparsha::AppRunError> {
     #[cfg(not(target_arch = "wasm32"))]
     env_logger::init();
 
-    App::new()
+    App::builder()
         .title("Fractal Clock - Sparsha")
-        .size(1440, 960)
+        .width(1440)
+        .height(960)
         .background(Color::from_hex(0x04060A))
         .theme(Theme::light())
-        .router(Router::new().route("/", FractalClock::new).fallback("/"))
+        .router(
+            Router::builder()
+                .routes(vec![Route::new("/", FractalClock::new)])
+                .fallback("/")
+                .build(),
+        )
+        .build()
         .run()
 }
 

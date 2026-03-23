@@ -725,9 +725,11 @@ mod tests {
     #[test]
     fn scroll_widget_track_click_pages_content() {
         let mut scroll = Scroll::new().vertical().content(
-            Container::new()
-                .column()
-                .child(Container::new().height(320.0).child(Text::new("Large"))),
+            Container::new().column().child(
+                Container::new()
+                    .height(320.0)
+                    .child(Text::builder().content("Large").build()),
+            ),
         );
         scroll.set_id(Default::default());
 
@@ -760,5 +762,33 @@ mod tests {
         ctx.has_capture = true;
         scroll.event(&mut ctx, &pointer_up_at(116.0, 24.0));
         assert!(ctx.commands.release_pointer || scroll.model.hover_axis().is_some());
+    }
+
+    #[test]
+    fn configuration_methods_update_layout_and_behavior() {
+        let style = ScrollbarStyle {
+            width: 14.0,
+            ..ScrollbarStyle::default()
+        };
+
+        let scroll = Scroll::new()
+            .direction(ScrollDirection::Both)
+            .content(Text::builder().content("Content").build())
+            .scrollbar_style(style.clone())
+            .width(320.0)
+            .height(240.0)
+            .flex_grow(1.0)
+            .debug_overlay(true);
+
+        assert_eq!(scroll.direction, ScrollDirection::Both);
+        assert_eq!(
+            scroll.scrollbar_style_override.as_ref().map(|it| it.width),
+            Some(style.width)
+        );
+        assert_eq!(scroll.layout_style.size.width, length(320.0));
+        assert_eq!(scroll.layout_style.size.height, length(240.0));
+        assert_eq!(scroll.layout_style.flex_grow, 1.0);
+        assert!(scroll.debug_overlay);
+        assert_eq!(scroll.children().len(), 1);
     }
 }

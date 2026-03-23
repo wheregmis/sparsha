@@ -37,6 +37,13 @@ use web_sys::{
     Window,
 };
 
+#[wasm_bindgen::prelude::wasm_bindgen(
+    inline_js = "export function sparshaStartViewTransition(document) {\n  const startViewTransition = document?.startViewTransition;\n  if (typeof startViewTransition !== 'function') {\n    return;\n  }\n  try {\n    startViewTransition.call(document, () => {});\n  } catch (_) {\n    // Ignore unsupported and timing-related failures.\n  }\n}"
+)]
+extern "C" {
+    fn sparshaStartViewTransition(document: &web_sys::Document);
+}
+
 fn format_js_error(error: &wasm_bindgen::JsValue) -> String {
     error.as_string().unwrap_or_else(|| format!("{error:?}"))
 }
@@ -78,6 +85,7 @@ pub(crate) fn run_dom_app(
         Box::new(RouterHost::new(router_for_build.clone())) as Box<dyn Widget>
     });
 
+    let initial_route_path = navigator.current_path();
     let mut state = WebAppState {
         config,
         theme,
@@ -108,6 +116,7 @@ pub(crate) fn run_dom_app(
         surface_manager,
         ime_composing: false,
         pending_surface_retry: false,
+        last_route_path: initial_route_path,
     };
     state.update_viewport();
 
@@ -158,6 +167,7 @@ struct WebAppState {
     surface_manager: HybridSurfaceManager,
     ime_composing: bool,
     pending_surface_retry: bool,
+    last_route_path: String,
 }
 
 struct WebFrameSnapshot<'a> {
@@ -484,6 +494,8 @@ impl WebAppState {
     }
 
     fn frame(&mut self) {
+        let current_route_path = self.router_navigator.current_path();
+        let route_changed = current_route_path != self.last_route_path;
         let mut had_task_results = false;
         self.task_runtime.drain_completed(|result| {
             had_task_results = true;
@@ -528,6 +540,7 @@ impl WebAppState {
         if !should_render_layers {
             let desired_hash = self.desired_route_hash();
             self.sync_route_hash(&desired_hash);
+            self.last_route_path = current_route_path;
             return;
         }
 
@@ -538,6 +551,10 @@ impl WebAppState {
         self.sync_text_input_bridge_with_state(focused_editor_state.as_ref(), suppress_text_bridge);
 
         let (dom_rendered, pending_surface_retry) = {
+            if should_start_route_view_transition(route_changed, self.first_paint_emitted) {
+                start_document_view_transition();
+            }
+
             let snapshot = WebFrameSnapshot {
                 draw_list: &self.draw_list,
                 surface_frames: &self.surface_frames,
@@ -601,6 +618,7 @@ impl WebAppState {
             self.pending_surface_retry = false;
         }
 
+        self.last_route_path = current_route_path;
         self.needs_repaint |= self.pending_surface_retry;
     }
 
@@ -1767,6 +1785,21 @@ fn should_sync_external_hash(current_path: &str, hash: &str) -> bool {
     hash_to_path(hash) != current_path
 }
 
+fn should_start_route_view_transition(route_changed: bool, first_paint_emitted: bool) -> bool {
+    route_changed && first_paint_emitted
+}
+
+fn start_document_view_transition() {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let Some(document) = window.document() else {
+        return;
+    };
+
+    sparshaStartViewTransition(&document);
+}
+
 fn should_render_web_layers(
     painted_frame: bool,
     pending_surface_retry: bool,
@@ -1914,6 +1947,14 @@ mod wasm_tests {
         assert!(!should_sync_external_hash("/", "#/"));
         assert!(!should_sync_external_hash("/about", "#/about"));
         assert!(should_sync_external_hash("/", "#/about"));
+    }
+
+    #[test]
+    fn route_view_transition_runs_only_after_first_paint() {
+        assert!(!should_start_route_view_transition(false, false));
+        assert!(!should_start_route_view_transition(false, true));
+        assert!(!should_start_route_view_transition(true, false));
+        assert!(should_start_route_view_transition(true, true));
     }
 
     #[test]

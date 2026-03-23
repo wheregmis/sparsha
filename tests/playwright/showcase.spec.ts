@@ -119,6 +119,42 @@ async function swipeUp(page: Page, startY = 730, distance = 360) {
   await page.waitForTimeout(100);
 }
 
+async function tapRoot(page: Page, x: number, y: number) {
+  await page.evaluate(
+    ({ x, y, touchIdentifier }) => {
+      const root = document.querySelector(".sparsha-dom-root");
+      if (!(root instanceof HTMLElement) || typeof Touch === "undefined") {
+        return;
+      }
+      const touch = new Touch({
+        identifier: touchIdentifier,
+        target: root,
+        clientX: x,
+        clientY: y,
+        pageX: x,
+        pageY: y,
+        screenX: x,
+        screenY: y,
+      });
+      const dispatch = (type: string, touches: Touch[], changedTouches: Touch[]) => {
+        root.dispatchEvent(
+          new TouchEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            touches,
+            changedTouches,
+            targetTouches: touches,
+          }),
+        );
+      };
+      dispatch("touchstart", [touch], [touch]);
+      dispatch("touchend", [], [touch]);
+    },
+    { x, y, touchIdentifier: TOUCH_IDENTIFIER },
+  );
+  await page.waitForTimeout(100);
+}
+
 for (const viewport of viewports) {
   test(`${viewport.name}: showcase components preview stays interactive and can switch routes`, async ({
     page,
@@ -212,4 +248,26 @@ test("mobile: touch swipe scrolls components content", async ({ page }) => {
   await swipeUp(page);
   const nextY = await sectionHeading.evaluate((element) => element.getBoundingClientRect().y);
   expect(nextY).toBeLessThan(initialY - 16);
+});
+
+test("mobile: tapping outside input clears focus without reopening", async ({
+  page,
+}) => {
+  const mobileViewport = viewports.find((viewport) => viewport.name === "mobile");
+  if (!mobileViewport) {
+    throw new Error("Missing mobile viewport configuration.");
+  }
+  await openShowcase(page, mobileViewport);
+
+  const singleLine = page.getByRole("textbox", {
+    name: "Showcase single-line input",
+  });
+  await singleLine.focus();
+  await expect(singleLine).toBeFocused();
+
+  await tapRoot(page, 30, 80);
+  await expect(singleLine).not.toBeFocused();
+
+  await tapRoot(page, 40, 90);
+  await expect(singleLine).not.toBeFocused();
 });

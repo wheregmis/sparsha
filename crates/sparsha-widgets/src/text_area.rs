@@ -726,7 +726,9 @@ mod tests {
     use crate::{
         set_current_theme, set_current_viewport, PaintCommands, PaintContext, Theme, ViewportInfo,
     };
-    use sparsha_input::{FocusManager, InputEvent, KeyboardEvent, Modifiers};
+    use sparsha_input::{
+        with_shortcut_profile, FocusManager, InputEvent, KeyboardEvent, Modifiers, ShortcutProfile,
+    };
     use sparsha_layout::LayoutTree;
     use sparsha_render::DrawList;
     use sparsha_text::TextSystem;
@@ -746,15 +748,7 @@ mod tests {
     }
 
     fn primary_modifiers() -> Modifiers {
-        #[cfg(any(target_os = "macos", target_arch = "wasm32"))]
-        {
-            Modifiers::META
-        }
-
-        #[cfg(not(any(target_os = "macos", target_arch = "wasm32")))]
-        {
-            Modifiers::CONTROL
-        }
+        ShortcutProfile::ControlPrimary.primary_modifiers()
     }
 
     #[test]
@@ -797,35 +791,39 @@ mod tests {
 
     #[test]
     fn paste_and_undo_work_for_multiline_content() {
-        reset_viewport();
-        let mut area = TextArea::new();
-        area.set_id(Default::default());
-        let layout = layout_bounds(0.0, 0.0, 280.0, 120.0);
-        let layout_tree = LayoutTree::new();
-        let mut focus = FocusManager::new();
-        focus.set_focus(area.id());
+        with_shortcut_profile(ShortcutProfile::ControlPrimary, || {
+            reset_viewport();
+            let mut area = TextArea::new();
+            area.set_id(Default::default());
+            let layout = layout_bounds(0.0, 0.0, 280.0, 120.0);
+            let layout_tree = LayoutTree::new();
+            let mut focus = FocusManager::new();
+            focus.set_focus(area.id());
 
-        let mut paste_ctx = mock_event_context(layout, &layout_tree, &mut focus, area.id(), false);
-        area.event(
-            &mut paste_ctx,
-            &InputEvent::Paste {
-                text: "alpha\nbeta".to_owned(),
-            },
-        );
-        assert_eq!(area.get_value(), "alpha\nbeta");
-
-        let mut undo_ctx = mock_event_context(layout, &layout_tree, &mut focus, area.id(), false);
-        area.event(
-            &mut undo_ctx,
-            &InputEvent::KeyDown {
-                event: KeyboardEvent {
-                    key: Key::Character("z".into()),
-                    modifiers: primary_modifiers(),
-                    ..Default::default()
+            let mut paste_ctx =
+                mock_event_context(layout, &layout_tree, &mut focus, area.id(), false);
+            area.event(
+                &mut paste_ctx,
+                &InputEvent::Paste {
+                    text: "alpha\nbeta".to_owned(),
                 },
-            },
-        );
-        assert_eq!(area.get_value(), "");
+            );
+            assert_eq!(area.get_value(), "alpha\nbeta");
+
+            let mut undo_ctx =
+                mock_event_context(layout, &layout_tree, &mut focus, area.id(), false);
+            area.event(
+                &mut undo_ctx,
+                &InputEvent::KeyDown {
+                    event: KeyboardEvent {
+                        key: Key::Character("z".into()),
+                        modifiers: primary_modifiers(),
+                        ..Default::default()
+                    },
+                },
+            );
+            assert_eq!(area.get_value(), "");
+        });
     }
 
     #[test]

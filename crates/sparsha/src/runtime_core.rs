@@ -39,6 +39,316 @@ pub(crate) struct RuntimeCoreContext<'a> {
     pub(crate) needs_repaint: &'a mut bool,
 }
 
+pub(crate) struct RuntimeHost<'a> {
+    theme: &'a AppTheme,
+    navigator: crate::router::Navigator,
+    root_widget: &'a mut dyn Widget,
+    layout_tree: &'a mut LayoutTree,
+    widget_registry: &'a mut WidgetRuntimeRegistry,
+    component_states: &'a mut ComponentStateStore,
+    focus_manager: &'a mut FocusManager,
+    focused_path: &'a mut Option<WidgetPath>,
+    capture_path: &'a mut Option<WidgetPath>,
+    signal_runtime: RuntimeHandle,
+    task_runtime: crate::tasks::TaskRuntime,
+    text_system: &'a mut TextSystem,
+    viewport: ViewportInfo,
+    shortcut_profile: ShortcutProfile,
+    ime_composing: &'a mut bool,
+    needs_layout: &'a mut bool,
+    needs_repaint: &'a mut bool,
+}
+
+impl<'a> From<RuntimeCoreContext<'a>> for RuntimeHost<'a> {
+    fn from(ctx: RuntimeCoreContext<'a>) -> Self {
+        Self {
+            theme: ctx.theme,
+            navigator: ctx.navigator,
+            root_widget: ctx.root_widget,
+            layout_tree: ctx.layout_tree,
+            widget_registry: ctx.widget_registry,
+            component_states: ctx.component_states,
+            focus_manager: ctx.focus_manager,
+            focused_path: ctx.focused_path,
+            capture_path: ctx.capture_path,
+            signal_runtime: ctx.signal_runtime,
+            task_runtime: ctx.task_runtime,
+            text_system: ctx.text_system,
+            viewport: ctx.viewport,
+            shortcut_profile: ctx.shortcut_profile,
+            ime_composing: ctx.ime_composing,
+            needs_layout: ctx.needs_layout,
+            needs_repaint: ctx.needs_repaint,
+        }
+    }
+}
+
+impl RuntimeHost<'_> {
+    pub(crate) fn focused_text_editor_state(&self) -> Option<&TextEditorState> {
+        focused_text_editor_state(self.widget_registry, self.focused_path.as_deref())
+    }
+
+    pub(crate) fn has_pointer_capture(&self) -> bool {
+        self.capture_path.is_some()
+    }
+
+    pub(crate) fn refresh_accessibility(&mut self) -> AccessibilityTreeSnapshot {
+        refresh_accessibility_tree(
+            self.widget_registry,
+            self.root_widget,
+            self.layout_tree,
+            self.focused_path.as_ref(),
+        )
+    }
+
+    pub(crate) fn build_layout(&mut self) -> PlatformEffects {
+        let runtime = self.signal_runtime.clone();
+        *self.layout_tree = LayoutTree::new();
+        self.component_states.begin_rebuild();
+
+        runtime.with_tracking(SubscriberKind::Rebuild, || {
+            let resolved_theme = self.theme.resolve_theme();
+            let navigator = self.navigator.clone();
+            let viewport = self.viewport;
+            set_current_theme(resolved_theme.clone());
+            set_current_viewport(viewport);
+
+            fn rebuild_widget(
+                widget: &mut dyn Widget,
+                build_ctx: &mut BuildContext,
+                path: &mut Vec<usize>,
+            ) {
+                build_ctx.set_path(path);
+                widget.rebuild(build_ctx);
+                let child_keys: Vec<_> = (0..widget.children().len())
+                    .map(|index| widget.child_path_key(index))
+                    .collect();
+                for (index, child) in widget.children_mut().iter_mut().enumerate() {
+                    path.push(child_keys[index]);
+                    rebuild_widget(child.as_mut(), build_ctx, path);
+                    path.pop();
+                }
+            }
+
+            fn persist_widget_state(
+                widget: &dyn Widget,
+                build_ctx: &mut BuildContext,
+                path: &mut Vec<usize>,
+            ) {
+                build_ctx.set_path(path);
+                widget.persist_build_state(build_ctx);
+                let child_keys: Vec<_> = (0..widget.children().len())
+                    .map(|index| widget.child_path_key(index))
+                    .collect();
+                for (index, child) in widget.children().iter().enumerate() {
+                    path.push(child_keys[index]);
+                    persist_widget_state(child.as_ref(), build_ctx, path);
+                    path.pop();
+                }
+            }
+
+            let mut build_ctx = BuildContext::default();
+            build_ctx.set_theme(resolved_theme);
+            build_ctx.insert_resource(navigator);
+            build_ctx.insert_resource(self.task_runtime.clone());
+            build_ctx.insert_resource(self.signal_runtime.clone());
+            build_ctx.insert_resource(viewport);
+            unsafe { build_ctx.set_state_store(self.component_states) };
+            let mut path = Vec::new();
+            persist_widget_state(self.root_widget, &mut build_ctx, &mut path);
+            self.component_states.begin_rebuild();
+            path.clear();
+            rebuild_widget(self.root_widget, &mut build_ctx, &mut path);
+        });
+        self.component_states.finish_rebuild();
+
+        let mut widget_registry = WidgetRuntimeRegistry::default();
+        let root_id = runtime.with_tracking(SubscriberKind::Layout, || {
+            set_current_theme(self.theme.resolve_theme());
+            set_current_viewport(self.viewport);
+            let mut path = Vec::new();
+            add_widget_to_layout(
+                self.root_widget,
+                self.layout_tree,
+                self.text_system,
+                &mut widget_registry,
+                &mut path,
+                false,
+                true,
+            )
+        });
+        self.layout_tree.set_root(root_id);
+        *self.widget_registry = widget_registry;
+        self.layout_tree
+            .compute_layout(self.viewport.width.max(1.0), self.viewport.height.max(1.0));
+        *self.focused_path = remap_path(self.focused_path.take(), self.widget_registry);
+        *self.capture_path = remap_path(self.capture_path.take(), self.widget_registry);
+        sync_focus_manager(
+            self.focus_manager,
+            self.widget_registry,
+            self.focused_path.as_ref(),
+        );
+        *self.needs_layout = false;
+        *self.needs_repaint = true;
+
+        let mut effects = PlatformEffects::default();
+        effects.push(PlatformEffect::SyncTextInput);
+        effects.push(PlatformEffect::SyncPointerCapture);
+        effects
+    }
+
+    pub(crate) fn handle_input_event(
+        &mut self,
+        event: InputEvent,
+        clipboard_text: Option<String>,
+    ) -> PlatformEffects {
+        let mapper = ActionMapper::with_shortcut_profile(self.shortcut_profile);
+        let mut handled_focus_navigation = false;
+        let mut dispatch_event = event.clone();
+        let mut effects = PlatformEffects::default();
+
+        if let Some(Action::Standard(action)) = mapper.map_event(&event) {
+            match action {
+                StandardAction::FocusNext | StandardAction::FocusPrevious => {
+                    let next_focus = move_focus_path(
+                        self.focused_path.as_ref(),
+                        self.widget_registry,
+                        matches!(action, StandardAction::FocusNext),
+                    );
+                    let focus_changed = apply_focus_change(
+                        self.root_widget,
+                        self.focus_manager,
+                        self.widget_registry,
+                        self.focused_path,
+                        next_focus,
+                    );
+                    if focus_changed {
+                        *self.ime_composing = false;
+                        *self.needs_repaint = true;
+                        effects.push(PlatformEffect::SyncTextInput);
+                    }
+                    handled_focus_navigation = true;
+                }
+                StandardAction::Paste if self.focused_text_editor_state().is_some() => {
+                    let Some(text) = clipboard_text else {
+                        return effects;
+                    };
+                    dispatch_event = InputEvent::Paste { text };
+                }
+                _ => {}
+            }
+        }
+
+        if handled_focus_navigation {
+            return effects;
+        }
+
+        let current_focus_id = self
+            .focused_path
+            .as_ref()
+            .and_then(|path| self.widget_registry.id_for_path(path));
+        let current_capture_path = self.capture_path.clone();
+        let outcome = self.signal_runtime.run_with_current(|| {
+            with_shortcut_profile(self.shortcut_profile, || {
+                dispatch_widget_event(
+                    self.root_widget,
+                    self.layout_tree,
+                    current_focus_id,
+                    current_capture_path.as_ref(),
+                    &dispatch_event,
+                )
+            })
+        });
+
+        if outcome.commands.request_focus || outcome.commands.clear_focus {
+            let focus_changed = apply_focus_change(
+                self.root_widget,
+                self.focus_manager,
+                self.widget_registry,
+                self.focused_path,
+                outcome.focus_path.clone(),
+            );
+            if focus_changed {
+                if self.focused_text_editor_state().is_none() {
+                    *self.ime_composing = false;
+                }
+                *self.needs_repaint = true;
+                effects.push(PlatformEffect::SyncTextInput);
+            }
+        }
+
+        if outcome.commands.capture_pointer || outcome.commands.release_pointer {
+            *self.capture_path = outcome.capture_path;
+            *self.needs_repaint = true;
+            effects.push(PlatformEffect::SyncPointerCapture);
+        }
+
+        if let Some(text) = outcome.commands.clipboard_write {
+            effects.push(PlatformEffect::WriteClipboard(text));
+        }
+
+        if outcome.commands.request_paint {
+            *self.needs_repaint = true;
+        }
+        if outcome.commands.request_layout {
+            *self.needs_layout = true;
+        }
+
+        run_signal_effects(&self.signal_runtime, self.needs_layout, self.needs_repaint);
+
+        effects
+    }
+
+    pub(crate) fn handle_accessibility_action(
+        &mut self,
+        node_id: u64,
+        action: AccessibilityAction,
+        value: Option<String>,
+    ) -> PlatformEffects {
+        let Some(path) = self
+            .widget_registry
+            .path_for_accessibility_node(node_id)
+            .map(ToOwned::to_owned)
+        else {
+            return PlatformEffects::default();
+        };
+
+        let mut effects = PlatformEffects::default();
+        match action {
+            AccessibilityAction::Focus => {
+                let focus_changed = apply_focus_change(
+                    self.root_widget,
+                    self.focus_manager,
+                    self.widget_registry,
+                    self.focused_path,
+                    Some(path),
+                );
+                if focus_changed {
+                    *self.ime_composing = false;
+                    *self.needs_repaint = true;
+                    effects.push(PlatformEffect::SyncTextInput);
+                }
+            }
+            action => {
+                let handled = with_widget_mut(self.root_widget, &path, |widget| {
+                    widget.handle_accessibility_action(action, value.clone())
+                })
+                .unwrap_or(false);
+                if handled {
+                    if matches!(action, AccessibilityAction::SetValue) {
+                        *self.needs_layout = true;
+                    }
+                    *self.needs_repaint = true;
+                }
+            }
+        }
+
+        run_signal_effects(&self.signal_runtime, self.needs_layout, self.needs_repaint);
+
+        effects
+    }
+}
+
 pub(crate) fn focused_text_editor_state<'a>(
     widget_registry: &'a WidgetRuntimeRegistry,
     focused_path: Option<&[usize]>,
@@ -55,257 +365,6 @@ pub(crate) fn refresh_accessibility_tree(
     widget_registry.accessibility =
         collect_accessibility_tree(root_widget, layout_tree, focused_path);
     widget_registry.accessibility_tree().clone()
-}
-
-pub(crate) fn build_layout(ctx: RuntimeCoreContext<'_>) -> PlatformEffects {
-    let runtime = ctx.signal_runtime.clone();
-    *ctx.layout_tree = LayoutTree::new();
-    ctx.component_states.begin_rebuild();
-
-    runtime.with_tracking(SubscriberKind::Rebuild, || {
-        let resolved_theme = ctx.theme.resolve_theme();
-        let navigator = ctx.navigator.clone();
-        let viewport = ctx.viewport;
-        set_current_theme(resolved_theme.clone());
-        set_current_viewport(viewport);
-
-        fn rebuild_widget(
-            widget: &mut dyn Widget,
-            build_ctx: &mut BuildContext,
-            path: &mut Vec<usize>,
-        ) {
-            build_ctx.set_path(path);
-            widget.rebuild(build_ctx);
-            let child_keys: Vec<_> = (0..widget.children().len())
-                .map(|index| widget.child_path_key(index))
-                .collect();
-            for (index, child) in widget.children_mut().iter_mut().enumerate() {
-                path.push(child_keys[index]);
-                rebuild_widget(child.as_mut(), build_ctx, path);
-                path.pop();
-            }
-        }
-
-        fn persist_widget_state(
-            widget: &dyn Widget,
-            build_ctx: &mut BuildContext,
-            path: &mut Vec<usize>,
-        ) {
-            build_ctx.set_path(path);
-            widget.persist_build_state(build_ctx);
-            let child_keys: Vec<_> = (0..widget.children().len())
-                .map(|index| widget.child_path_key(index))
-                .collect();
-            for (index, child) in widget.children().iter().enumerate() {
-                path.push(child_keys[index]);
-                persist_widget_state(child.as_ref(), build_ctx, path);
-                path.pop();
-            }
-        }
-
-        let mut build_ctx = BuildContext::default();
-        build_ctx.set_theme(resolved_theme);
-        build_ctx.insert_resource(navigator);
-        build_ctx.insert_resource(ctx.task_runtime.clone());
-        build_ctx.insert_resource(ctx.signal_runtime.clone());
-        build_ctx.insert_resource(viewport);
-        unsafe { build_ctx.set_state_store(ctx.component_states) };
-        let mut path = Vec::new();
-        persist_widget_state(ctx.root_widget, &mut build_ctx, &mut path);
-        ctx.component_states.begin_rebuild();
-        path.clear();
-        rebuild_widget(ctx.root_widget, &mut build_ctx, &mut path);
-    });
-    ctx.component_states.finish_rebuild();
-
-    let mut widget_registry = WidgetRuntimeRegistry::default();
-    let root_id = runtime.with_tracking(SubscriberKind::Layout, || {
-        set_current_theme(ctx.theme.resolve_theme());
-        set_current_viewport(ctx.viewport);
-        let mut path = Vec::new();
-        add_widget_to_layout(
-            ctx.root_widget,
-            ctx.layout_tree,
-            ctx.text_system,
-            &mut widget_registry,
-            &mut path,
-            false,
-            true,
-        )
-    });
-    ctx.layout_tree.set_root(root_id);
-    *ctx.widget_registry = widget_registry;
-    ctx.layout_tree
-        .compute_layout(ctx.viewport.width.max(1.0), ctx.viewport.height.max(1.0));
-    *ctx.focused_path = remap_path(ctx.focused_path.take(), ctx.widget_registry);
-    *ctx.capture_path = remap_path(ctx.capture_path.take(), ctx.widget_registry);
-    sync_focus_manager(
-        ctx.focus_manager,
-        ctx.widget_registry,
-        ctx.focused_path.as_ref(),
-    );
-    *ctx.needs_layout = false;
-    *ctx.needs_repaint = true;
-
-    let mut effects = PlatformEffects::default();
-    effects.push(PlatformEffect::SyncTextInput);
-    effects.push(PlatformEffect::SyncPointerCapture);
-    effects
-}
-
-pub(crate) fn handle_input_event(
-    ctx: RuntimeCoreContext<'_>,
-    event: InputEvent,
-    clipboard_text: Option<String>,
-) -> PlatformEffects {
-    let mapper = ActionMapper::with_shortcut_profile(ctx.shortcut_profile);
-    let mut handled_focus_navigation = false;
-    let mut dispatch_event = event.clone();
-    let mut effects = PlatformEffects::default();
-
-    if let Some(Action::Standard(action)) = mapper.map_event(&event) {
-        match action {
-            StandardAction::FocusNext | StandardAction::FocusPrevious => {
-                let next_focus = move_focus_path(
-                    ctx.focused_path.as_ref(),
-                    ctx.widget_registry,
-                    matches!(action, StandardAction::FocusNext),
-                );
-                let focus_changed = apply_focus_change(
-                    ctx.root_widget,
-                    ctx.focus_manager,
-                    ctx.widget_registry,
-                    ctx.focused_path,
-                    next_focus,
-                );
-                if focus_changed {
-                    *ctx.ime_composing = false;
-                    *ctx.needs_repaint = true;
-                    effects.push(PlatformEffect::SyncTextInput);
-                }
-                handled_focus_navigation = true;
-            }
-            StandardAction::Paste
-                if focused_text_editor_state(ctx.widget_registry, ctx.focused_path.as_deref())
-                    .is_some() =>
-            {
-                let Some(text) = clipboard_text else {
-                    return effects;
-                };
-                dispatch_event = InputEvent::Paste { text };
-            }
-            _ => {}
-        }
-    }
-
-    if handled_focus_navigation {
-        return effects;
-    }
-
-    let current_focus_id = ctx
-        .focused_path
-        .as_ref()
-        .and_then(|path| ctx.widget_registry.id_for_path(path));
-    let current_capture_path = ctx.capture_path.clone();
-    let outcome = ctx.signal_runtime.run_with_current(|| {
-        with_shortcut_profile(ctx.shortcut_profile, || {
-            dispatch_widget_event(
-                ctx.root_widget,
-                ctx.layout_tree,
-                current_focus_id,
-                current_capture_path.as_ref(),
-                &dispatch_event,
-            )
-        })
-    });
-
-    if outcome.commands.request_focus || outcome.commands.clear_focus {
-        let focus_changed = apply_focus_change(
-            ctx.root_widget,
-            ctx.focus_manager,
-            ctx.widget_registry,
-            ctx.focused_path,
-            outcome.focus_path.clone(),
-        );
-        if focus_changed {
-            if focused_text_editor_state(ctx.widget_registry, ctx.focused_path.as_deref()).is_none()
-            {
-                *ctx.ime_composing = false;
-            }
-            *ctx.needs_repaint = true;
-            effects.push(PlatformEffect::SyncTextInput);
-        }
-    }
-
-    if outcome.commands.capture_pointer || outcome.commands.release_pointer {
-        *ctx.capture_path = outcome.capture_path;
-        *ctx.needs_repaint = true;
-        effects.push(PlatformEffect::SyncPointerCapture);
-    }
-
-    if let Some(text) = outcome.commands.clipboard_write {
-        effects.push(PlatformEffect::WriteClipboard(text));
-    }
-
-    if outcome.commands.request_paint {
-        *ctx.needs_repaint = true;
-    }
-    if outcome.commands.request_layout {
-        *ctx.needs_layout = true;
-    }
-
-    run_signal_effects(&ctx.signal_runtime, ctx.needs_layout, ctx.needs_repaint);
-
-    effects
-}
-
-pub(crate) fn handle_accessibility_action(
-    ctx: RuntimeCoreContext<'_>,
-    node_id: u64,
-    action: AccessibilityAction,
-    value: Option<String>,
-) -> PlatformEffects {
-    let Some(path) = ctx
-        .widget_registry
-        .path_for_accessibility_node(node_id)
-        .map(ToOwned::to_owned)
-    else {
-        return PlatformEffects::default();
-    };
-
-    let mut effects = PlatformEffects::default();
-    match action {
-        AccessibilityAction::Focus => {
-            let focus_changed = apply_focus_change(
-                ctx.root_widget,
-                ctx.focus_manager,
-                ctx.widget_registry,
-                ctx.focused_path,
-                Some(path),
-            );
-            if focus_changed {
-                *ctx.ime_composing = false;
-                *ctx.needs_repaint = true;
-                effects.push(PlatformEffect::SyncTextInput);
-            }
-        }
-        action => {
-            let handled = with_widget_mut(ctx.root_widget, &path, |widget| {
-                widget.handle_accessibility_action(action, value.clone())
-            })
-            .unwrap_or(false);
-            if handled {
-                if matches!(action, AccessibilityAction::SetValue) {
-                    *ctx.needs_layout = true;
-                }
-                *ctx.needs_repaint = true;
-            }
-        }
-    }
-
-    run_signal_effects(&ctx.signal_runtime, ctx.needs_layout, ctx.needs_repaint);
-
-    effects
 }
 
 fn run_signal_effects(

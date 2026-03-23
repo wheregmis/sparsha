@@ -3,6 +3,15 @@ use sparsha_input::ShortcutProfile;
 use sparsha_widgets::TextEditorState;
 
 pub(crate) mod events;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod native;
+#[cfg(target_arch = "wasm32")]
+pub(crate) mod web;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use native::NativePlatform;
+#[cfg(target_arch = "wasm32")]
+pub(crate) use web::WebPlatform;
 
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

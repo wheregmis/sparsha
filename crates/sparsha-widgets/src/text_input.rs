@@ -707,7 +707,9 @@ mod tests {
     use crate::{
         set_current_theme, set_current_viewport, PaintCommands, PaintContext, Theme, ViewportInfo,
     };
-    use sparsha_input::{FocusManager, InputEvent, KeyboardEvent, Modifiers};
+    use sparsha_input::{
+        with_shortcut_profile, FocusManager, InputEvent, KeyboardEvent, Modifiers, ShortcutProfile,
+    };
     use sparsha_layout::LayoutTree;
     use sparsha_render::DrawList;
     use sparsha_text::TextSystem;
@@ -728,15 +730,7 @@ mod tests {
     }
 
     fn primary_modifiers() -> Modifiers {
-        #[cfg(any(target_os = "macos", target_arch = "wasm32"))]
-        {
-            Modifiers::META
-        }
-
-        #[cfg(not(any(target_os = "macos", target_arch = "wasm32")))]
-        {
-            Modifiers::CONTROL
-        }
+        ShortcutProfile::ControlPrimary.primary_modifiers()
     }
 
     #[test]
@@ -809,82 +803,89 @@ mod tests {
 
     #[test]
     fn copy_cut_paste_and_undo_roundtrip() {
-        reset_viewport();
-        let changes = Arc::new(Mutex::new(Vec::new()));
-        let changes_for_cb = Arc::clone(&changes);
-        let mut input = TextInput::new()
-            .value("hello")
-            .on_change(move |value| changes_for_cb.lock().unwrap().push(value.to_owned()));
-        input.set_id(Default::default());
+        with_shortcut_profile(ShortcutProfile::ControlPrimary, || {
+            reset_viewport();
+            let changes = Arc::new(Mutex::new(Vec::new()));
+            let changes_for_cb = Arc::clone(&changes);
+            let mut input = TextInput::new()
+                .value("hello")
+                .on_change(move |value| changes_for_cb.lock().unwrap().push(value.to_owned()));
+            input.set_id(Default::default());
 
-        let layout = layout_bounds(0.0, 0.0, 240.0, 36.0);
-        let layout_tree = LayoutTree::new();
-        let mut focus = FocusManager::new();
-        focus.set_focus(input.id());
+            let layout = layout_bounds(0.0, 0.0, 240.0, 36.0);
+            let layout_tree = LayoutTree::new();
+            let mut focus = FocusManager::new();
+            focus.set_focus(input.id());
 
-        input.editor.select_all();
-        let mut copy_ctx = mock_event_context(layout, &layout_tree, &mut focus, input.id(), false);
-        input.event(
-            &mut copy_ctx,
-            &InputEvent::KeyDown {
-                event: KeyboardEvent {
-                    key: Key::Character("c".into()),
-                    modifiers: primary_modifiers(),
-                    ..Default::default()
+            input.editor.select_all();
+            let mut copy_ctx =
+                mock_event_context(layout, &layout_tree, &mut focus, input.id(), false);
+            input.event(
+                &mut copy_ctx,
+                &InputEvent::KeyDown {
+                    event: KeyboardEvent {
+                        key: Key::Character("c".into()),
+                        modifiers: primary_modifiers(),
+                        ..Default::default()
+                    },
                 },
-            },
-        );
-        assert_eq!(copy_ctx.commands.clipboard_write.as_deref(), Some("hello"));
+            );
+            assert_eq!(copy_ctx.commands.clipboard_write.as_deref(), Some("hello"));
 
-        let mut cut_ctx = mock_event_context(layout, &layout_tree, &mut focus, input.id(), false);
-        input.event(
-            &mut cut_ctx,
-            &InputEvent::KeyDown {
-                event: KeyboardEvent {
-                    key: Key::Character("x".into()),
-                    modifiers: primary_modifiers(),
-                    ..Default::default()
+            let mut cut_ctx =
+                mock_event_context(layout, &layout_tree, &mut focus, input.id(), false);
+            input.event(
+                &mut cut_ctx,
+                &InputEvent::KeyDown {
+                    event: KeyboardEvent {
+                        key: Key::Character("x".into()),
+                        modifiers: primary_modifiers(),
+                        ..Default::default()
+                    },
                 },
-            },
-        );
-        assert_eq!(input.get_value(), "");
-        assert_eq!(cut_ctx.commands.clipboard_write.as_deref(), Some("hello"));
+            );
+            assert_eq!(input.get_value(), "");
+            assert_eq!(cut_ctx.commands.clipboard_write.as_deref(), Some("hello"));
 
-        let mut paste_ctx = mock_event_context(layout, &layout_tree, &mut focus, input.id(), false);
-        input.event(
-            &mut paste_ctx,
-            &InputEvent::Paste {
-                text: "world".to_owned(),
-            },
-        );
-        assert_eq!(input.get_value(), "world");
-
-        let mut undo_ctx = mock_event_context(layout, &layout_tree, &mut focus, input.id(), false);
-        input.event(
-            &mut undo_ctx,
-            &InputEvent::KeyDown {
-                event: KeyboardEvent {
-                    key: Key::Character("z".into()),
-                    modifiers: primary_modifiers(),
-                    ..Default::default()
+            let mut paste_ctx =
+                mock_event_context(layout, &layout_tree, &mut focus, input.id(), false);
+            input.event(
+                &mut paste_ctx,
+                &InputEvent::Paste {
+                    text: "world".to_owned(),
                 },
-            },
-        );
-        assert_eq!(input.get_value(), "");
+            );
+            assert_eq!(input.get_value(), "world");
 
-        let mut redo_ctx = mock_event_context(layout, &layout_tree, &mut focus, input.id(), false);
-        input.event(
-            &mut redo_ctx,
-            &InputEvent::KeyDown {
-                event: KeyboardEvent {
-                    key: Key::Character("z".into()),
-                    modifiers: primary_modifiers() | Modifiers::SHIFT,
-                    ..Default::default()
+            let mut undo_ctx =
+                mock_event_context(layout, &layout_tree, &mut focus, input.id(), false);
+            input.event(
+                &mut undo_ctx,
+                &InputEvent::KeyDown {
+                    event: KeyboardEvent {
+                        key: Key::Character("z".into()),
+                        modifiers: primary_modifiers(),
+                        ..Default::default()
+                    },
                 },
-            },
-        );
-        assert_eq!(input.get_value(), "world");
-        assert!(!changes.lock().unwrap().is_empty());
+            );
+            assert_eq!(input.get_value(), "");
+
+            let mut redo_ctx =
+                mock_event_context(layout, &layout_tree, &mut focus, input.id(), false);
+            input.event(
+                &mut redo_ctx,
+                &InputEvent::KeyDown {
+                    event: KeyboardEvent {
+                        key: Key::Character("z".into()),
+                        modifiers: primary_modifiers() | Modifiers::SHIFT,
+                        ..Default::default()
+                    },
+                },
+            );
+            assert_eq!(input.get_value(), "world");
+            assert!(!changes.lock().unwrap().is_empty());
+        });
     }
 
     #[test]

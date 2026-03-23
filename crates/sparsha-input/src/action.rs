@@ -325,6 +325,7 @@ impl ActionContext {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ShortcutProfile;
     use ui_events::keyboard::Modifiers;
 
     #[test]
@@ -377,21 +378,11 @@ mod tests {
 
     #[test]
     fn test_space_with_primary_shortcut_modifiers_does_not_activate() {
-        let mapper = ActionMapper::new();
+        let mapper = ActionMapper::with_shortcut_profile(ShortcutProfile::ControlPrimary);
         let event = InputEvent::KeyDown {
             event: KeyboardEvent {
                 key: Key::Character(" ".to_owned()),
-                modifiers: {
-                    #[cfg(any(target_os = "macos", target_arch = "wasm32"))]
-                    {
-                        Modifiers::META
-                    }
-
-                    #[cfg(not(any(target_os = "macos", target_arch = "wasm32")))]
-                    {
-                        Modifiers::CONTROL
-                    }
-                },
+                modifiers: ShortcutProfile::ControlPrimary.primary_modifiers(),
                 ..Default::default()
             },
         };
@@ -442,38 +433,18 @@ mod tests {
 
     #[test]
     fn test_primary_shortcuts_map_copy_and_word_movement() {
-        let mapper = ActionMapper::new();
+        let mapper = ActionMapper::with_shortcut_profile(ShortcutProfile::ControlPrimary);
         let copy = InputEvent::KeyDown {
             event: KeyboardEvent {
                 key: Key::Character("c".into()),
-                modifiers: {
-                    #[cfg(any(target_os = "macos", target_arch = "wasm32"))]
-                    {
-                        Modifiers::META
-                    }
-
-                    #[cfg(not(any(target_os = "macos", target_arch = "wasm32")))]
-                    {
-                        Modifiers::CONTROL
-                    }
-                },
+                modifiers: ShortcutProfile::ControlPrimary.primary_modifiers(),
                 ..Default::default()
             },
         };
         let move_word = InputEvent::KeyDown {
             event: KeyboardEvent {
                 key: Key::Named(NamedKey::ArrowRight),
-                modifiers: {
-                    #[cfg(any(target_os = "macos", target_arch = "wasm32"))]
-                    {
-                        Modifiers::META
-                    }
-
-                    #[cfg(not(any(target_os = "macos", target_arch = "wasm32")))]
-                    {
-                        Modifiers::CONTROL
-                    }
-                },
+                modifiers: ShortcutProfile::ControlPrimary.primary_modifiers(),
                 ..Default::default()
             },
         };

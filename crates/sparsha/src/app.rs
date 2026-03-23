@@ -1,24 +1,18 @@
 //! Application runner and main event loop.
 
 #[cfg(not(target_arch = "wasm32"))]
-use crate::accessibility::{action_from_accesskit, AccessibilityTreeSnapshot};
+use crate::accessibility::action_from_accesskit;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::component::ComponentStateStore;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::platform::events::{NativeEventTranslator, NativeKeyboardDispatch};
 #[cfg(not(target_arch = "wasm32"))]
-use crate::platform::{
-    AccessibilityBackend, ClipboardService, PlatformCapabilities, PlatformEffect, PlatformFeature,
-    PlatformId, PointerCaptureService, TextInputService,
-};
+use crate::platform::{NativePlatform, PlatformId};
 use crate::router::Router;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::router::RouterHost;
 #[cfg(not(target_arch = "wasm32"))]
-use crate::runtime_core::{
-    build_layout as build_runtime_layout, focused_text_editor_state, handle_accessibility_action,
-    handle_input_event, refresh_accessibility_tree, RuntimeCoreContext,
-};
+use crate::runtime_core::{focused_text_editor_state, RuntimeCoreContext, RuntimeHost};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::runtime_widget::{WidgetPath, WidgetRuntimeRegistry};
 use sparsha_core::Color;
@@ -400,9 +394,7 @@ struct AppRunner {
 #[cfg(not(target_arch = "wasm32"))]
 struct AppState {
     navigator: crate::router::Navigator,
-    platform_id: PlatformId,
-    platform_capabilities: PlatformCapabilities,
-    event_translator: NativeEventTranslator,
+    platform: NativePlatform,
     window: &'static winit::window::Window,
     device: Device,
     queue: Queue,
@@ -424,10 +416,7 @@ struct AppState {
     mouse_pos: glam::Vec2,
     modifiers: Modifiers,
     scale_factor: f32,
-    clipboard: Option<arboard::Clipboard>,
     ime_composing: bool,
-    accessibility_snapshot: Arc<Mutex<AccessibilityTreeSnapshot>>,
-    accessibility_adapter: Option<accesskit_winit::Adapter>,
     needs_layout: bool,
     needs_repaint: bool,
 }
@@ -440,6 +429,30 @@ impl AppState {
 
     fn focused_text_editor_state(&self) -> Option<&sparsha_widgets::TextEditorState> {
         focused_text_editor_state(&self.widget_registry, self.focused_path.as_deref())
+    }
+
+    fn runtime_host(&mut self) -> RuntimeHost<'_> {
+        let viewport = self.logical_viewport();
+        let shortcut_profile = self.platform.shortcut_profile();
+        RuntimeHost::from(RuntimeCoreContext {
+            theme: &self.theme,
+            navigator: self.navigator.clone(),
+            root_widget: self.root_widget.as_mut(),
+            layout_tree: &mut self.layout_tree,
+            widget_registry: &mut self.widget_registry,
+            component_states: &mut self.component_states,
+            focus_manager: &mut self.focus_manager,
+            focused_path: &mut self.focused_path,
+            capture_path: &mut self.capture_path,
+            signal_runtime: self.signal_runtime.clone(),
+            task_runtime: self.task_runtime.clone(),
+            text_system: &mut self.text_system,
+            viewport,
+            shortcut_profile,
+            ime_composing: &mut self.ime_composing,
+            needs_layout: &mut self.needs_layout,
+            needs_repaint: &mut self.needs_repaint,
+        })
     }
 
     fn sync_window_metrics(&mut self) -> bool {
@@ -464,172 +477,6 @@ impl AppState {
         }
 
         changed
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-struct NativeClipboardBridge<'a> {
-    clipboard: &'a mut Option<arboard::Clipboard>,
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl ClipboardService for NativeClipboardBridge<'_> {
-    fn read_text(&mut self) -> Option<String> {
-        let clipboard = self.clipboard.as_mut()?;
-        match clipboard.get_text() {
-            Ok(text) => Some(text),
-            Err(err) => {
-                log::warn!("failed to read clipboard text: {err}");
-                None
-            }
-        }
-    }
-
-    fn write_text(&mut self, text: &str) {
-        let Some(clipboard) = self.clipboard.as_mut() else {
-            return;
-        };
-        if let Err(err) = clipboard.set_text(text.to_owned()) {
-            log::warn!("failed to write clipboard text: {err}");
-        }
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-struct NativeTextInputBridge<'a> {
-    window: &'a winit::window::Window,
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl TextInputService for NativeTextInputBridge<'_> {
-    fn sync_editor_state(
-        &mut self,
-        editor_state: Option<&sparsha_widgets::TextEditorState>,
-        _suppress_bridge: bool,
-    ) {
-        set_native_ime_allowed(self.window, editor_state.is_some());
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-struct NativePointerCaptureBridge;
-
-#[cfg(not(target_arch = "wasm32"))]
-impl PointerCaptureService for NativePointerCaptureBridge {
-    fn sync_capture(&mut self, _has_capture: bool) {}
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-struct NativeAccessibilityBridge<'a> {
-    snapshot: &'a Arc<Mutex<AccessibilityTreeSnapshot>>,
-    adapter: Option<&'a mut accesskit_winit::Adapter>,
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl AccessibilityBackend for NativeAccessibilityBridge<'_> {
-    fn update_accessibility(&mut self, title: &str, snapshot: &AccessibilityTreeSnapshot) {
-        match self.snapshot.lock() {
-            Ok(mut guard) => {
-                *guard = snapshot.clone();
-            }
-            Err(poisoned) => {
-                log::warn!("recovering from poisoned accessibility snapshot");
-                *poisoned.into_inner() = snapshot.clone();
-            }
-        }
-
-        if let Some(adapter) = self.adapter.as_mut() {
-            adapter.update_if_active(|| snapshot.to_tree_update(title));
-        }
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn feature_for_effect(effect: &PlatformEffect) -> PlatformFeature {
-    match effect {
-        PlatformEffect::SyncTextInput => PlatformFeature::ImeComposition,
-        PlatformEffect::SyncPointerCapture => PlatformFeature::PointerCapture,
-        PlatformEffect::WriteClipboard(_) => PlatformFeature::ClipboardWrite,
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn log_effect_support(state: &AppState, effect: &PlatformEffect) {
-    let feature = feature_for_effect(effect);
-    let support = state.platform_capabilities.support(feature);
-    if matches!(
-        support.support,
-        crate::platform::SupportLevel::Partial | crate::platform::SupportLevel::Unsupported
-    ) {
-        log::warn!(
-            "platform {:?} handling {:?} via {:?}: {}",
-            state.platform_id,
-            feature,
-            support.fallback,
-            support.rationale
-        );
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn apply_native_platform_effects(
-    state: &mut AppState,
-    title: &str,
-    effects: &crate::platform::PlatformEffects,
-) {
-    for effect in effects.iter() {
-        log_effect_support(state, effect);
-    }
-    let focused_editor_state = state.focused_text_editor_state().cloned();
-    let has_capture = state.capture_path.is_some();
-    let mut clipboard = NativeClipboardBridge {
-        clipboard: &mut state.clipboard,
-    };
-    let mut text_input = NativeTextInputBridge {
-        window: state.window,
-    };
-    let mut pointer_capture = NativePointerCaptureBridge;
-
-    for effect in effects.iter() {
-        match effect {
-            PlatformEffect::SyncTextInput => {
-                text_input.sync_editor_state(focused_editor_state.as_ref(), false)
-            }
-            PlatformEffect::SyncPointerCapture => pointer_capture.sync_capture(has_capture),
-            PlatformEffect::WriteClipboard(text) => clipboard.write_text(text),
-        }
-    }
-
-    let snapshot = refresh_accessibility_tree(
-        &mut state.widget_registry,
-        state.root_widget.as_ref(),
-        &state.layout_tree,
-        state.focused_path.as_ref(),
-    );
-    let mut accessibility = NativeAccessibilityBridge {
-        snapshot: &state.accessibility_snapshot,
-        adapter: state.accessibility_adapter.as_mut(),
-    };
-    accessibility.update_accessibility(title, &snapshot);
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-struct NativeAccessibilityActivationHandler {
-    title: String,
-    snapshot: Arc<Mutex<AccessibilityTreeSnapshot>>,
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl accesskit::ActivationHandler for NativeAccessibilityActivationHandler {
-    fn request_initial_tree(&mut self) -> Option<accesskit::TreeUpdate> {
-        let snapshot = match self.snapshot.lock() {
-            Ok(guard) => guard.clone(),
-            Err(poisoned) => {
-                log::warn!("recovering from poisoned accessibility snapshot");
-                poisoned.into_inner().clone()
-            }
-        };
-        Some(snapshot.to_tree_update(&self.title))
     }
 }
 
@@ -673,10 +520,20 @@ impl AppRunner {
         let Some(state) = self.state.as_mut() else {
             return;
         };
-        apply_native_platform_effects(
-            state,
+        let (snapshot, focused_editor_state, has_capture) = {
+            let mut host = state.runtime_host();
+            let snapshot = host.refresh_accessibility();
+            let focused_editor_state = host.focused_text_editor_state().cloned();
+            let has_capture = host.has_pointer_capture();
+            (snapshot, focused_editor_state, has_capture)
+        };
+        state.platform.apply_effects(
+            state.window,
             &self.config.title,
             &crate::platform::PlatformEffects::default(),
+            focused_editor_state.as_ref(),
+            has_capture,
+            &snapshot,
         );
     }
 
@@ -687,32 +544,23 @@ impl AppRunner {
         let Some(state) = self.state.as_mut() else {
             return;
         };
-        let viewport = state.logical_viewport();
-        let effects = handle_accessibility_action(
-            RuntimeCoreContext {
-                theme: &state.theme,
-                navigator: state.navigator.clone(),
-                root_widget: state.root_widget.as_mut(),
-                layout_tree: &mut state.layout_tree,
-                widget_registry: &mut state.widget_registry,
-                component_states: &mut state.component_states,
-                focus_manager: &mut state.focus_manager,
-                focused_path: &mut state.focused_path,
-                capture_path: &mut state.capture_path,
-                signal_runtime: state.signal_runtime.clone(),
-                task_runtime: state.task_runtime.clone(),
-                text_system: &mut state.text_system,
-                viewport,
-                shortcut_profile: state.platform_capabilities.shortcut_profile(),
-                ime_composing: &mut state.ime_composing,
-                needs_layout: &mut state.needs_layout,
-                needs_repaint: &mut state.needs_repaint,
-            },
-            request.node_id,
-            request.action,
-            request.value,
+        let (effects, snapshot, focused_editor_state, has_capture) = {
+            let mut host = state.runtime_host();
+            let effects =
+                host.handle_accessibility_action(request.node_id, request.action, request.value);
+            let snapshot = host.refresh_accessibility();
+            let focused_editor_state = host.focused_text_editor_state().cloned();
+            let has_capture = host.has_pointer_capture();
+            (effects, snapshot, focused_editor_state, has_capture)
+        };
+        state.platform.apply_effects(
+            state.window,
+            &self.config.title,
+            &effects,
+            focused_editor_state.as_ref(),
+            has_capture,
+            &snapshot,
         );
-        apply_native_platform_effects(state, &self.config.title, &effects);
         if let Some(state) = self.state.as_ref() {
             if state.needs_layout || state.needs_repaint {
                 state.window.request_redraw();
@@ -724,27 +572,22 @@ impl AppRunner {
         let Some(state) = self.state.as_mut() else {
             return;
         };
-        let viewport = state.logical_viewport();
-        let effects = build_runtime_layout(RuntimeCoreContext {
-            theme: &state.theme,
-            navigator: state.navigator.clone(),
-            root_widget: state.root_widget.as_mut(),
-            layout_tree: &mut state.layout_tree,
-            widget_registry: &mut state.widget_registry,
-            component_states: &mut state.component_states,
-            focus_manager: &mut state.focus_manager,
-            focused_path: &mut state.focused_path,
-            capture_path: &mut state.capture_path,
-            signal_runtime: state.signal_runtime.clone(),
-            task_runtime: state.task_runtime.clone(),
-            text_system: &mut state.text_system,
-            viewport,
-            shortcut_profile: state.platform_capabilities.shortcut_profile(),
-            ime_composing: &mut state.ime_composing,
-            needs_layout: &mut state.needs_layout,
-            needs_repaint: &mut state.needs_repaint,
-        });
-        apply_native_platform_effects(state, &self.config.title, &effects);
+        let (effects, snapshot, focused_editor_state, has_capture) = {
+            let mut host = state.runtime_host();
+            let effects = host.build_layout();
+            let snapshot = host.refresh_accessibility();
+            let focused_editor_state = host.focused_text_editor_state().cloned();
+            let has_capture = host.has_pointer_capture();
+            (effects, snapshot, focused_editor_state, has_capture)
+        };
+        state.platform.apply_effects(
+            state.window,
+            &self.config.title,
+            &effects,
+            focused_editor_state.as_ref(),
+            has_capture,
+            &snapshot,
+        );
     }
 
     fn paint(&mut self) {
@@ -859,37 +702,23 @@ impl AppRunner {
         let Some(state) = self.state.as_mut() else {
             return;
         };
-        let clipboard_text = {
-            let mut clipboard = NativeClipboardBridge {
-                clipboard: &mut state.clipboard,
-            };
-            clipboard.read_text()
+        let clipboard_text = state.platform.read_clipboard_text();
+        let (effects, snapshot, focused_editor_state, has_capture) = {
+            let mut host = state.runtime_host();
+            let effects = host.handle_input_event(event, clipboard_text);
+            let snapshot = host.refresh_accessibility();
+            let focused_editor_state = host.focused_text_editor_state().cloned();
+            let has_capture = host.has_pointer_capture();
+            (effects, snapshot, focused_editor_state, has_capture)
         };
-        let viewport = state.logical_viewport();
-        let effects = handle_input_event(
-            RuntimeCoreContext {
-                theme: &state.theme,
-                navigator: state.navigator.clone(),
-                root_widget: state.root_widget.as_mut(),
-                layout_tree: &mut state.layout_tree,
-                widget_registry: &mut state.widget_registry,
-                component_states: &mut state.component_states,
-                focus_manager: &mut state.focus_manager,
-                focused_path: &mut state.focused_path,
-                capture_path: &mut state.capture_path,
-                signal_runtime: state.signal_runtime.clone(),
-                task_runtime: state.task_runtime.clone(),
-                text_system: &mut state.text_system,
-                viewport,
-                shortcut_profile: state.platform_capabilities.shortcut_profile(),
-                ime_composing: &mut state.ime_composing,
-                needs_layout: &mut state.needs_layout,
-                needs_repaint: &mut state.needs_repaint,
-            },
-            event,
-            clipboard_text,
+        state.platform.apply_effects(
+            state.window,
+            &self.config.title,
+            &effects,
+            focused_editor_state.as_ref(),
+            has_capture,
+            &snapshot,
         );
-        apply_native_platform_effects(state, &self.config.title, &effects);
         if let Some(state) = self.state.as_ref() {
             if state.needs_repaint || state.needs_layout {
                 state.window.request_redraw();
@@ -1004,21 +833,11 @@ impl winit::application::ApplicationHandler<NativeUserEvent> for AppRunner {
             let root_widget = signal_runtime
                 .run_with_current(|| Box::new(RouterHost::new(router.clone())) as Box<dyn Widget>);
 
-            let scale_factor = window.scale_factor() as f32;
             let platform_id = PlatformId::current_native();
-            let clipboard = match arboard::Clipboard::new() {
-                Ok(clipboard) => Some(clipboard),
-                Err(err) => {
-                    log::warn!("native clipboard unavailable: {err}");
-                    None
-                }
-            };
 
             self.state = Some(AppState {
                 navigator: self.router.navigator(),
-                platform_id,
-                platform_capabilities: PlatformCapabilities::new(platform_id),
-                event_translator: NativeEventTranslator::new(platform_id),
+                platform: NativePlatform::new(platform_id),
                 window,
                 device,
                 queue,
@@ -1039,11 +858,8 @@ impl winit::application::ApplicationHandler<NativeUserEvent> for AppRunner {
                 start_time: Instant::now(),
                 mouse_pos: glam::Vec2::ZERO,
                 modifiers: Modifiers::default(),
-                scale_factor,
-                clipboard,
+                scale_factor: window.scale_factor() as f32,
                 ime_composing: false,
-                accessibility_snapshot: Arc::new(Mutex::new(AccessibilityTreeSnapshot::default())),
-                accessibility_adapter: None,
                 needs_layout: true,
                 needs_repaint: true,
             });
@@ -1052,17 +868,15 @@ impl winit::application::ApplicationHandler<NativeUserEvent> for AppRunner {
             self.build_layout();
 
             if let Some(state) = self.state.as_mut() {
-                let activation_handler = NativeAccessibilityActivationHandler {
-                    title: self.config.title.clone(),
-                    snapshot: Arc::clone(&state.accessibility_snapshot),
-                };
+                let activation_handler =
+                    state.platform.activation_handler(self.config.title.clone());
                 let adapter = accesskit_winit::Adapter::with_mixed_handlers(
                     event_loop,
                     state.window,
                     activation_handler,
                     self.event_loop_proxy.clone(),
                 );
-                state.accessibility_adapter = Some(adapter);
+                state.platform.set_accessibility_adapter(adapter);
                 state.window.set_visible(true);
                 state.sync_window_metrics();
             }
@@ -1082,7 +896,7 @@ impl winit::application::ApplicationHandler<NativeUserEvent> for AppRunner {
         event: WindowEvent,
     ) {
         if let Some(state) = self.state.as_mut() {
-            if let Some(adapter) = state.accessibility_adapter.as_mut() {
+            if let Some(adapter) = state.platform.accessibility_adapter_mut() {
                 adapter.process_event(state.window, &event);
             }
         }
@@ -1109,7 +923,7 @@ impl winit::application::ApplicationHandler<NativeUserEvent> for AppRunner {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 let pos = if let Some(state) = self.state.as_mut() {
-                    let pos = state.event_translator.cursor_position(
+                    let pos = state.platform.event_translator().cursor_position(
                         position.x as f32,
                         position.y as f32,
                         state.scale_factor,
@@ -1130,7 +944,7 @@ impl winit::application::ApplicationHandler<NativeUserEvent> for AppRunner {
                 let button = self
                     .state
                     .as_ref()
-                    .map(|state| state.event_translator.map_mouse_button(button))
+                    .map(|state| state.platform.event_translator().map_mouse_button(button))
                     .unwrap_or(PointerButton::Primary);
 
                 match btn_state {
@@ -1163,7 +977,10 @@ impl winit::application::ApplicationHandler<NativeUserEvent> for AppRunner {
             }
             WindowEvent::ModifiersChanged(modifiers) => {
                 if let Some(state) = self.state.as_mut() {
-                    state.modifiers = state.event_translator.map_modifiers(modifiers.state());
+                    state.modifiers = state
+                        .platform
+                        .event_translator()
+                        .map_modifiers(modifiers.state());
                 }
             }
             WindowEvent::KeyboardInput { event, .. } => {
@@ -1177,7 +994,7 @@ impl winit::application::ApplicationHandler<NativeUserEvent> for AppRunner {
                     .state
                     .as_ref()
                     .map(|state| {
-                        state.event_translator.translate_keyboard(
+                        state.platform.event_translator().translate_keyboard(
                             &key_without_modifiers.as_ref(),
                             event.state,
                             modifiers,
@@ -1201,7 +1018,10 @@ impl winit::application::ApplicationHandler<NativeUserEvent> for AppRunner {
                     return;
                 };
                 let was_composing = state.ime_composing;
-                let translated = state.event_translator.translate_ime(&event, was_composing);
+                let translated = state
+                    .platform
+                    .event_translator()
+                    .translate_ime(&event, was_composing);
                 match event {
                     winit::event::Ime::Preedit(_, _) => state.ime_composing = true,
                     winit::event::Ime::Commit(_) | winit::event::Ime::Disabled => {

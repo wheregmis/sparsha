@@ -24,6 +24,8 @@ Internal/provisional:
 - native AccessKit adapter internals
 - web semantic DOM internals
 - hybrid surface manager internals
+- internal platform adapters under `crates/sparsha/src/platform/`
+- internal runtime orchestration under `crates/sparsha/src/runtime_core.rs`, including `RuntimeHost`
 
 ## `sparsha-core`
 

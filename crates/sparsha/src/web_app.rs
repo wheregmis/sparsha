@@ -4,21 +4,14 @@
 
 use crate::tasks::{TaskRuntime, TaskStatus};
 use crate::{
-    accessibility::{AccessibilityTreeSnapshot, ACCESSIBILITY_ROOT_ID},
+    accessibility::AccessibilityTreeSnapshot,
     app::{AppConfig, AppRunError, AppTheme},
     component::ComponentStateStore,
     dom_renderer::{DomFrameSnapshot, DomRenderer},
     platform::events::WebEventTranslator,
-    platform::{
-        ClipboardService, PlatformCapabilities, PlatformEffect, PlatformFeature, PlatformId,
-        PointerCaptureService, TextInputService,
-    },
+    platform::WebPlatform,
     router::{hash_to_path, path_to_hash, Navigator, Router, RouterHost},
-    runtime_core::{
-        build_layout as build_runtime_layout, focused_text_editor_state,
-        handle_accessibility_action, handle_input_event, refresh_accessibility_tree,
-        RuntimeCoreContext,
-    },
+    runtime_core::{focused_text_editor_state, RuntimeCoreContext, RuntimeHost},
     runtime_widget::{WidgetPath, WidgetRuntimeRegistry},
     web_surface_manager::{HybridSurfaceManager, HybridSurfaceStatus, SurfaceFrame},
 };
@@ -29,8 +22,8 @@ use sparsha_render::DrawList;
 use sparsha_signals::{RuntimeHandle, SubscriberKind};
 use sparsha_text::TextSystem;
 use sparsha_widgets::{
-    set_current_theme, set_current_viewport, AccessibilityAction, AccessibilityRole, PaintCommands,
-    PaintContext, TextEditorState, ViewportInfo, Widget,
+    set_current_theme, set_current_viewport, AccessibilityAction, PaintCommands, PaintContext,
+    TextEditorState, ViewportInfo, Widget,
 };
 use std::{
     cell::{Cell, RefCell},
@@ -38,7 +31,7 @@ use std::{
 };
 use wasm_bindgen::{closure::Closure, JsCast};
 use web_sys::{
-    ClipboardEvent, CompositionEvent as WebCompositionEvent, CustomEvent, Document, Element, Event,
+    ClipboardEvent, CompositionEvent as WebCompositionEvent, CustomEvent, Element, Event,
     HtmlElement, HtmlInputElement, HtmlTextAreaElement, InputEvent as WebInputEvent,
     KeyboardEvent as WebKeyboardEvent, MouseEvent, Touch, TouchEvent, TouchList, WheelEvent,
     Window,
@@ -63,9 +56,7 @@ pub(crate) fn run_dom_app(
         .map_err(|err| AppRunError::DomMount(format_js_error(&err)))?;
     let surface_manager = HybridSurfaceManager::new(dom_renderer.root())
         .map_err(|err| AppRunError::HybridSurfaceInit(format_js_error(&err)))?;
-    let text_input_bridge = WebTextInputBridge::new(&document, dom_renderer.root())
-        .map_err(|err| AppRunError::DomMount(format_js_error(&err)))?;
-    let semantic_dom = WebSemanticDomLayer::new(&document, dom_renderer.root())
+    let platform = WebPlatform::new(&document, dom_renderer.root())
         .map_err(|err| AppRunError::DomMount(format_js_error(&err)))?;
     let signal_runtime = RuntimeHandle::current_or_default();
     let task_runtime =
@@ -85,14 +76,11 @@ pub(crate) fn run_dom_app(
     let root_widget = signal_runtime.run_with_current(|| {
         Box::new(RouterHost::new(router_for_build.clone())) as Box<dyn Widget>
     });
-    let platform_id = PlatformId::Web;
 
     let mut state = WebAppState {
         config,
         theme,
-        platform_id,
-        platform_capabilities: PlatformCapabilities::new(platform_id),
-        event_translator: WebEventTranslator::new(),
+        platform,
         router_navigator: navigator,
         dom_renderer,
         text_system: TextSystem::new_headless(),
@@ -117,11 +105,7 @@ pub(crate) fn run_dom_app(
         needs_repaint: true,
         first_paint_emitted: false,
         surface_manager,
-        text_input_bridge,
-        semantic_dom,
-        pending_clipboard_write: None,
         ime_composing: false,
-        accessibility_text_focus_node: None,
         pending_surface_retry: false,
     };
     state.update_viewport();
@@ -146,9 +130,7 @@ pub(crate) fn run_dom_app(
 struct WebAppState {
     config: AppConfig,
     theme: AppTheme,
-    platform_id: PlatformId,
-    platform_capabilities: PlatformCapabilities,
-    event_translator: WebEventTranslator,
+    platform: WebPlatform,
     router_navigator: Navigator,
     dom_renderer: DomRenderer,
     text_system: TextSystem,
@@ -173,11 +155,7 @@ struct WebAppState {
     needs_repaint: bool,
     first_paint_emitted: bool,
     surface_manager: HybridSurfaceManager,
-    text_input_bridge: WebTextInputBridge,
-    semantic_dom: WebSemanticDomLayer,
-    pending_clipboard_write: Option<String>,
     ime_composing: bool,
-    accessibility_text_focus_node: Option<u64>,
     pending_surface_retry: bool,
 }
 
@@ -188,396 +166,6 @@ struct WebFrameSnapshot<'a> {
     viewport_width: f32,
     viewport_height: f32,
     accessibility: AccessibilityTreeSnapshot,
-}
-
-struct WebTextInputBridge {
-    element: HtmlTextAreaElement,
-    syncing: bool,
-}
-
-impl WebTextInputBridge {
-    fn new(
-        document: &web_sys::Document,
-        root: &web_sys::HtmlElement,
-    ) -> Result<Self, wasm_bindgen::JsValue> {
-        let element = document
-            .create_element("textarea")?
-            .dyn_into::<HtmlTextAreaElement>()?;
-        element.set_class_name("sparsha-text-editor-bridge");
-        element.set_attribute("aria-hidden", "true")?;
-        element.set_attribute("autocomplete", "off")?;
-        element.set_attribute("autocorrect", "off")?;
-        element.set_attribute("autocapitalize", "off")?;
-        element.set_attribute("spellcheck", "false")?;
-        let style = element.style();
-        style.set_property("position", "absolute")?;
-        style.set_property("left", "-10000px")?;
-        style.set_property("top", "0")?;
-        style.set_property("width", "1px")?;
-        style.set_property("height", "1px")?;
-        style.set_property("opacity", "0")?;
-        style.set_property("pointer-events", "none")?;
-        style.set_property("resize", "none")?;
-        style.set_property("overflow", "hidden")?;
-        style.set_property("white-space", "pre")?;
-        root.append_child(&element)?;
-        Ok(Self {
-            element,
-            syncing: false,
-        })
-    }
-
-    fn is_syncing(&self) -> bool {
-        self.syncing
-    }
-
-    fn element(&self) -> &HtmlTextAreaElement {
-        &self.element
-    }
-
-    fn sync(&mut self, editor_state: Option<&sparsha_widgets::TextEditorState>) {
-        self.syncing = true;
-        if let Some(state) = editor_state {
-            if self.element.value() != state.text {
-                self.element.set_value(&state.text);
-            }
-            let (selection_start, selection_end) = state.selection_range();
-            let _ = self
-                .element
-                .set_selection_start(Some(selection_start as u32));
-            let _ = self.element.set_selection_end(Some(selection_end as u32));
-            let _ = self.element.focus();
-        } else {
-            if !self.element.value().is_empty() {
-                self.element.set_value("");
-            }
-            let _ = self.element.blur();
-        }
-        self.syncing = false;
-    }
-}
-
-struct WebClipboardBridge<'a> {
-    pending_write: &'a mut Option<String>,
-}
-
-impl ClipboardService for WebClipboardBridge<'_> {
-    fn read_text(&mut self) -> Option<String> {
-        None
-    }
-
-    fn write_text(&mut self, text: &str) {
-        *self.pending_write = Some(text.to_owned());
-    }
-}
-
-struct WebTextInputService<'a> {
-    bridge: &'a mut WebTextInputBridge,
-}
-
-impl TextInputService for WebTextInputService<'_> {
-    fn sync_editor_state(
-        &mut self,
-        editor_state: Option<&sparsha_widgets::TextEditorState>,
-        suppress_bridge: bool,
-    ) {
-        if suppress_bridge {
-            self.bridge.sync(None);
-        } else {
-            self.bridge.sync(editor_state);
-        }
-    }
-}
-
-struct WebPointerCaptureBridge;
-
-impl PointerCaptureService for WebPointerCaptureBridge {
-    fn sync_capture(&mut self, _has_capture: bool) {}
-}
-
-fn web_feature_for_effect(effect: &PlatformEffect) -> PlatformFeature {
-    match effect {
-        PlatformEffect::SyncTextInput => PlatformFeature::TextInputBridge,
-        PlatformEffect::SyncPointerCapture => PlatformFeature::PointerCapture,
-        PlatformEffect::WriteClipboard(_) => PlatformFeature::ClipboardWrite,
-    }
-}
-
-fn log_web_effect_support(state: &WebAppState, effect: &PlatformEffect) {
-    let feature = web_feature_for_effect(effect);
-    let support = state.platform_capabilities.support(feature);
-    if matches!(
-        support.support,
-        crate::platform::SupportLevel::Partial | crate::platform::SupportLevel::Unsupported
-    ) {
-        log::warn!(
-            "platform {:?} handling {:?} via {:?}: {}",
-            state.platform_id,
-            feature,
-            support.fallback,
-            support.rationale
-        );
-    }
-}
-
-fn apply_web_platform_effects(state: &mut WebAppState, effects: &crate::platform::PlatformEffects) {
-    for effect in effects.iter() {
-        log_web_effect_support(state, effect);
-    }
-    let focused_editor_state = state.focused_text_editor_state().cloned();
-    let suppress_bridge = state.accessibility_text_focus_matches_widget_focus();
-    let has_capture = state.capture_path.is_some();
-    let mut clipboard = WebClipboardBridge {
-        pending_write: &mut state.pending_clipboard_write,
-    };
-    let mut text_input = WebTextInputService {
-        bridge: &mut state.text_input_bridge,
-    };
-    let mut pointer_capture = WebPointerCaptureBridge;
-
-    for effect in effects.iter() {
-        match effect {
-            PlatformEffect::SyncTextInput => {
-                text_input.sync_editor_state(focused_editor_state.as_ref(), suppress_bridge)
-            }
-            PlatformEffect::SyncPointerCapture => pointer_capture.sync_capture(has_capture),
-            PlatformEffect::WriteClipboard(text) => clipboard.write_text(text),
-        }
-    }
-
-    refresh_accessibility_tree(
-        &mut state.widget_registry,
-        state.root_widget.as_ref(),
-        &state.layout_tree,
-        state.focused_path.as_ref(),
-    );
-}
-
-struct WebSemanticDomLayer {
-    root: HtmlElement,
-}
-
-impl WebSemanticDomLayer {
-    fn new(document: &Document, parent: &HtmlElement) -> Result<Self, wasm_bindgen::JsValue> {
-        let root = document.create_element("div")?.dyn_into::<HtmlElement>()?;
-        root.set_class_name("sparsha-semantic-root");
-        let style = root.style();
-        style.set_property("position", "absolute")?;
-        style.set_property("inset", "0")?;
-        style.set_property("pointer-events", "none")?;
-        style.set_property("overflow", "visible")?;
-        style.set_property("background", "transparent")?;
-        style.set_property("z-index", "10")?;
-        parent.append_child(&root)?;
-        Ok(Self { root })
-    }
-
-    fn root(&self) -> &HtmlElement {
-        &self.root
-    }
-
-    fn render(&self, snapshot: &AccessibilityTreeSnapshot) -> Result<(), wasm_bindgen::JsValue> {
-        self.root.set_inner_html("");
-        let Some(document) = self.root.owner_document() else {
-            return Ok(());
-        };
-
-        let nodes = snapshot
-            .nodes
-            .iter()
-            .map(|node| (node.id, node))
-            .collect::<std::collections::HashMap<_, _>>();
-        for node_id in &snapshot.root_children {
-            self.append_node(&document, &nodes, *node_id, None)?;
-        }
-
-        if snapshot.focus != ACCESSIBILITY_ROOT_ID {
-            if let Some(element) = self
-                .root
-                .query_selector(&format!("[data-sparsha-a11y-node=\"{}\"]", snapshot.focus))?
-                .and_then(|element| element.dyn_into::<HtmlElement>().ok())
-            {
-                let active = document
-                    .active_element()
-                    .and_then(|node| node.get_attribute("data-sparsha-a11y-node"));
-                if active.as_deref() != Some(&snapshot.focus.to_string()) {
-                    let _ = element.focus();
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    fn append_node(
-        &self,
-        document: &Document,
-        nodes: &std::collections::HashMap<u64, &crate::accessibility::AccessibilityNodeSnapshot>,
-        node_id: u64,
-        parent_bounds: Option<sparsha_core::Rect>,
-    ) -> Result<(), wasm_bindgen::JsValue> {
-        let Some(node) = nodes.get(&node_id).copied() else {
-            return Ok(());
-        };
-        let element = create_semantic_element(document, node)?;
-        apply_semantic_bounds(&element, node.bounds, parent_bounds)?;
-        self.root.append_child(&element)?;
-        for child_id in &node.children {
-            self.append_child_node(document, &element, nodes, *child_id, Some(node.bounds))?;
-        }
-        Ok(())
-    }
-
-    fn append_child_node(
-        &self,
-        document: &Document,
-        parent: &HtmlElement,
-        nodes: &std::collections::HashMap<u64, &crate::accessibility::AccessibilityNodeSnapshot>,
-        node_id: u64,
-        parent_bounds: Option<sparsha_core::Rect>,
-    ) -> Result<(), wasm_bindgen::JsValue> {
-        let Some(node) = nodes.get(&node_id).copied() else {
-            return Ok(());
-        };
-        let element = create_semantic_element(document, node)?;
-        apply_semantic_bounds(&element, node.bounds, parent_bounds)?;
-        parent.append_child(&element)?;
-        for child_id in &node.children {
-            self.append_child_node(document, &element, nodes, *child_id, Some(node.bounds))?;
-        }
-        Ok(())
-    }
-}
-
-fn create_semantic_element(
-    document: &Document,
-    node: &crate::accessibility::AccessibilityNodeSnapshot,
-) -> Result<HtmlElement, wasm_bindgen::JsValue> {
-    let element = match node.role {
-        AccessibilityRole::Button => document
-            .create_element("button")?
-            .dyn_into::<HtmlElement>()?,
-        AccessibilityRole::CheckBox => {
-            let input = document
-                .create_element("input")?
-                .dyn_into::<HtmlInputElement>()?;
-            input.set_type("checkbox");
-            input.set_checked(node.checked.unwrap_or(false));
-            input.unchecked_into::<HtmlElement>()
-        }
-        AccessibilityRole::TextInput => {
-            let input = document
-                .create_element("input")?
-                .dyn_into::<HtmlInputElement>()?;
-            input.set_type("text");
-            input.set_value(node.value.as_deref().unwrap_or_default());
-            input.unchecked_into::<HtmlElement>()
-        }
-        AccessibilityRole::MultilineTextInput => {
-            let textarea = document
-                .create_element("textarea")?
-                .dyn_into::<HtmlTextAreaElement>()?;
-            textarea.set_value(node.value.as_deref().unwrap_or_default());
-            textarea.unchecked_into::<HtmlElement>()
-        }
-        _ => document.create_element("div")?.dyn_into::<HtmlElement>()?,
-    };
-
-    let style = element.style();
-    style.set_property("position", "absolute")?;
-    style.set_property("pointer-events", "none")?;
-    style.set_property("opacity", "0")?;
-    style.set_property("background", "transparent")?;
-    style.set_property("border", "0")?;
-    style.set_property("margin", "0")?;
-    style.set_property("padding", "0")?;
-    style.set_property("overflow", "hidden")?;
-    style.set_property("color", "transparent")?;
-    style.set_property("caret-color", "transparent")?;
-    style.set_property("outline", "none")?;
-
-    element.set_attribute("data-sparsha-a11y-node", &node.id.to_string())?;
-    if node.hidden {
-        style.set_property("display", "none")?;
-    }
-    if node.disabled {
-        element.set_attribute("disabled", "true")?;
-        element.set_attribute("aria-disabled", "true")?;
-    }
-    if let Some(label) = &node.label {
-        element.set_attribute("aria-label", label)?;
-        if matches!(
-            node.role,
-            AccessibilityRole::Label | AccessibilityRole::Button
-        ) {
-            element.set_text_content(Some(label));
-        }
-    }
-    if let Some(description) = &node.description {
-        element.set_attribute("aria-description", description)?;
-    }
-    if let Some(value) = &node.value {
-        match node.role {
-            AccessibilityRole::Label => element.set_text_content(Some(value)),
-            AccessibilityRole::ScrollView => {
-                element.set_attribute("aria-valuetext", value)?;
-            }
-            AccessibilityRole::GenericContainer | AccessibilityRole::List => {
-                element.set_attribute("aria-label", value)?;
-            }
-            _ => {}
-        }
-    }
-    if let Some(checked) = node.checked {
-        element.set_attribute("aria-checked", if checked { "true" } else { "false" })?;
-    }
-
-    match node.role {
-        AccessibilityRole::GenericContainer => {
-            element.set_attribute("role", "group")?;
-        }
-        AccessibilityRole::List => {
-            element.set_attribute("role", "list")?;
-        }
-        AccessibilityRole::ScrollView => {
-            element.set_attribute("role", "group")?;
-            element.set_attribute("aria-roledescription", "scroll view")?;
-        }
-        AccessibilityRole::Label => {}
-        AccessibilityRole::Button
-        | AccessibilityRole::CheckBox
-        | AccessibilityRole::TextInput
-        | AccessibilityRole::MultilineTextInput => {}
-    }
-
-    if node.actions.contains(&AccessibilityAction::Focus)
-        && !matches!(
-            node.role,
-            AccessibilityRole::Button
-                | AccessibilityRole::CheckBox
-                | AccessibilityRole::TextInput
-                | AccessibilityRole::MultilineTextInput
-        )
-    {
-        element.set_tab_index(0);
-    }
-
-    Ok(element)
-}
-
-fn apply_semantic_bounds(
-    element: &HtmlElement,
-    bounds: sparsha_core::Rect,
-    parent_bounds: Option<sparsha_core::Rect>,
-) -> Result<(), wasm_bindgen::JsValue> {
-    let origin_x = parent_bounds.map(|rect| rect.x).unwrap_or(0.0);
-    let origin_y = parent_bounds.map(|rect| rect.y).unwrap_or(0.0);
-    let style = element.style();
-    style.set_property("left", &format!("{}px", bounds.x - origin_x))?;
-    style.set_property("top", &format!("{}px", bounds.y - origin_y))?;
-    style.set_property("width", &format!("{}px", bounds.width.max(1.0)))?;
-    style.set_property("height", &format!("{}px", bounds.height.max(1.0)))?;
-    Ok(())
 }
 
 fn paint_widget_subtree(
@@ -669,8 +257,56 @@ impl WebAppState {
         web_viewport_info(self.viewport_width, self.viewport_height)
     }
 
+    fn runtime_host(&mut self) -> RuntimeHost<'_> {
+        let viewport = self.logical_viewport();
+        let shortcut_profile = self.platform.shortcut_profile();
+        RuntimeHost::from(RuntimeCoreContext {
+            theme: &self.theme,
+            navigator: self.router_navigator.clone(),
+            root_widget: self.root_widget.as_mut(),
+            layout_tree: &mut self.layout_tree,
+            widget_registry: &mut self.widget_registry,
+            component_states: &mut self.component_states,
+            focus_manager: &mut self.focus_manager,
+            focused_path: &mut self.focused_path,
+            capture_path: &mut self.capture_path,
+            signal_runtime: self.signal_runtime.clone(),
+            task_runtime: self.task_runtime.clone(),
+            text_system: &mut self.text_system,
+            viewport,
+            shortcut_profile,
+            ime_composing: &mut self.ime_composing,
+            needs_layout: &mut self.needs_layout,
+            needs_repaint: &mut self.needs_repaint,
+        })
+    }
+
     fn focused_text_editor_state(&self) -> Option<&sparsha_widgets::TextEditorState> {
         focused_text_editor_state(&self.widget_registry, self.focused_path.as_deref())
+    }
+
+    fn event_translator(&self) -> &crate::platform::events::WebEventTranslator {
+        self.platform.event_translator()
+    }
+
+    fn semantic_root(&self) -> HtmlElement {
+        self.platform.semantic_root().clone()
+    }
+
+    fn text_input_element(&self) -> HtmlTextAreaElement {
+        self.platform.text_input_element().clone()
+    }
+
+    fn text_input_is_syncing(&self) -> bool {
+        self.platform.text_input_is_syncing()
+    }
+
+    fn set_accessibility_text_focus_node(&mut self, node_id: Option<u64>) {
+        self.platform.set_accessibility_text_focus_node(node_id);
+    }
+
+    fn take_pending_clipboard_write(&mut self) -> Option<String> {
+        self.platform.take_pending_clipboard_write()
     }
 
     fn focused_selection_text(&self) -> Option<String> {
@@ -681,26 +317,14 @@ impl WebAppState {
 
     #[allow(dead_code)]
     fn refresh_accessibility(&mut self) {
-        refresh_accessibility_tree(
-            &mut self.widget_registry,
-            self.root_widget.as_ref(),
-            &self.layout_tree,
-            self.focused_path.as_ref(),
-        );
+        let _ = self.runtime_host().refresh_accessibility();
     }
 
     fn accessibility_text_focus_matches_widget_focus(&self) -> bool {
-        let Some(node_id) = self.accessibility_text_focus_node else {
-            return false;
-        };
-        let Some(path) = self.widget_registry.path_for_accessibility_node(node_id) else {
-            return false;
-        };
-        self.focused_path.as_deref() == Some(path)
-            && self
-                .widget_registry
-                .text_editor_state_for_path(path)
-                .is_some()
+        self.platform.accessibility_text_focus_matches_widget_focus(
+            &self.widget_registry,
+            self.focused_path.as_deref(),
+        )
     }
 
     fn sync_text_input_bridge(&mut self) {
@@ -714,11 +338,8 @@ impl WebAppState {
         editor_state: Option<&TextEditorState>,
         suppress_text_bridge: bool,
     ) {
-        if suppress_text_bridge {
-            self.text_input_bridge.sync(None);
-            return;
-        }
-        self.text_input_bridge.sync(editor_state);
+        self.platform
+            .sync_text_input_bridge(editor_state, suppress_text_bridge);
     }
 
     fn handle_accessibility_action(
@@ -727,32 +348,21 @@ impl WebAppState {
         action: AccessibilityAction,
         value: Option<String>,
     ) {
-        let viewport = self.logical_viewport();
-        let effects = handle_accessibility_action(
-            RuntimeCoreContext {
-                theme: &self.theme,
-                navigator: self.router_navigator.clone(),
-                root_widget: self.root_widget.as_mut(),
-                layout_tree: &mut self.layout_tree,
-                widget_registry: &mut self.widget_registry,
-                component_states: &mut self.component_states,
-                focus_manager: &mut self.focus_manager,
-                focused_path: &mut self.focused_path,
-                capture_path: &mut self.capture_path,
-                signal_runtime: self.signal_runtime.clone(),
-                task_runtime: self.task_runtime.clone(),
-                text_system: &mut self.text_system,
-                viewport,
-                shortcut_profile: self.platform_capabilities.shortcut_profile(),
-                ime_composing: &mut self.ime_composing,
-                needs_layout: &mut self.needs_layout,
-                needs_repaint: &mut self.needs_repaint,
-            },
-            node_id,
-            action,
-            value,
+        let (effects, focused_editor_state, has_capture) = {
+            let mut host = self.runtime_host();
+            let effects = host.handle_accessibility_action(node_id, action, value);
+            let _ = host.refresh_accessibility();
+            let focused_editor_state = host.focused_text_editor_state().cloned();
+            let has_capture = host.has_pointer_capture();
+            (effects, focused_editor_state, has_capture)
+        };
+        let suppress_bridge = self.accessibility_text_focus_matches_widget_focus();
+        self.platform.apply_effects(
+            &effects,
+            focused_editor_state.as_ref(),
+            has_capture,
+            suppress_bridge,
         );
-        apply_web_platform_effects(self, &effects);
     }
 
     fn update_viewport(&mut self) {
@@ -791,6 +401,10 @@ impl WebAppState {
         path_to_hash(&self.router_navigator.current_path())
     }
 
+    fn shortcut_profile(&self) -> sparsha_input::ShortcutProfile {
+        self.platform.shortcut_profile()
+    }
+
     fn sync_route_hash(&self, desired_hash: &str) {
         let Some(window) = web_sys::window() else {
             return;
@@ -806,27 +420,21 @@ impl WebAppState {
     }
 
     fn build_layout(&mut self) {
-        let viewport = self.logical_viewport();
-        let effects = build_runtime_layout(RuntimeCoreContext {
-            theme: &self.theme,
-            navigator: self.router_navigator.clone(),
-            root_widget: self.root_widget.as_mut(),
-            layout_tree: &mut self.layout_tree,
-            widget_registry: &mut self.widget_registry,
-            component_states: &mut self.component_states,
-            focus_manager: &mut self.focus_manager,
-            focused_path: &mut self.focused_path,
-            capture_path: &mut self.capture_path,
-            signal_runtime: self.signal_runtime.clone(),
-            task_runtime: self.task_runtime.clone(),
-            text_system: &mut self.text_system,
-            viewport,
-            shortcut_profile: self.platform_capabilities.shortcut_profile(),
-            ime_composing: &mut self.ime_composing,
-            needs_layout: &mut self.needs_layout,
-            needs_repaint: &mut self.needs_repaint,
-        });
-        apply_web_platform_effects(self, &effects);
+        let (effects, focused_editor_state, has_capture) = {
+            let mut host = self.runtime_host();
+            let effects = host.build_layout();
+            let _ = host.refresh_accessibility();
+            let focused_editor_state = host.focused_text_editor_state().cloned();
+            let has_capture = host.has_pointer_capture();
+            (effects, focused_editor_state, has_capture)
+        };
+        let suppress_bridge = self.accessibility_text_focus_matches_widget_focus();
+        self.platform.apply_effects(
+            &effects,
+            focused_editor_state.as_ref(),
+            has_capture,
+            suppress_bridge,
+        );
     }
 
     fn paint(&mut self) {
@@ -857,31 +465,21 @@ impl WebAppState {
     }
 
     fn handle_event(&mut self, event: InputEvent) {
-        let viewport = self.logical_viewport();
-        let effects = handle_input_event(
-            RuntimeCoreContext {
-                theme: &self.theme,
-                navigator: self.router_navigator.clone(),
-                root_widget: self.root_widget.as_mut(),
-                layout_tree: &mut self.layout_tree,
-                widget_registry: &mut self.widget_registry,
-                component_states: &mut self.component_states,
-                focus_manager: &mut self.focus_manager,
-                focused_path: &mut self.focused_path,
-                capture_path: &mut self.capture_path,
-                signal_runtime: self.signal_runtime.clone(),
-                task_runtime: self.task_runtime.clone(),
-                text_system: &mut self.text_system,
-                viewport,
-                shortcut_profile: self.platform_capabilities.shortcut_profile(),
-                ime_composing: &mut self.ime_composing,
-                needs_layout: &mut self.needs_layout,
-                needs_repaint: &mut self.needs_repaint,
-            },
-            event,
-            None,
+        let (effects, focused_editor_state, has_capture) = {
+            let mut host = self.runtime_host();
+            let effects = host.handle_input_event(event, None);
+            let _ = host.refresh_accessibility();
+            let focused_editor_state = host.focused_text_editor_state().cloned();
+            let has_capture = host.has_pointer_capture();
+            (effects, focused_editor_state, has_capture)
+        };
+        let suppress_bridge = self.accessibility_text_focus_matches_widget_focus();
+        self.platform.apply_effects(
+            &effects,
+            focused_editor_state.as_ref(),
+            has_capture,
+            suppress_bridge,
         );
-        apply_web_platform_effects(self, &effects);
     }
 
     fn frame(&mut self) {
@@ -962,7 +560,7 @@ impl WebAppState {
                 dom_rendered = true;
             }
 
-            if let Err(err) = self.semantic_dom.render(&snapshot.accessibility) {
+            if let Err(err) = self.platform.render_semantic_dom(&snapshot.accessibility) {
                 log::error!("semantic dom render failed: {:?}", err);
                 dom_rendered = false;
             }
@@ -1078,7 +676,7 @@ fn install_event_listeners(
     frame_cb: &Rc<RefCell<Option<Closure<dyn FnMut(f64)>>>>,
 ) {
     let root = state.borrow().dom_renderer.root().clone();
-    let semantic_root = state.borrow().semantic_dom.root().clone();
+    let semantic_root = state.borrow().semantic_root();
 
     {
         let state = Rc::clone(state);
@@ -1117,7 +715,7 @@ fn install_event_listeners(
             let pos = mouse_pos(&root_for_event, &event);
             let button = state
                 .borrow()
-                .event_translator
+                .event_translator()
                 .map_mouse_button(event.button());
             root_for_event.focus().ok();
             let mut state_ref = state.borrow_mut();
@@ -1183,7 +781,7 @@ fn install_event_listeners(
             let pos = mouse_pos(&root_for_event, &event);
             let button = state
                 .borrow()
-                .event_translator
+                .event_translator()
                 .map_mouse_button(event.button());
             let mut state_ref = state.borrow_mut();
             state_ref.mouse_pos = pos;
@@ -1314,7 +912,7 @@ fn install_event_listeners(
             let pos = mouse_pos(&root_for_event, &event);
             let button = state
                 .borrow()
-                .event_translator
+                .event_translator()
                 .map_mouse_button(event.button());
             let mut state_ref = state.borrow_mut();
             state_ref.mouse_pos = pos;
@@ -1453,7 +1051,7 @@ fn install_event_listeners(
                 delta_x /= WEB_SCROLL_DELTA_UNIT;
                 delta_y /= WEB_SCROLL_DELTA_UNIT;
             }
-            let modifiers = state.borrow().event_translator.modifiers_from_flags(
+            let modifiers = state.borrow().event_translator().modifiers_from_flags(
                 event.shift_key(),
                 event.ctrl_key(),
                 event.alt_key(),
@@ -1482,7 +1080,7 @@ fn install_event_listeners(
         let window = window.clone();
         let on_key_down = Closure::wrap(Box::new(move |event: WebKeyboardEvent| {
             let focused_text_editor = state.borrow().focused_text_editor_state().is_some();
-            let dispatch = state.borrow().event_translator.translate_key_down(
+            let dispatch = state.borrow().event_translator().translate_key_down(
                 &event.key(),
                 event.shift_key(),
                 event.ctrl_key(),
@@ -1514,7 +1112,7 @@ fn install_event_listeners(
         let frame_cb = Rc::clone(frame_cb);
         let window = window.clone();
         let on_key_up = Closure::wrap(Box::new(move |event: WebKeyboardEvent| {
-            if let Some(key_event) = state.borrow().event_translator.translate_key_up(
+            if let Some(key_event) = state.borrow().event_translator().translate_key_up(
                 &event.key(),
                 event.shift_key(),
                 event.ctrl_key(),
@@ -1532,16 +1130,16 @@ fn install_event_listeners(
     }
 
     {
-        let bridge = state.borrow().text_input_bridge.element().clone();
+        let bridge = state.borrow().text_input_element();
         let state = Rc::clone(state);
         let pending_animation_frame = Rc::clone(pending_animation_frame);
         let frame_cb = Rc::clone(frame_cb);
         let window = window.clone();
         let on_before_input = Closure::wrap(Box::new(move |event: WebInputEvent| {
-            let translated = state.borrow().event_translator.translate_before_input(
+            let translated = state.borrow().event_translator().translate_before_input(
                 &event.input_type(),
                 event.data(),
-                state.borrow().text_input_bridge.is_syncing(),
+                state.borrow().text_input_is_syncing(),
                 state.borrow().focused_text_editor_state().is_some(),
             );
             if let Some(input_event) = translated {
@@ -1560,13 +1158,13 @@ fn install_event_listeners(
     }
 
     {
-        let bridge = state.borrow().text_input_bridge.element().clone();
+        let bridge = state.borrow().text_input_element();
         let state = Rc::clone(state);
         let pending_animation_frame = Rc::clone(pending_animation_frame);
         let frame_cb = Rc::clone(frame_cb);
         let window = window.clone();
         let on_input = Closure::wrap(Box::new(move |_event: WebInputEvent| {
-            if state.borrow().text_input_bridge.is_syncing() {
+            if state.borrow().text_input_is_syncing() {
                 return;
             }
             if state.borrow().focused_text_editor_state().is_none() {
@@ -1582,16 +1180,19 @@ fn install_event_listeners(
     }
 
     {
-        let bridge = state.borrow().text_input_bridge.element().clone();
+        let bridge = state.borrow().text_input_element();
         let state = Rc::clone(state);
         let pending_animation_frame = Rc::clone(pending_animation_frame);
         let frame_cb = Rc::clone(frame_cb);
         let window = window.clone();
         let on_composition_start = Closure::wrap(Box::new(move |_event: WebCompositionEvent| {
-            let translated = state.borrow().event_translator.translate_composition_start(
-                state.borrow().text_input_bridge.is_syncing(),
-                state.borrow().focused_text_editor_state().is_some(),
-            );
+            let translated = state
+                .borrow()
+                .event_translator()
+                .translate_composition_start(
+                    state.borrow().text_input_is_syncing(),
+                    state.borrow().focused_text_editor_state().is_some(),
+                );
             if let Some(input_event) = translated {
                 let mut state_ref = state.borrow_mut();
                 state_ref.ime_composing = true;
@@ -1611,7 +1212,7 @@ fn install_event_listeners(
     }
 
     {
-        let bridge = state.borrow().text_input_bridge.element().clone();
+        let bridge = state.borrow().text_input_element();
         let state = Rc::clone(state);
         let pending_animation_frame = Rc::clone(pending_animation_frame);
         let frame_cb = Rc::clone(frame_cb);
@@ -1619,10 +1220,10 @@ fn install_event_listeners(
         let on_composition_update = Closure::wrap(Box::new(move |event: WebCompositionEvent| {
             if let Some(input_event) = state
                 .borrow()
-                .event_translator
+                .event_translator()
                 .translate_composition_update(
                     event.data().unwrap_or_default(),
-                    state.borrow().text_input_bridge.is_syncing(),
+                    state.borrow().text_input_is_syncing(),
                     state.borrow().focused_text_editor_state().is_some(),
                 )
             {
@@ -1640,15 +1241,15 @@ fn install_event_listeners(
     }
 
     {
-        let bridge = state.borrow().text_input_bridge.element().clone();
+        let bridge = state.borrow().text_input_element();
         let state = Rc::clone(state);
         let pending_animation_frame = Rc::clone(pending_animation_frame);
         let frame_cb = Rc::clone(frame_cb);
         let window = window.clone();
         let on_composition_end = Closure::wrap(Box::new(move |event: WebCompositionEvent| {
-            if let Some(input_event) = state.borrow().event_translator.translate_composition_end(
+            if let Some(input_event) = state.borrow().event_translator().translate_composition_end(
                 event.data().unwrap_or_default(),
-                state.borrow().text_input_bridge.is_syncing(),
+                state.borrow().text_input_is_syncing(),
                 state.borrow().focused_text_editor_state().is_some(),
             ) {
                 let mut state_ref = state.borrow_mut();
@@ -1669,13 +1270,13 @@ fn install_event_listeners(
     }
 
     {
-        let bridge = state.borrow().text_input_bridge.element().clone();
+        let bridge = state.borrow().text_input_element();
         let state = Rc::clone(state);
         let pending_animation_frame = Rc::clone(pending_animation_frame);
         let frame_cb = Rc::clone(frame_cb);
         let window = window.clone();
         let on_paste = Closure::wrap(Box::new(move |event: ClipboardEvent| {
-            let translated = state.borrow().event_translator.translate_paste(
+            let translated = state.borrow().event_translator().translate_paste(
                 event
                     .clipboard_data()
                     .and_then(|clipboard| clipboard.get_data("text/plain").ok()),
@@ -1694,7 +1295,7 @@ fn install_event_listeners(
     }
 
     {
-        let bridge = state.borrow().text_input_bridge.element().clone();
+        let bridge = state.borrow().text_input_element();
         let state = Rc::clone(state);
         let on_copy = Closure::wrap(Box::new(move |event: ClipboardEvent| {
             if state.borrow().focused_text_editor_state().is_none() {
@@ -1703,8 +1304,7 @@ fn install_event_listeners(
             let text = {
                 let mut state_ref = state.borrow_mut();
                 state_ref
-                    .pending_clipboard_write
-                    .take()
+                    .take_pending_clipboard_write()
                     .or_else(|| state_ref.focused_selection_text())
             };
             let Some(text) = text else {
@@ -1720,7 +1320,7 @@ fn install_event_listeners(
     }
 
     {
-        let bridge = state.borrow().text_input_bridge.element().clone();
+        let bridge = state.borrow().text_input_element();
         let state = Rc::clone(state);
         let pending_animation_frame = Rc::clone(pending_animation_frame);
         let frame_cb = Rc::clone(frame_cb);
@@ -1733,15 +1333,11 @@ fn install_event_listeners(
             let fallback_text = state.borrow().focused_selection_text();
             let mut clipboard_text = {
                 let mut state_ref = state.borrow_mut();
-                state_ref.pending_clipboard_write.take()
+                state_ref.take_pending_clipboard_write()
             };
 
             if clipboard_text.is_none() && fallback_text.is_some() {
-                let primary_modifiers = state
-                    .borrow()
-                    .platform_capabilities
-                    .shortcut_profile()
-                    .primary_modifiers();
+                let primary_modifiers = state.borrow().shortcut_profile().primary_modifiers();
                 let mut synthetic = sparsha_input::KeyboardEvent::key_down(
                     sparsha_input::Key::Character("x".to_owned()),
                     sparsha_input::ui_events::keyboard::Code::Unidentified,
@@ -1750,7 +1346,7 @@ fn install_event_listeners(
                 state
                     .borrow_mut()
                     .handle_event(InputEvent::KeyDown { event: synthetic });
-                clipboard_text = state.borrow_mut().pending_clipboard_write.take();
+                clipboard_text = state.borrow_mut().take_pending_clipboard_write();
                 if clipboard_text.is_none() {
                     let mut ctrl_synthetic = sparsha_input::KeyboardEvent::key_down(
                         sparsha_input::Key::Character("x".to_owned()),
@@ -1760,7 +1356,7 @@ fn install_event_listeners(
                     state.borrow_mut().handle_event(InputEvent::KeyDown {
                         event: ctrl_synthetic,
                     });
-                    clipboard_text = state.borrow_mut().pending_clipboard_write.take();
+                    clipboard_text = state.borrow_mut().take_pending_clipboard_write();
                 }
             }
 
@@ -1833,7 +1429,7 @@ fn install_event_listeners(
             let Ok(mut state_ref) = state.try_borrow_mut() else {
                 return;
             };
-            state_ref.accessibility_text_focus_node = is_text.then_some(node_id);
+            state_ref.set_accessibility_text_focus_node(is_text.then_some(node_id));
             state_ref.handle_accessibility_action(node_id, AccessibilityAction::Focus, None);
             let should_schedule = state_ref.should_schedule_frame();
             drop(state_ref);
@@ -1853,7 +1449,7 @@ fn install_event_listeners(
             let Ok(mut state_ref) = state.try_borrow_mut() else {
                 return;
             };
-            state_ref.accessibility_text_focus_node = None;
+            state_ref.set_accessibility_text_focus_node(None);
             state_ref.sync_text_input_bridge();
         }) as Box<dyn FnMut(_)>);
         let _ = target
@@ -1931,7 +1527,7 @@ fn install_event_listeners(
                 return;
             };
             let mut state_ref = state.borrow_mut();
-            state_ref.accessibility_text_focus_node = Some(node_id);
+            state_ref.set_accessibility_text_focus_node(Some(node_id));
             state_ref.handle_accessibility_action(
                 node_id,
                 AccessibilityAction::SetValue,
@@ -2275,11 +1871,12 @@ mod wasm_tests {
     use super::*;
     use serde_json::json;
     use sparsha_core::Rect;
+    use sparsha_widgets::AccessibilityRole;
     use wasm_bindgen_test::*;
 
     wasm_bindgen_test_configure!(run_in_browser);
 
-    fn document() -> Document {
+    fn document() -> web_sys::Document {
         web_sys::window()
             .and_then(|window| window.document())
             .expect("window document")
@@ -2287,7 +1884,7 @@ mod wasm_tests {
 
     #[wasm_bindgen_test]
     fn semantic_text_input_node_preserves_value_and_label() {
-        let element = create_semantic_element(
+        let element = crate::platform::web::create_semantic_element(
             &document(),
             &crate::accessibility::AccessibilityNodeSnapshot {
                 id: 7,

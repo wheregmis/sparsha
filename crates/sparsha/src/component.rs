@@ -251,7 +251,7 @@ impl<F> Component<F> {
 }
 
 /// Build a widget from a function component.
-#[builder(start_fn(name = component_builder))]
+#[builder]
 pub fn component<F, W>(render: F) -> Component<F>
 where
     F: for<'a> Fn(&'a mut ComponentContext<'a>) -> W + 'static,
@@ -331,12 +331,14 @@ mod tests {
                 // SAFETY: the test owns `store` for the full rebuild and does
                 // not alias it while `build` is using it.
                 unsafe { build.set_state_store(&mut store) };
-                let mut host = component(move |cx| {
-                    let counter = cx.signal(0usize);
-                    observed.set(counter.get());
-                    counter.set(counter.get() + 1);
-                    Text::new("component")
-                });
+                let mut host = component()
+                    .render(move |cx| {
+                        let counter = cx.signal(0usize);
+                        observed.set(counter.get());
+                        counter.set(counter.get() + 1);
+                        Text::new("component")
+                    })
+                    .call();
                 host.rebuild(&mut build);
                 assert_eq!(observed.get(), expected);
             }
@@ -358,10 +360,12 @@ mod tests {
             // alias it while `build` is using it.
             unsafe { build.set_state_store(&mut store) };
 
-            let mut host = component(move |cx| {
-                hook_slot.set(Some(cx.use_task("component.test", "echo")));
-                Text::new("task")
-            });
+            let mut host = component()
+                .render(move |cx| {
+                    hook_slot.set(Some(cx.use_task("component.test", "echo")));
+                    Text::new("task")
+                })
+                .call();
             host.rebuild(&mut build);
 
             let hook = hook_slot.get().expect("task hook");
@@ -401,10 +405,12 @@ mod tests {
             // alias it while `build` is using it.
             unsafe { build.set_state_store(&mut store) };
 
-            let mut host = component(move |cx| {
-                hook_slot.set(Some(cx.use_task(task_key.get(), "echo")));
-                Text::new("task")
-            });
+            let mut host = component()
+                .render(move |cx| {
+                    hook_slot.set(Some(cx.use_task(task_key.get(), "echo")));
+                    Text::new("task")
+                })
+                .call();
             host.rebuild(&mut build);
 
             task_key.set(TaskKey::new("todos.b"));
@@ -439,10 +445,12 @@ mod tests {
             build.insert_resource(ViewportInfo::new(820.0, 1180.0));
             unsafe { build.set_state_store(&mut store) };
 
-            let mut host = component(move |cx| {
-                observed.set(Some(cx.viewport()));
-                Text::new("viewport")
-            });
+            let mut host = component()
+                .render(move |cx| {
+                    observed.set(Some(cx.viewport()));
+                    Text::new("viewport")
+                })
+                .call();
             host.rebuild(&mut build);
 
             let viewport = observed.get().expect("viewport");
@@ -452,11 +460,11 @@ mod tests {
     }
 
     #[test]
-    fn component_builder_named_args_constructs_component() {
+    fn bon_component_constructs_component() {
         let runtime = RuntimeHandle::new();
         runtime.run_with_current(|| {
             let mut build = BuildContext::default();
-            let mut host = component_builder()
+            let mut host = component()
                 .render(|_: &mut ComponentContext<'_>| Text::new("from-builder"))
                 .call();
             host.rebuild(&mut build);

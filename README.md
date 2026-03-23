@@ -37,7 +37,7 @@ Notable current behavior:
 - `Scroll` supports vertical, horizontal, and both-axis scrolling with interactive scrollbars
 - `List` supports both simple owned-children mode and fixed-extent virtualization for large data sets
 - Default widget sizing and focus-ring behavior are aligned through shared theme control tokens
-- Normal app screens can be authored as function components via `component(...)` and `ComponentContext`
+- Normal app screens can be authored as bon-backed function components via `component().render(...).call()` and `ComponentContext`
 
 ## Web Story
 

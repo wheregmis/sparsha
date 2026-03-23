@@ -21,14 +21,12 @@ fn main() -> Result<(), sparsha::AppRunError> {
         .router(
             Router::new()
                 .transition(RouterTransition::slide_overlay())
-                .route(
-                    "/",
-                    move || component_builder().render(move |cx| todo_app(cx, theme_mode)).call(),
-                )
-                .route(
-                    "/about",
-                    || component_builder().render(todo_about).call(),
-                )
+                .route("/", move || {
+                    component()
+                        .render(move |cx| todo_app(cx, theme_mode))
+                        .call()
+                })
+                .route("/about", || component().render(todo_about).call())
                 .fallback("/"),
         )
         .run()

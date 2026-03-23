@@ -9,6 +9,10 @@ Stable for 1.0:
 - `App`
 - `AppRunError`
 - `Router`, `Route`, `Navigator`, `hash_to_path`, `path_to_hash`
+- authoring lanes:
+  - primary composition lane: bon-backed `component`, plus the normal crate-root widget/configuration APIs
+  - specialized lane: dedicated primitives such as `ForEach`, `DrawSurface`, animation helpers, and theme/style value types
+  - expert lane: low-level `Widget` and context APIs for manual custom widgets
 - component authoring helpers: `component`, `Component`, `ComponentContext`, `TaskHook`
 - theme and accessibility configuration types re-exported from `sparsha-widgets`
 - task runtime types: `TaskRuntime`, `TaskRuntimeInitError`, `TaskHandle`, `TaskResult`, `TaskStatus`, `TaskKey`, `TaskId`, `TaskPayload`, `TaskPolicy`, `Generation`
@@ -26,6 +30,11 @@ Internal/provisional:
 - hybrid surface manager internals
 - internal platform adapters under `crates/sparsha/src/platform/`
 - internal runtime orchestration under `crates/sparsha/src/runtime_core.rs`, including `RuntimeHost`
+
+Contributor rule:
+
+- new public authoring APIs must declare which lane they belong to
+- normal UI composition must not gain parallel public entrypoints that overlap in behavior
 
 ## `sparsha-core`
 

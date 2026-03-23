@@ -12,7 +12,7 @@ Each example is a normal Cargo binary. The examples are intended to demonstrate 
 | `fractal-clock` | Draw-heavy rendering with `DrawSurface` and reactive state |
 | `hybrid-overlay` | DOM-backed UI with a hybrid GPU surface on the web path |
 | `showcase` | Hash-routed public preview surface with component samples and manual rendering checks |
-| `todo` | Function components, signals, keyed `ForEach`, routing, and background task hooks in a small app |
+| `todo` | Bon-backed function components, signals, keyed `ForEach`, routing, and background task hooks in a small app |
 
 ## Native
 

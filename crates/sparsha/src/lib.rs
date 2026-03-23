@@ -63,7 +63,7 @@ mod web_surface_manager;
 mod web_text_metrics;
 
 pub use app::{App, AppRunError, ThemeInput, ThemeMode, ThemeModeInput};
-pub use component::{component, component_builder, Component, ComponentContext, TaskHook};
+pub use component::{component, Component, ComponentContext, TaskHook};
 pub use router::{hash_to_path, path_to_hash, Navigator, Route, Router, RouterTransition};
 pub use sparsha_widgets::{
     current_theme, current_viewport, lerp_color, AccessibilityAction, AccessibilityInfo,
@@ -87,8 +87,8 @@ pub mod prelude {
         TaskResultSubscription, TaskRuntime, TaskStatus,
     };
     pub use crate::{
-        component, component_builder, App, AppRunError, Component, ComponentContext, Navigator,
-        Route, Router, RouterTransition, TaskHook, ThemeInput, ThemeMode, ThemeModeInput,
+        component, App, AppRunError, Component, ComponentContext, Navigator, Route, Router,
+        RouterTransition, TaskHook, ThemeInput, ThemeMode, ThemeModeInput,
     };
     pub use sparsha_core::{Color, Rect};
     pub use sparsha_input::{InputEvent, Key, Modifiers, PointerButton};

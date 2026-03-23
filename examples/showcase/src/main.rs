@@ -697,7 +697,7 @@ fn build_controls_card(layout: ShowcaseLayout) -> Container {
     section_card(
         "Controls",
         "Primary, secondary, and disabled actions using the shipped theme tokens,\nplus a single checkbox that stays in the normal focus order.",
-        component_builder()
+        component()
             .render(move |cx| {
                 let checked = cx.signal(true);
                 let is_checked = checked.get();
@@ -856,7 +856,7 @@ fn build_inputs_card(layout: ShowcaseLayout) -> Container {
     section_card(
         "Inputs",
         "Single-line and multiline editors should feel coherent with the same theme.\nLabels are explicit so browser smoke tests can target them directly.",
-        component_builder()
+        component()
             .render(move |cx| {
                 let email = cx.signal("sparsh@example.dev".to_owned());
                 let notes = cx.signal(

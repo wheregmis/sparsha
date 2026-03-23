@@ -45,8 +45,17 @@ export function startRouteViewTransition(document) {
     return;
   }
   try {
-    // The render/update happens in Rust; this callback intentionally no-ops.
-    startViewTransition.call(document, () => {});
+    // Perform a minimal DOM mutation inside the transition callback so that
+    // the before/after states differ and the transition can capture it.
+    startViewTransition.call(document, () => {
+      const docEl = document.documentElement;
+      if (!docEl) {
+        return;
+      }
+      const prev = docEl.getAttribute("data-route-view-transition") || "0";
+      const next = prev === "0" ? "1" : "0";
+      docEl.setAttribute("data-route-view-transition", next);
+    });
   } catch (_) {
     // Ignore unsupported and timing-related failures.
   }

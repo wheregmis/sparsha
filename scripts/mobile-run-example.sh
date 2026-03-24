@@ -52,15 +52,26 @@ EOF
     return
   fi
 
-  if grep -q '^[[:space:]]*template-pack[[:space:]]*=' "$config_file"; then
-    sed -i.bak -E "s|^([[:space:]]*template-pack[[:space:]]*=[[:space:]]*\").*(\".*)$|\\1${TEMPLATE_PACK}\\2|" "$config_file"
-    rm -f "$config_file.bak"
-  elif grep -q '^[[:space:]]*\[app\][[:space:]]*$' "$config_file"; then
+  if grep -q '^[[:space:]]*\[app\][[:space:]]*$' "$config_file"; then
     awk -v template="$TEMPLATE_PACK" '
-      { print }
-      /^[[:space:]]*\[app\][[:space:]]*$/ && !inserted {
-        print "template-pack = \"" template "\""
-        inserted = 1
+      BEGIN { in_app = 0; has_template = 0 }
+      /^[[:space:]]*\[/ {
+        if (in_app && !has_template) {
+          print "template-pack = \"" template "\""
+        }
+        in_app = ($0 ~ /^[[:space:]]*\[app\][[:space:]]*$/)
+      }
+      {
+        if (in_app && $0 ~ /^[[:space:]]*template-pack[[:space:]]*=/) {
+          sub(/=.*/, "= \"" template "\"")
+          has_template = 1
+        }
+        print
+      }
+      END {
+        if (in_app && !has_template) {
+          print "template-pack = \"" template "\""
+        }
       }
     ' "$config_file" >"$config_file.tmp"
     mv "$config_file.tmp" "$config_file"

@@ -20,9 +20,19 @@ fi
 
 case "$PLATFORM" in
   android)
+    if ! cargo android --help >/dev/null 2>&1; then
+      echo "cargo-mobile2 is required. Install it with:" >&2
+      echo "  cargo install --git https://github.com/tauri-apps/cargo-mobile2" >&2
+      exit 1
+    fi
     MOBILE_CMD=(cargo android "$ACTION")
     ;;
   ios)
+    if ! cargo apple --help >/dev/null 2>&1; then
+      echo "cargo-mobile2 is required. Install it with:" >&2
+      echo "  cargo install --git https://github.com/tauri-apps/cargo-mobile2" >&2
+      exit 1
+    fi
     if [[ "$(uname -s)" != "Darwin" ]]; then
       echo "iOS builds require macOS (Darwin)." >&2
       exit 1

@@ -1,18 +1,20 @@
 //! Multiline text area widget.
 
 use crate::text_editor::{EditorCore, TextEditorState};
+use crate::text_editor_widget::{
+    apply_standard_action, compute_prefix_widths, editor_placeholder_style, editor_text_style,
+    editor_widget_style, paint_editor_frame, persist_editor_build_state, resolve_editor_style,
+    restore_editor_build_state, set_editor_value,
+};
 use crate::text_input::TextInputStyle;
 use crate::{
-    control_state::{focus_ring_border_width, focus_ring_bounds, focus_ring_color},
-    current_theme, responsive_text_area_min_height, responsive_theme_controls,
-    responsive_typography, AccessibilityAction, AccessibilityInfo, AccessibilityRole, EventContext,
-    PaintContext, Widget,
+    AccessibilityAction, AccessibilityInfo, AccessibilityRole, EventContext, PaintContext, Widget,
 };
 use bon::bon;
 use sparsha_core::Color;
 use sparsha_input::{Action, ActionMapper, InputEvent, Key, NamedKey, StandardAction};
 use sparsha_layout::WidgetId;
-use sparsha_text::TextStyle;
+use sparsha_text::{TextLayoutInfo, TextLayoutOptions, TextStyle, TextWrap};
 use std::cell::RefCell;
 use taffy::prelude::*;
 
@@ -23,6 +25,9 @@ pub type TextAreaStyle = TextInputStyle;
 struct LineMetrics {
     start: usize,
     end: usize,
+    x_offset: f32,
+    y_offset: f32,
+    height: f32,
     widths: Vec<(usize, f32)>,
 }
 
@@ -37,12 +42,6 @@ pub struct TextArea {
     fill_width: bool,
     use_theme_defaults: bool,
     line_metrics: RefCell<Vec<LineMetrics>>,
-}
-
-#[derive(Clone)]
-struct TextAreaBuildState {
-    editor: EditorCore,
-    declared_value: Option<String>,
 }
 
 impl TextArea {
@@ -62,6 +61,9 @@ impl TextArea {
             line_metrics: RefCell::new(vec![LineMetrics {
                 start: 0,
                 end: 0,
+                x_offset: 0.0,
+                y_offset: 0.0,
+                height: 0.0,
                 widths: vec![(0, 0.0)],
             }]),
         }
@@ -84,56 +86,43 @@ impl TextArea {
     }
 
     fn resolved_style(&self) -> TextAreaStyle {
-        if self.use_theme_defaults {
-            let theme = current_theme();
-            let controls = responsive_theme_controls(&theme);
-            let typography = responsive_typography(&theme);
-            TextAreaStyle {
-                background: theme.colors.input_background,
-                background_focused: theme.colors.surface,
-                text_color: theme.colors.text_primary,
-                placeholder_color: theme.colors.input_placeholder,
-                border_color: theme.colors.border,
-                border_color_focused: theme.colors.primary,
-                border_width: 1.0,
-                corner_radius: theme.radii.md,
-                padding_h: controls.control_padding_x,
-                padding_v: controls.control_padding_y,
-                font_size: typography.body_size,
-                min_width: 180.0,
-                min_height: responsive_text_area_min_height(&theme),
-            }
-        } else {
-            self.style.clone()
-        }
+        resolve_editor_style(&self.style, self.use_theme_defaults, true)
     }
 
-    fn compute_prefix_widths(
-        text: &str,
-        start: usize,
-        mut measure_width: impl FnMut(&str) -> f32,
-    ) -> Vec<(usize, f32)> {
-        let mut boundaries = vec![(start, 0.0)];
-        if text.is_empty() {
-            return boundaries;
+    fn update_line_metrics(
+        &self,
+        layout_info: &TextLayoutInfo,
+        style: &TextStyle,
+        mut measure_prefix: impl FnMut(&str) -> f32,
+    ) {
+        if self.editor.text().is_empty() {
+            *self.line_metrics.borrow_mut() = vec![LineMetrics {
+                start: 0,
+                end: 0,
+                x_offset: 0.0,
+                y_offset: 0.0,
+                height: style.font_size * style.line_height,
+                widths: vec![(0, 0.0)],
+            }];
+            return;
         }
-        for (offset, _) in text.char_indices().skip(1) {
-            boundaries.push((start + offset, measure_width(&text[..offset])));
-        }
-        boundaries.push((start + text.len(), measure_width(text)));
-        boundaries
-    }
 
-    fn update_line_metrics_with_paint_ctx(&self, ctx: &mut PaintContext, style: &TextStyle) {
-        let lines = line_slices(self.editor.text());
-        let metrics = lines
+        let text = self.editor.text();
+        let metrics = layout_info
+            .lines
             .iter()
-            .map(|(start, end, slice)| LineMetrics {
-                start: *start,
-                end: *end,
-                widths: Self::compute_prefix_widths(slice, *start, |prefix| {
-                    self.measure_prefix_width(ctx, style, prefix) / ctx.scale_factor.max(1.0)
-                }),
+            .map(|line| {
+                let slice = &text[line.text_range.clone()];
+                LineMetrics {
+                    start: line.text_range.start,
+                    end: line.text_range.end,
+                    x_offset: line.offset,
+                    y_offset: line.min_coord,
+                    height: line.line_height,
+                    widths: compute_prefix_widths(slice, line.text_range.start, |prefix| {
+                        measure_prefix(prefix)
+                    }),
+                }
             })
             .collect();
         *self.line_metrics.borrow_mut() = metrics;
@@ -143,47 +132,64 @@ impl TextArea {
         &self,
         ctx: &mut crate::LayoutContext,
         style: &TextStyle,
+        max_width: Option<f32>,
     ) {
-        let lines = line_slices(self.editor.text());
-        let metrics = lines
-            .iter()
-            .map(|(start, end, slice)| LineMetrics {
-                start: *start,
-                end: *end,
-                widths: Self::compute_prefix_widths(slice, *start, |prefix| {
-                    ctx.measure_text(prefix, style).0
-                }),
-            })
-            .collect();
-        *self.line_metrics.borrow_mut() = metrics;
+        let layout = ctx.text.layout_info(
+            self.editor.text(),
+            style,
+            TextLayoutOptions::new()
+                .with_max_width(max_width)
+                .with_wrap(TextWrap::Word),
+        );
+        self.update_line_metrics(&layout, style, |prefix| {
+            ctx.text.measure(prefix, style, None).0
+        });
     }
 
-    fn measure_prefix_width(&self, ctx: &mut PaintContext, style: &TextStyle, text: &str) -> f32 {
-        ctx.measure_text(text, style).0
+    fn update_line_metrics_with_paint_ctx(
+        &self,
+        ctx: &mut PaintContext,
+        style: &TextStyle,
+        max_width: Option<f32>,
+    ) {
+        let layout = ctx.text_system.layout_info(
+            self.editor.text(),
+            style,
+            TextLayoutOptions::new()
+                .with_max_width(max_width)
+                .with_wrap(TextWrap::Word),
+        );
+        self.update_line_metrics(&layout, style, |prefix| {
+            ctx.text_system.measure(prefix, style, None).0
+        });
     }
 
-    fn cursor_index_for_position(&self, x: f32, y: f32, line_height: f32) -> usize {
+    fn cursor_index_for_position(&self, x: f32, y: f32) -> usize {
         let metrics = self.line_metrics.borrow();
         if metrics.is_empty() {
             return 0;
         }
-        let line = (y / line_height).floor().max(0.0) as usize;
-        let Some(line_metrics) = metrics.get(line).or_else(|| metrics.last()) else {
+        let Some(line_metrics) = metrics
+            .iter()
+            .find(|line| y < line.y_offset + line.height)
+            .or_else(|| metrics.last())
+        else {
             return 0;
         };
 
-        if x <= 0.0 {
+        if x <= line_metrics.x_offset {
             return line_metrics.start;
         }
+        let local_x = (x - line_metrics.x_offset).max(0.0);
         if let Some((last_idx, last_x)) = line_metrics.widths.last() {
-            if x >= *last_x {
+            if local_x >= *last_x {
                 return *last_idx;
             }
         }
 
         let mut best = (line_metrics.end, f32::MAX);
         for (idx, width) in &line_metrics.widths {
-            let distance = (*width - x).abs();
+            let distance = (*width - local_x).abs();
             if distance < best.1 {
                 best = (*idx, distance);
             }
@@ -192,107 +198,9 @@ impl TextArea {
     }
 
     fn handle_action(&mut self, ctx: &mut EventContext, action: StandardAction) {
-        match action {
-            StandardAction::SelectAll => {
-                self.editor.select_all();
-                ctx.request_paint();
-            }
-            StandardAction::Copy => {
-                if let Some(text) = self.editor.copy_selection() {
-                    ctx.write_clipboard(text);
-                }
-                ctx.request_paint();
-            }
-            StandardAction::Cut => {
-                if let Some(text) = self.editor.cut_selection() {
-                    ctx.write_clipboard(text);
-                    self.fire_change();
-                    ctx.request_layout();
-                }
-            }
-            StandardAction::Undo if self.editor.undo() => {
-                self.fire_change();
-                ctx.request_layout();
-            }
-            StandardAction::Redo if self.editor.redo() => {
-                self.fire_change();
-                ctx.request_layout();
-            }
-            StandardAction::Backspace if self.editor.backspace() => {
-                self.fire_change();
-                ctx.request_layout();
-            }
-            StandardAction::Delete if self.editor.delete_forward() => {
-                self.fire_change();
-                ctx.request_layout();
-            }
-            StandardAction::MoveLeft => {
-                self.editor.move_left(false);
-                ctx.request_paint();
-            }
-            StandardAction::MoveRight => {
-                self.editor.move_right(false);
-                ctx.request_paint();
-            }
-            StandardAction::MoveUp => {
-                self.editor.move_up(false);
-                ctx.request_paint();
-            }
-            StandardAction::MoveDown => {
-                self.editor.move_down(false);
-                ctx.request_paint();
-            }
-            StandardAction::SelectLeft => {
-                self.editor.move_left(true);
-                ctx.request_paint();
-            }
-            StandardAction::SelectRight => {
-                self.editor.move_right(true);
-                ctx.request_paint();
-            }
-            StandardAction::SelectUp => {
-                self.editor.move_up(true);
-                ctx.request_paint();
-            }
-            StandardAction::SelectDown => {
-                self.editor.move_down(true);
-                ctx.request_paint();
-            }
-            StandardAction::MoveWordLeft => {
-                self.editor.move_word_left(false);
-                ctx.request_paint();
-            }
-            StandardAction::MoveWordRight => {
-                self.editor.move_word_right(false);
-                ctx.request_paint();
-            }
-            StandardAction::SelectWordLeft => {
-                self.editor.move_word_left(true);
-                ctx.request_paint();
-            }
-            StandardAction::SelectWordRight => {
-                self.editor.move_word_right(true);
-                ctx.request_paint();
-            }
-            StandardAction::MoveToStart => {
-                self.editor.move_to_start(false);
-                ctx.request_paint();
-            }
-            StandardAction::MoveToEnd => {
-                self.editor.move_to_end(false);
-                ctx.request_paint();
-            }
-            StandardAction::SelectToStart => {
-                self.editor.move_to_start(true);
-                ctx.request_paint();
-            }
-            StandardAction::SelectToEnd => {
-                self.editor.move_to_end(true);
-                ctx.request_paint();
-            }
-            _ => {}
+        if apply_standard_action(&mut self.editor, ctx, action, true) {
+            self.fire_change();
         }
-        ctx.stop_propagation();
     }
 }
 
@@ -339,187 +247,126 @@ impl Widget for TextArea {
     }
 
     fn rebuild(&mut self, ctx: &mut crate::BuildContext) {
-        if let Some(state) = ctx
-            .take_boxed_state()
-            .and_then(|state| state.downcast::<TextAreaBuildState>().ok())
-            .map(|state| *state)
-        {
-            if state.declared_value == self.declared_value {
-                self.editor = state.editor;
-            }
-        }
-
-        ctx.store_boxed_state(Box::new(TextAreaBuildState {
-            editor: self.editor.clone(),
-            declared_value: self.declared_value.clone(),
-        }));
+        restore_editor_build_state(&mut self.editor, &self.declared_value, true, ctx);
+        persist_editor_build_state(&self.editor, &self.declared_value, true, ctx);
     }
 
     fn persist_build_state(&self, ctx: &mut crate::BuildContext) {
-        ctx.store_boxed_state(Box::new(TextAreaBuildState {
-            editor: self.editor.clone(),
-            declared_value: self.declared_value.clone(),
-        }));
+        persist_editor_build_state(&self.editor, &self.declared_value, true, ctx);
     }
 
     fn style(&self) -> Style {
-        let style = self.resolved_style();
-        Style {
-            size: Size {
-                width: if self.fill_width {
-                    percent(1.0)
-                } else {
-                    auto()
-                },
-                height: auto(),
-            },
-            padding: Rect {
-                left: length(style.padding_h),
-                right: length(style.padding_h),
-                top: length(style.padding_v),
-                bottom: length(style.padding_v),
-            },
-            min_size: Size {
-                width: length(style.min_width),
-                height: length(style.min_height),
-            },
-            ..Default::default()
-        }
+        editor_widget_style(&self.resolved_style(), self.fill_width)
     }
 
     fn paint(&self, ctx: &mut PaintContext) {
         let style = self.resolved_style();
         let bounds = ctx.bounds();
-        let focused = ctx.has_focus();
         let scale = ctx.scale_factor;
-
-        let bg = if focused {
-            style.background_focused
-        } else {
-            style.background
-        };
-        let border = if focused {
-            style.border_color_focused
-        } else {
-            style.border_color
-        };
-        ctx.fill_bordered_rect(bounds, bg, style.corner_radius, style.border_width, border);
-
-        if focused {
-            let controls = current_theme().controls;
-            let focus_bounds = focus_ring_bounds(bounds, scale, &controls);
-            ctx.fill_bordered_rect(
-                focus_bounds,
-                Color::TRANSPARENT,
-                style.corner_radius + 2.0,
-                focus_ring_border_width(scale, &controls),
-                focus_ring_color(current_theme().colors.border_focus),
-            );
-        }
+        let focused = ctx.has_focus();
+        paint_editor_frame(ctx, bounds, &style);
 
         let padding_h = style.padding_h * scale;
         let padding_v = style.padding_v * scale;
         let text_x = bounds.x + padding_h;
         let text_y = bounds.y + padding_v;
-        let text_style = TextStyle::default()
-            .with_family(current_theme().typography.font_family.clone())
-            .with_size(style.font_size)
-            .with_color(style.text_color);
-        let placeholder_style = TextStyle::default()
-            .with_family(current_theme().typography.font_family)
-            .with_size(style.font_size)
-            .with_color(style.placeholder_color);
+        let content_width = ((bounds.width / scale) - style.padding_h * 2.0).max(0.0);
+        let content_bounds = sparsha_core::Rect::new(
+            text_x,
+            text_y,
+            (bounds.width - padding_h * 2.0).max(0.0),
+            (bounds.height - padding_v * 2.0).max(0.0),
+        );
+        let text_style = editor_text_style(&style);
+        let placeholder_style = editor_placeholder_style(&style);
 
-        self.update_line_metrics_with_paint_ctx(ctx, &text_style);
-        let (_, line_height) = ctx.measure_text("Ay", &text_style);
-        let lines = line_slices(self.editor.text());
+        self.update_line_metrics_with_paint_ctx(ctx, &text_style, Some(content_width));
 
         if self.editor.text().is_empty() {
             if !self.placeholder.is_empty() {
-                ctx.draw_text(&self.placeholder, &placeholder_style, text_x, text_y);
+                ctx.draw_text_block(
+                    &self.placeholder,
+                    &placeholder_style,
+                    content_bounds,
+                    TextWrap::Word,
+                    sparsha_text::TextLayoutAlignment::Start,
+                    None,
+                );
             }
         } else {
             if let Some((selection_start, selection_end)) = self.editor.selection_range() {
-                for (line_index, (start, end, _slice)) in lines.iter().enumerate() {
-                    let highlight_start = selection_start.max(*start);
-                    let highlight_end = selection_end.min(*end);
+                for line_metrics in self.line_metrics.borrow().iter() {
+                    let highlight_start = selection_start.max(line_metrics.start);
+                    let highlight_end = selection_end.min(line_metrics.end);
                     if highlight_start >= highlight_end {
                         continue;
                     }
-
-                    let line_metrics = self
-                        .line_metrics
-                        .borrow()
-                        .get(line_index)
-                        .cloned()
-                        .unwrap_or(LineMetrics {
-                            start: *start,
-                            end: *end,
-                            widths: vec![(*start, 0.0)],
-                        });
 
                     let start_x = line_metrics
                         .widths
                         .iter()
                         .find_map(|(idx, width)| (*idx == highlight_start).then_some(*width))
-                        .unwrap_or_default()
-                        * scale;
+                        .unwrap_or_default();
                     let end_x = line_metrics
                         .widths
                         .iter()
                         .find_map(|(idx, width)| (*idx == highlight_end).then_some(*width))
-                        .unwrap_or(start_x / scale)
-                        * scale;
+                        .unwrap_or(start_x);
 
                     ctx.fill_rect(
                         sparsha_core::Rect::new(
-                            text_x + start_x,
-                            text_y + line_index as f32 * line_height,
-                            (end_x - start_x).max(0.0),
-                            line_height,
+                            text_x + (line_metrics.x_offset + start_x) * scale,
+                            text_y + line_metrics.y_offset * scale,
+                            (end_x - start_x).max(0.0) * scale,
+                            line_metrics.height * scale,
                         ),
                         Color::from_hex(0x3B82F6).with_alpha(0.3),
                     );
                 }
             }
 
-            for (line_index, (_start, _end, slice)) in lines.iter().enumerate() {
-                ctx.draw_text(
-                    slice,
-                    &text_style,
-                    text_x,
-                    text_y + line_index as f32 * line_height,
-                );
-            }
+            ctx.draw_text_block(
+                self.editor.text(),
+                &text_style,
+                content_bounds,
+                TextWrap::Word,
+                sparsha_text::TextLayoutAlignment::Start,
+                None,
+            );
         }
 
         if focused {
             ctx.request_next_frame();
             let cursor_visible = (ctx.elapsed_time * 2.0).fract() < 0.5;
             if cursor_visible {
-                let (line, _column) = self.editor.line_and_column(self.editor.cursor());
-                let line_metrics =
-                    self.line_metrics
-                        .borrow()
-                        .get(line)
-                        .cloned()
-                        .unwrap_or(LineMetrics {
-                            start: 0,
-                            end: 0,
-                            widths: vec![(0, 0.0)],
-                        });
+                let line_metrics = self
+                    .line_metrics
+                    .borrow()
+                    .iter()
+                    .find(|line| {
+                        self.editor.cursor() >= line.start && self.editor.cursor() <= line.end
+                    })
+                    .cloned()
+                    .or_else(|| self.line_metrics.borrow().last().cloned())
+                    .unwrap_or(LineMetrics {
+                        start: 0,
+                        end: 0,
+                        x_offset: 0.0,
+                        y_offset: 0.0,
+                        height: text_style.font_size * text_style.line_height,
+                        widths: vec![(0, 0.0)],
+                    });
                 let cursor_x = line_metrics
                     .widths
                     .iter()
                     .find_map(|(idx, width)| (*idx == self.editor.cursor()).then_some(*width))
-                    .unwrap_or_default()
-                    * scale;
+                    .unwrap_or_default();
                 ctx.fill_rect(
                     sparsha_core::Rect::new(
-                        text_x + cursor_x,
-                        text_y + line as f32 * line_height,
+                        text_x + (line_metrics.x_offset + cursor_x) * scale,
+                        text_y + line_metrics.y_offset * scale,
                         2.0 * scale,
-                        line_height,
+                        line_metrics.height * scale,
                     ),
                     style.text_color,
                 );
@@ -533,30 +380,27 @@ impl Widget for TextArea {
                 let style = self.resolved_style();
                 ctx.request_focus();
                 let local = ctx.to_local(*pos);
-                let line_height = style.font_size * 1.2;
                 let x = (local.x - style.padding_h).max(0.0);
                 let y = (local.y - style.padding_v).max(0.0);
-                let index = self.cursor_index_for_position(x, y, line_height);
+                let index = self.cursor_index_for_position(x, y);
                 self.editor.set_cursor(index, false);
                 ctx.capture_pointer();
             }
             InputEvent::PointerMove { pos } if ctx.has_capture => {
                 let style = self.resolved_style();
                 let local = ctx.to_local(*pos);
-                let line_height = style.font_size * 1.2;
                 let x = (local.x - style.padding_h).max(0.0);
                 let y = (local.y - style.padding_v).max(0.0);
-                let index = self.cursor_index_for_position(x, y, line_height);
+                let index = self.cursor_index_for_position(x, y);
                 self.editor.set_cursor(index, true);
                 ctx.request_paint();
             }
             InputEvent::PointerUp { pos, .. } if ctx.has_capture => {
                 let style = self.resolved_style();
                 let local = ctx.to_local(*pos);
-                let line_height = style.font_size * 1.2;
                 let x = (local.x - style.padding_h).max(0.0);
                 let y = (local.y - style.padding_v).max(0.0);
-                let index = self.cursor_index_for_position(x, y, line_height);
+                let index = self.cursor_index_for_position(x, y);
                 self.editor.set_cursor(index, true);
                 ctx.release_pointer();
             }
@@ -632,10 +476,14 @@ impl Widget for TextArea {
 
     fn measure(&self, ctx: &mut crate::LayoutContext) -> Option<(f32, f32)> {
         let style = self.resolved_style();
-        let text_style = TextStyle::default()
-            .with_family(current_theme().typography.font_family)
-            .with_size(style.font_size);
-        self.update_line_metrics_with_layout_ctx(ctx, &text_style);
+        let text_style = editor_text_style(&style);
+        let horizontal_chrome = style.padding_h * 2.0 + style.border_width * 2.0;
+        let vertical_chrome = style.padding_v * 2.0 + style.border_width * 2.0;
+        let content_width = ctx
+            .max_width
+            .map(|width| (width - horizontal_chrome).max(0.0))
+            .filter(|width| *width > 0.0);
+        self.update_line_metrics_with_layout_ctx(ctx, &text_style, content_width);
 
         let sample = if self.editor.text().is_empty() {
             if self.placeholder.is_empty() {
@@ -646,24 +494,21 @@ impl Widget for TextArea {
         } else {
             self.editor.text()
         };
-        let lines = line_slices(sample);
-        let mut max_width: f32 = 0.0;
-        let mut line_height: f32 = 0.0;
-        for (_, _, slice) in &lines {
-            let (width, height) = ctx.measure_text(slice, &text_style);
-            max_width = max_width.max(width);
-            line_height = line_height.max(height);
-        }
-        if line_height <= 0.0 {
-            line_height = ctx.measure_text("Ay", &text_style).1;
-        }
+        let layout = ctx.text.layout_info(
+            sample,
+            &text_style,
+            TextLayoutOptions::new()
+                .with_max_width(content_width)
+                .with_wrap(TextWrap::Word),
+        );
 
-        let width =
-            (max_width + style.padding_h * 2.0 + style.border_width * 2.0).max(style.min_width);
-        let height =
-            (line_height * lines.len() as f32 + style.padding_v * 2.0 + style.border_width * 2.0)
-                .max(style.min_height);
+        let width = (layout.width + horizontal_chrome).max(style.min_width);
+        let height = (layout.height + vertical_chrome).max(style.min_height);
         Some((width, height))
+    }
+
+    fn requires_post_layout_measurement(&self) -> bool {
+        true
     }
 
     fn on_focus(&mut self) {
@@ -695,34 +540,14 @@ impl Widget for TextArea {
         action: AccessibilityAction,
         value: Option<String>,
     ) -> bool {
-        if matches!(action, AccessibilityAction::SetValue) {
-            let next = value.unwrap_or_default();
-            if self.editor.text() != next {
-                self.editor.set_text(next);
-                self.fire_change();
-                return true;
-            }
+        if matches!(action, AccessibilityAction::SetValue)
+            && set_editor_value(&mut self.editor, value)
+        {
+            self.fire_change();
+            return true;
         }
         false
     }
-}
-
-fn line_slices(text: &str) -> Vec<(usize, usize, &str)> {
-    let mut lines = Vec::new();
-    if text.is_empty() {
-        lines.push((0, 0, ""));
-        return lines;
-    }
-    let mut start = 0usize;
-    for segment in text.split('\n') {
-        let end = start + segment.len();
-        lines.push((start, end, segment));
-        start = end.saturating_add(1);
-    }
-    if text.ends_with('\n') {
-        lines.push((text.len(), text.len(), ""));
-    }
-    lines
 }
 
 #[cfg(test)]
@@ -747,6 +572,16 @@ mod tests {
             max_height: None,
         };
         let _ = area.measure(&mut ctx);
+    }
+
+    fn prepare_area_with_width(area: &TextArea, max_width: f32) -> (f32, f32) {
+        let mut text = TextSystem::new_headless();
+        let mut ctx = crate::LayoutContext {
+            text: &mut text,
+            max_width: Some(max_width),
+            max_height: None,
+        };
+        area.measure(&mut ctx).expect("text area measurement")
     }
 
     fn reset_viewport() {
@@ -924,6 +759,57 @@ mod tests {
             .expect("width after trailing space");
 
         assert!(width_after_space > width_after_a);
+    }
+
+    #[test]
+    fn wrapped_multiline_measurement_grows_height_when_width_is_constrained() {
+        reset_viewport();
+        let area = TextArea::builder()
+            .value("alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu")
+            .fill_width(true)
+            .build();
+
+        let unconstrained = prepare_area_with_width(&area, 480.0);
+        let constrained = prepare_area_with_width(&area, 120.0);
+
+        assert!(constrained.1 > unconstrained.1);
+        assert!(area.line_metrics.borrow().len() > 1);
+    }
+
+    #[test]
+    fn wrapped_multiline_hit_testing_tracks_visual_lines() {
+        reset_viewport();
+        let mut area = TextArea::builder()
+            .value("alpha beta gamma delta epsilon zeta")
+            .fill_width(true)
+            .build();
+        area.set_id(Default::default());
+        let _ = prepare_area_with_width(&area, 180.0);
+
+        let second_line = area
+            .line_metrics
+            .borrow()
+            .get(1)
+            .cloned()
+            .expect("second visual line");
+        let layout = layout_bounds(0.0, 0.0, 180.0, 220.0);
+        let layout_tree = LayoutTree::new();
+        let mut focus = FocusManager::new();
+        let mut event_ctx = mock_event_context(layout, &layout_tree, &mut focus, area.id(), false);
+
+        area.event(
+            &mut event_ctx,
+            &InputEvent::PointerDown {
+                pos: glam::vec2(
+                    second_line.x_offset + 2.0,
+                    second_line.y_offset + second_line.height * 0.5,
+                ),
+                button: sparsha_input::PointerButton::Primary,
+            },
+        );
+
+        assert!(area.editor.cursor() >= second_line.start);
+        assert!(area.editor.cursor() <= second_line.end);
     }
 
     #[test]

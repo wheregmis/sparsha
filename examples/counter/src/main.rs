@@ -15,31 +15,11 @@ fn material_counter_theme() -> Theme {
     theme.typography.small_size = 14.0;
     theme.typography.title_size = 20.0;
     theme.typography.button_size = 16.0;
-    theme.radii.md = 4.0;
     theme.radii.lg = 28.0;
     theme.controls.control_height = 40.0;
     theme.controls.control_padding_x = 16.0;
     theme.controls.control_padding_y = 10.0;
     theme
-}
-
-fn floating_action_button_style(theme: &Theme) -> ButtonStyle {
-    ButtonStyle {
-        background: theme.colors.primary,
-        background_hovered: theme.colors.primary_hovered,
-        background_pressed: theme.colors.primary_pressed,
-        background_disabled: theme.colors.disabled,
-        text_color: Color::WHITE,
-        text_color_disabled: theme.colors.text_muted,
-        border_color: Color::TRANSPARENT,
-        border_width: 0.0,
-        corner_radius: 28.0,
-        padding_h: 0.0,
-        padding_v: 0.0,
-        font_size: 32.0,
-        min_width: 56.0,
-        min_height: 56.0,
-    }
 }
 
 fn main() -> Result<(), sparsha::AppRunError> {
@@ -66,73 +46,45 @@ fn main() -> Result<(), sparsha::AppRunError> {
         .run()
 }
 
-fn counter_app(cx: &mut ComponentContext<'_>) -> Container {
+fn counter_app(cx: &mut ComponentContext<'_>) -> Scaffold {
     let count = cx.signal(0i32);
     let theme = cx.theme();
-    let fab_style = floating_action_button_style(&theme);
 
-    Container::column()
-        .fill()
-        .background(theme.colors.background)
-        .child(
-            Container::column()
-                .fill_width()
-                .height(56.0)
-                .padding_sides(16.0, 16.0, 0.0, 0.0)
-                .main_axis_alignment(MainAxisAlignment::Center)
-                .cross_axis_alignment(CrossAxisAlignment::Center)
-                .background(theme.colors.primary)
-                .child(
-                    Text::builder()
-                        .content("Sparsha Demo Home Page")
-                        .font_size(20.0)
-                        .color(Color::WHITE)
-                        .fill_width(true)
-                        .align(TextAlign::Center)
-                        .build(),
-                ),
-        )
-        .child(
-            Container::column()
-                .fill_width()
-                .flex_grow(1.0)
-                .main_axis_alignment(MainAxisAlignment::Center)
-                .cross_axis_alignment(CrossAxisAlignment::Center)
-                .padding_sides(24.0, 24.0, 24.0, 24.0)
-                .gap(12.0)
-                .child(
-                    Text::builder()
-                        .content("You have pushed the button this many times:")
-                        .font_size(16.0)
-                        .color(theme.colors.text_muted)
-                        .fill_width(true)
-                        .align(TextAlign::Center)
-                        .build(),
-                )
-                .child(
-                    Text::builder()
-                        .content(count.get().to_string())
-                        .font_size(72.0)
-                        .bold(true)
-                        .color(theme.colors.text_primary)
-                        .fill_width(true)
-                        .align(TextAlign::Center)
-                        .build(),
-                )
-        )
-        .child(
-            Container::row()
-                .fill_width()
-                .padding_sides(24.0, 24.0, 0.0, 28.0)
-                .main_axis_alignment(MainAxisAlignment::End)
-                .child(
-                    Button::builder()
-                        .label("+")
-                        .style(fab_style)
-                        .on_click(move || {
-                            count.set(count.get() + 1);
-                        })
-                        .build(),
-                ),
-        )
+    Scaffold::new(Center::new(Padding::all(
+        24.0,
+        Container::column()
+            .fill_width()
+            .gap(theme.spacing.md)
+            .cross_axis_alignment(CrossAxisAlignment::Stretch)
+            .child(
+                Text::builder()
+                    .content("You have pushed the button this many times:")
+                    .font_size(16.0)
+                    .color(theme.colors.text_muted)
+                    .fill_width(true)
+                    .align(TextAlign::Center)
+                    .overflow(TextOverflow::Clip)
+                    .build(),
+            )
+            .child(
+                Text::builder()
+                    .content(count.get().to_string())
+                    .font_size(72.0)
+                    .bold(true)
+                    .color(theme.colors.text_primary)
+                    .fill_width(true)
+                    .align(TextAlign::Center)
+                    .overflow(TextOverflow::Clip)
+                    .build(),
+            ),
+    )))
+    .background(theme.colors.background)
+    .app_bar(AppBar::new("Sparsha Demo Home Page").center_title(true))
+    .floating_action_button(
+        FloatingActionButton::new("+")
+            .accessibility_label("Increment counter")
+            .on_click(move || {
+                count.set(count.get() + 1);
+            }),
+    )
 }

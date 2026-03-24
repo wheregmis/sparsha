@@ -1,7 +1,7 @@
 //! Draw commands that represent what to render.
 
 use sparsha_core::{Color, GlyphInstance, Rect};
-use sparsha_text::TextStyle;
+use sparsha_text::{TextLayoutAlignment, TextStyle, TextWrap};
 
 /// A logical text run that can be consumed by different render backends.
 #[derive(Clone, Debug)]
@@ -12,6 +12,14 @@ pub struct TextRun {
     pub style: TextStyle,
     /// Top-left origin in render-space pixels.
     pub position: (f32, f32),
+    /// Optional container width for wrapping/alignment.
+    pub max_width: Option<f32>,
+    /// Line alignment within the optional container width.
+    pub alignment: TextLayoutAlignment,
+    /// Maximum visible lines, if clamped.
+    pub max_lines: Option<usize>,
+    /// Wrapping behavior for the text run.
+    pub wrap: TextWrap,
 }
 
 /// A single draw command representing a primitive to render.
@@ -165,6 +173,38 @@ impl DrawList {
                     text,
                     style,
                     position: (x, y),
+                    max_width: None,
+                    alignment: TextLayoutAlignment::Start,
+                    max_lines: None,
+                    wrap: TextWrap::NoWrap,
+                },
+            });
+        }
+    }
+
+    /// Draw a logical text run with explicit layout options.
+    pub fn text_run_layout(
+        &mut self,
+        text: impl Into<String>,
+        style: TextStyle,
+        x: f32,
+        y: f32,
+        max_width: Option<f32>,
+        alignment: TextLayoutAlignment,
+        max_lines: Option<usize>,
+        wrap: TextWrap,
+    ) {
+        let text = text.into();
+        if !text.is_empty() {
+            self.push(DrawCommand::TextRun {
+                run: TextRun {
+                    text,
+                    style,
+                    position: (x, y),
+                    max_width,
+                    alignment,
+                    max_lines,
+                    wrap,
                 },
             });
         }

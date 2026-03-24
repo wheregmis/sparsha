@@ -7,18 +7,103 @@ use parley::fontique::Blob;
 use parley::{
     layout::{Alignment, GlyphRun, PositionedLayoutItem},
     style::{
-        FontFamily, FontStack, FontStyle, FontWeight, GenericFamily, LineHeight, StyleProperty,
+        FontFamily, FontStack, FontStyle, FontWeight, GenericFamily, LineHeight, OverflowWrap,
+        StyleProperty, TextWrapMode,
     },
     FontContext, Layout, LayoutContext,
 };
 use sparsha_core::{Color, GlyphInstance};
 use std::collections::HashMap;
+use std::ops::Range;
 use swash::{
     scale::{Render, ScaleContext, Source, StrikeWith},
     zeno::{Format, Vector},
     FontRef,
 };
 use wgpu::{Device, Queue};
+
+/// Horizontal alignment for constrained text layout.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum TextLayoutAlignment {
+    #[default]
+    Start,
+    Center,
+    End,
+}
+
+impl From<TextLayoutAlignment> for Alignment {
+    fn from(value: TextLayoutAlignment) -> Self {
+        match value {
+            TextLayoutAlignment::Start => Alignment::Start,
+            TextLayoutAlignment::Center => Alignment::Center,
+            TextLayoutAlignment::End => Alignment::End,
+        }
+    }
+}
+
+/// Wrapping behavior for constrained text layout.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum TextWrap {
+    NoWrap,
+    #[default]
+    Word,
+    Anywhere,
+}
+
+/// Layout options for shaped or measured text.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TextLayoutOptions {
+    pub max_width: Option<f32>,
+    pub alignment: TextLayoutAlignment,
+    pub max_lines: Option<usize>,
+    pub wrap: TextWrap,
+}
+
+/// A single visual line in a constrained text layout.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TextLayoutLine {
+    pub text_range: Range<usize>,
+    pub offset: f32,
+    pub baseline: f32,
+    pub advance: f32,
+    pub line_height: f32,
+    pub min_coord: f32,
+    pub max_coord: f32,
+}
+
+/// Paragraph layout information for constrained text.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TextLayoutInfo {
+    pub width: f32,
+    pub height: f32,
+    pub lines: Vec<TextLayoutLine>,
+}
+
+impl TextLayoutOptions {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_max_width(mut self, max_width: Option<f32>) -> Self {
+        self.max_width = max_width;
+        self
+    }
+
+    pub fn with_alignment(mut self, alignment: TextLayoutAlignment) -> Self {
+        self.alignment = alignment;
+        self
+    }
+
+    pub fn with_max_lines(mut self, max_lines: Option<usize>) -> Self {
+        self.max_lines = max_lines;
+        self
+    }
+
+    pub fn with_wrap(mut self, wrap: TextWrap) -> Self {
+        self.wrap = wrap;
+        self
+    }
+}
 
 // Embed Inter on native platforms only to keep web WASM payload smaller.
 #[cfg(not(target_arch = "wasm32"))]
@@ -71,6 +156,11 @@ impl TextStyle {
         self
     }
 
+    pub fn with_line_height(mut self, line_height: f32) -> Self {
+        self.line_height = line_height;
+        self
+    }
+
     pub fn with_family(mut self, family: impl Into<String>) -> Self {
         self.family = family.into();
         self
@@ -112,6 +202,7 @@ pub struct TextSystem {
     scale_cx: ScaleContext,
     atlas: Option<GlyphAtlas>,
     measure_cache: HashMap<TextCacheKey, (f32, f32)>,
+    layout_cache: HashMap<TextCacheKey, TextLayoutInfo>,
     shape_cache: HashMap<TextCacheKey, ShapedText>,
     metrics_backend: Box<dyn TextMetricsBackend>,
 }
@@ -126,10 +217,13 @@ struct TextCacheKey {
     bold: bool,
     italic: bool,
     max_width_bits: Option<u32>,
+    alignment: TextLayoutAlignment,
+    max_lines: Option<usize>,
+    wrap: TextWrap,
 }
 
 impl TextCacheKey {
-    fn new(text: &str, style: &TextStyle, max_width: Option<f32>) -> Self {
+    fn new(text: &str, style: &TextStyle, options: TextLayoutOptions) -> Self {
         Self {
             text: text.to_owned(),
             family: style.family.clone(),
@@ -143,7 +237,10 @@ impl TextCacheKey {
             ],
             bold: style.bold,
             italic: style.italic,
-            max_width_bits: max_width.map(f32::to_bits),
+            max_width_bits: options.max_width.map(f32::to_bits),
+            alignment: options.alignment,
+            max_lines: options.max_lines,
+            wrap: options.wrap,
         }
     }
 }
@@ -180,6 +277,7 @@ impl TextSystem {
             scale_cx,
             atlas: None,
             measure_cache: HashMap::new(),
+            layout_cache: HashMap::new(),
             shape_cache: HashMap::new(),
             metrics_backend: default_text_metrics_backend(),
         }
@@ -207,30 +305,16 @@ impl TextSystem {
         }
     }
 
-    /// Shape and position text for rendering.
-    pub fn shape(
+    fn build_layout(
         &mut self,
-        device: &Device,
-        queue: &Queue,
         text: &str,
         style: &TextStyle,
-        max_width: Option<f32>,
-    ) -> ShapedText {
-        if text.is_empty() {
-            return ShapedText::default();
-        }
-        let cache_key = TextCacheKey::new(text, style, max_width);
-        if let Some(cached) = self.shape_cache.get(&cache_key) {
-            return cached.clone();
-        }
-        self.ensure_atlas(device);
-
-        // Build layout with Parley
+        options: TextLayoutOptions,
+    ) -> Layout<[u8; 4]> {
         let mut builder = self
             .layout_cx
             .ranged_builder(&mut self.font_cx, text, 1.0, true);
 
-        // Apply default styles
         builder.push_default(StyleProperty::FontSize(style.font_size));
         builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(
             style.line_height,
@@ -250,7 +334,21 @@ impl TextSystem {
             .into(),
         )));
 
-        // Apply weight and style
+        match options.wrap {
+            TextWrap::NoWrap => {
+                builder.push_default(StyleProperty::TextWrapMode(TextWrapMode::NoWrap));
+                builder.push_default(StyleProperty::OverflowWrap(OverflowWrap::Normal));
+            }
+            TextWrap::Word => {
+                builder.push_default(StyleProperty::TextWrapMode(TextWrapMode::Wrap));
+                builder.push_default(StyleProperty::OverflowWrap(OverflowWrap::Normal));
+            }
+            TextWrap::Anywhere => {
+                builder.push_default(StyleProperty::TextWrapMode(TextWrapMode::Wrap));
+                builder.push_default(StyleProperty::OverflowWrap(OverflowWrap::Anywhere));
+            }
+        }
+
         if style.bold {
             builder.push_default(StyleProperty::FontWeight(FontWeight::BOLD));
         }
@@ -258,23 +356,113 @@ impl TextSystem {
             builder.push_default(StyleProperty::FontStyle(FontStyle::Italic));
         }
 
-        // Set brush color (Parley uses [u8; 4] for colors)
         let color_arr = style.color.to_u8_array();
         builder.push_default(StyleProperty::Brush(color_arr));
 
-        // Build the layout
         let mut layout: Layout<[u8; 4]> = builder.build(text);
+        layout.break_all_lines(options.max_width);
+        layout.align(
+            options.max_width,
+            options.alignment.into(),
+            parley::layout::AlignmentOptions {
+                align_when_overflowing: options.alignment != TextLayoutAlignment::Start,
+            },
+        );
+        layout
+    }
 
-        // Perform line breaking
-        layout.break_all_lines(max_width);
-        layout.align(max_width, Alignment::Start, Default::default());
+    /// Compute paragraph layout information using explicit width/alignment/clamp options.
+    pub fn layout_info(
+        &mut self,
+        text: &str,
+        style: &TextStyle,
+        options: TextLayoutOptions,
+    ) -> TextLayoutInfo {
+        if text.is_empty() {
+            return TextLayoutInfo::default();
+        }
+
+        let cache_key = TextCacheKey::new(text, style, options);
+        if let Some(cached) = self.layout_cache.get(&cache_key) {
+            return cached.clone();
+        }
+
+        let layout = self.build_layout(text, style, options);
+        let info = TextLayoutInfo {
+            width: layout_width(&layout, options.max_width, options.max_lines),
+            height: layout_height(&layout, style, options.max_lines),
+            lines: layout
+                .lines()
+                .enumerate()
+                .take_while(|(line_index, _)| {
+                    options.max_lines.is_none_or(|limit| *line_index < limit)
+                })
+                .map(|(_, line)| {
+                    let metrics = line.metrics();
+                    TextLayoutLine {
+                        text_range: line.text_range(),
+                        offset: metrics.offset,
+                        baseline: metrics.baseline,
+                        advance: metrics.advance,
+                        line_height: metrics.line_height,
+                        min_coord: metrics.min_coord,
+                        max_coord: metrics.max_coord,
+                    }
+                })
+                .collect(),
+        };
+
+        cache_insert(&mut self.layout_cache, cache_key, info.clone(), 512);
+        info
+    }
+
+    /// Shape and position text for rendering.
+    pub fn shape(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        text: &str,
+        style: &TextStyle,
+        max_width: Option<f32>,
+    ) -> ShapedText {
+        self.shape_with_options(
+            device,
+            queue,
+            text,
+            style,
+            TextLayoutOptions::new().with_max_width(max_width),
+        )
+    }
+
+    /// Shape and position text for rendering with explicit layout options.
+    pub fn shape_with_options(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        text: &str,
+        style: &TextStyle,
+        options: TextLayoutOptions,
+    ) -> ShapedText {
+        if text.is_empty() {
+            return ShapedText::default();
+        }
+        let cache_key = TextCacheKey::new(text, style, options);
+        if let Some(cached) = self.shape_cache.get(&cache_key) {
+            return cached.clone();
+        }
+        self.ensure_atlas(device);
+
+        let layout = self.build_layout(text, style, options);
 
         // Collect glyph instances
         let mut glyphs = Vec::new();
         let mut min_y: f32 = f32::MAX;
         let mut max_y: f32 = f32::MIN;
 
-        for line in layout.lines() {
+        for (line_index, line) in layout.lines().enumerate() {
+            if options.max_lines.is_some_and(|limit| line_index >= limit) {
+                break;
+            }
             for item in line.items() {
                 if let PositionedLayoutItem::GlyphRun(glyph_run) = item {
                     let mut reset_atlas = false;
@@ -306,16 +494,16 @@ impl TextSystem {
         }
 
         let total_height = if glyphs.is_empty() {
-            style.font_size * style.line_height
+            layout_height(&layout, style, options.max_lines)
         } else if max_y > f32::MIN {
             max_y
         } else {
-            style.font_size * style.line_height
+            layout_height(&layout, style, options.max_lines)
         };
 
         let shaped = ShapedText {
             glyphs,
-            width: layout_advance_width(&layout).max(layout.width()),
+            width: layout_width(&layout, options.max_width, options.max_lines),
             height: total_height,
         };
         cache_insert(&mut self.shape_cache, cache_key, shaped.clone(), 512);
@@ -471,15 +659,29 @@ impl TextSystem {
     /// Measure text without rasterizing (faster for layout).
     /// Returns (width, height) where height is based on line metrics.
     pub fn measure(&mut self, text: &str, style: &TextStyle, max_width: Option<f32>) -> (f32, f32) {
+        self.measure_with_options(
+            text,
+            style,
+            TextLayoutOptions::new().with_max_width(max_width),
+        )
+    }
+
+    /// Measure text without rasterizing using explicit layout options.
+    pub fn measure_with_options(
+        &mut self,
+        text: &str,
+        style: &TextStyle,
+        options: TextLayoutOptions,
+    ) -> (f32, f32) {
         if text.is_empty() {
             return (0.0, style.font_size * style.line_height);
         }
-        let cache_key = TextCacheKey::new(text, style, max_width);
+        let cache_key = TextCacheKey::new(text, style, options);
         if let Some(cached) = self.measure_cache.get(&cache_key) {
             return *cached;
         }
 
-        if max_width.is_none() {
+        if options.max_width.is_none() {
             if let Some((width, height)) = self.metrics_backend.measure_inline(text, style) {
                 let measured = (
                     width.max(0.0),
@@ -490,45 +692,10 @@ impl TextSystem {
             }
         }
 
-        // Build layout with Parley
-        let mut builder = self
-            .layout_cx
-            .ranged_builder(&mut self.font_cx, text, 1.0, true);
+        let layout = self.build_layout(text, style, options);
 
-        // Apply styles
-        builder.push_default(StyleProperty::FontSize(style.font_size));
-        builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(
-            style.line_height,
-        )));
-
-        #[cfg(target_arch = "wasm32")]
-        builder.push_default(StyleProperty::FontStack(FontStack::List(
-            vec![FontFamily::Generic(GenericFamily::SansSerif)].into(),
-        )));
-
-        #[cfg(not(target_arch = "wasm32"))]
-        builder.push_default(StyleProperty::FontStack(FontStack::List(
-            vec![
-                FontFamily::Named("Inter".into()),
-                FontFamily::Generic(GenericFamily::SansSerif),
-            ]
-            .into(),
-        )));
-
-        if style.bold {
-            builder.push_default(StyleProperty::FontWeight(FontWeight::BOLD));
-        }
-        if style.italic {
-            builder.push_default(StyleProperty::FontStyle(FontStyle::Italic));
-        }
-
-        let mut layout: Layout<[u8; 4]> = builder.build(text);
-
-        // Perform line breaking
-        layout.break_all_lines(max_width);
-
-        let measured_width = layout_advance_width(&layout).max(layout.width());
-        let measured_height = layout.height();
+        let measured_width = layout_width(&layout, options.max_width, options.max_lines);
+        let measured_height = layout_height(&layout, style, options.max_lines);
 
         // On web builds without embedded fonts, the shaping backend can occasionally return
         // zero metrics while browser CSS text still renders. Guard against that so layout
@@ -544,7 +711,7 @@ impl TextSystem {
             measured_width
         } else {
             let approx = text.chars().count() as f32 * style.font_size * 0.55;
-            match max_width {
+            match options.max_width {
                 Some(limit) if limit.is_finite() && limit > 0.0 => approx.min(limit),
                 _ => approx,
             }
@@ -554,12 +721,105 @@ impl TextSystem {
         cache_insert(&mut self.measure_cache, cache_key, measured, 1024);
         measured
     }
+
+    /// Truncate text to the longest prefix that fits the given layout options, appending an
+    /// ellipsis when truncation is required.
+    pub fn ellipsize_with_options(
+        &mut self,
+        text: &str,
+        style: &TextStyle,
+        options: TextLayoutOptions,
+    ) -> String {
+        if text.is_empty() {
+            return String::new();
+        }
+
+        let max_lines = options.max_lines.unwrap_or(1).max(1);
+        let options = options.with_max_lines(Some(max_lines));
+
+        if text_fits_layout(self, text, style, options) {
+            return text.to_owned();
+        }
+
+        let ellipsis = "\u{2026}";
+        if text_fits_layout(self, ellipsis, style, options) {
+            let mut boundaries: Vec<usize> = text.char_indices().map(|(index, _)| index).collect();
+            boundaries.push(text.len());
+
+            let mut best = ellipsis.to_owned();
+            let mut low = 0usize;
+            let mut high = boundaries.len() - 1;
+
+            while low <= high {
+                let mid = low + (high - low) / 2;
+                let prefix_end = boundaries[mid];
+                let candidate = ellipsized_candidate(text, prefix_end);
+
+                if text_fits_layout(self, &candidate, style, options) {
+                    best = candidate;
+                    low = mid.saturating_add(1);
+                } else if mid == 0 {
+                    break;
+                } else {
+                    high = mid - 1;
+                }
+            }
+
+            return best;
+        }
+
+        ellipsis.to_owned()
+    }
 }
 
-fn layout_advance_width(layout: &Layout<[u8; 4]>) -> f32 {
-    let mut max_width: f32 = 0.0;
+fn text_fits_layout(
+    system: &mut TextSystem,
+    text: &str,
+    style: &TextStyle,
+    options: TextLayoutOptions,
+) -> bool {
+    if text.is_empty() {
+        return true;
+    }
 
-    for line in layout.lines() {
+    let info = system.layout_info(text, style, options);
+    let consumed_all_text = info
+        .lines
+        .last()
+        .map(|line| line.text_range.end >= text.len())
+        .unwrap_or(false);
+    if !consumed_all_text {
+        return false;
+    }
+
+    match options.max_width {
+        Some(limit) if limit.is_finite() && limit > 0.0 => {
+            info.lines.iter().all(|line| line.advance <= limit + 1e-3)
+        }
+        _ => true,
+    }
+}
+
+fn ellipsized_candidate(text: &str, prefix_end: usize) -> String {
+    let trimmed = text[..prefix_end].trim_end();
+    if trimmed.is_empty() {
+        "\u{2026}".to_owned()
+    } else {
+        format!("{trimmed}\u{2026}")
+    }
+}
+
+fn layout_width(
+    layout: &Layout<[u8; 4]>,
+    max_width_constraint: Option<f32>,
+    max_lines: Option<usize>,
+) -> f32 {
+    let mut widest_line: f32 = 0.0;
+
+    for (line_index, line) in layout.lines().enumerate() {
+        if max_lines.is_some_and(|limit| line_index >= limit) {
+            break;
+        }
         let mut line_width: f32 = 0.0;
         for item in line.items() {
             if let PositionedLayoutItem::GlyphRun(glyph_run) = item {
@@ -570,10 +830,27 @@ fn layout_advance_width(layout: &Layout<[u8; 4]>) -> f32 {
                 line_width = line_width.max(cursor_x);
             }
         }
-        max_width = max_width.max(line_width);
+        widest_line = widest_line.max(line_width);
     }
 
-    max_width
+    match max_width_constraint {
+        Some(limit) if limit.is_finite() && limit > 0.0 => widest_line.min(limit),
+        _ => widest_line,
+    }
+}
+
+fn layout_height(layout: &Layout<[u8; 4]>, style: &TextStyle, max_lines: Option<usize>) -> f32 {
+    let fallback_height = style.font_size * style.line_height;
+    let limited_height = max_lines
+        .and_then(|limit| layout.lines().take(limit).last())
+        .map(|line| line.metrics().max_coord)
+        .unwrap_or_else(|| layout.height());
+
+    if limited_height.is_finite() && limited_height > 0.0 {
+        limited_height.max(fallback_height)
+    } else {
+        fallback_height
+    }
 }
 
 fn cache_insert<V: Clone>(
@@ -722,5 +999,95 @@ mod tests {
             with_space > without_space,
             "expected multiline trailing spaces to affect measured width: {without_space} -> {with_space}"
         );
+    }
+
+    #[test]
+    fn no_wrap_keeps_constrained_text_on_a_single_line() {
+        let mut system = TextSystem::new_headless();
+        let style = TextStyle::default().with_family("Inter").with_size(16.0);
+        let text = "Sparsha can keep this label on one visual line.";
+        let constrained = Some(120.0);
+
+        let (_, wrapped_height) = system.measure_with_options(
+            text,
+            &style,
+            TextLayoutOptions::new()
+                .with_max_width(constrained)
+                .with_wrap(TextWrap::Word),
+        );
+        let (_, no_wrap_height) = system.measure_with_options(
+            text,
+            &style,
+            TextLayoutOptions::new()
+                .with_max_width(constrained)
+                .with_wrap(TextWrap::NoWrap),
+        );
+
+        assert!(
+            no_wrap_height < wrapped_height,
+            "expected no-wrap text to stay on one line under width constraint: {wrapped_height} vs {no_wrap_height}"
+        );
+    }
+
+    #[test]
+    fn anywhere_wrap_breaks_long_words_more_aggressively() {
+        let mut system = TextSystem::new_headless();
+        let style = TextStyle::default().with_family("Inter").with_size(16.0);
+        let text = "Antidisestablishmentarianism";
+        let constrained = Some(72.0);
+
+        let (_, word_height) = system.measure_with_options(
+            text,
+            &style,
+            TextLayoutOptions::new()
+                .with_max_width(constrained)
+                .with_wrap(TextWrap::Word),
+        );
+        let (_, anywhere_height) = system.measure_with_options(
+            text,
+            &style,
+            TextLayoutOptions::new()
+                .with_max_width(constrained)
+                .with_wrap(TextWrap::Anywhere),
+        );
+
+        assert!(
+            anywhere_height > word_height,
+            "expected anywhere-wrap to break a long word into more lines: {word_height} vs {anywhere_height}"
+        );
+    }
+
+    #[test]
+    fn ellipsize_with_options_truncates_single_line_text() {
+        let mut system = TextSystem::new_headless();
+        let style = TextStyle::default().with_family("Inter").with_size(16.0);
+        let source = "Sparsha ellipsizes long labels cleanly.";
+        let options = TextLayoutOptions::new()
+            .with_max_width(Some(120.0))
+            .with_alignment(TextLayoutAlignment::Center)
+            .with_max_lines(Some(1));
+
+        let truncated = system.ellipsize_with_options(source, &style, options);
+        assert!(truncated.ends_with('\u{2026}'));
+        assert_ne!(truncated, source);
+        assert!(text_fits_layout(&mut system, &truncated, &style, options));
+    }
+
+    #[test]
+    fn ellipsize_with_options_respects_multiline_clamp() {
+        let mut system = TextSystem::new_headless();
+        let style = TextStyle::default().with_family("Inter").with_size(16.0);
+        let source = "First paragraph line that wraps.\nSecond paragraph line that also wraps.";
+        let options = TextLayoutOptions::new()
+            .with_max_width(Some(180.0))
+            .with_alignment(TextLayoutAlignment::Start)
+            .with_max_lines(Some(2));
+
+        let truncated = system.ellipsize_with_options(source, &style, options);
+        let layout = system.layout_info(&truncated, &style, options);
+
+        assert!(truncated.ends_with('\u{2026}'));
+        assert!(layout.lines.len() <= 2);
+        assert!(text_fits_layout(&mut system, &truncated, &style, options));
     }
 }

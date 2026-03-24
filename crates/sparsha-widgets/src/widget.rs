@@ -156,4 +156,10 @@ pub trait Widget {
         let _ = ctx;
         None
     }
+
+    /// Whether this widget needs a second measurement pass after its layout width is resolved.
+    #[doc(hidden)]
+    fn requires_post_layout_measurement(&self) -> bool {
+        false
+    }
 }

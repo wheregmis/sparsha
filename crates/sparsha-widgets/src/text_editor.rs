@@ -325,6 +325,7 @@ impl EditorCore {
         line_starts(&self.text)
     }
 
+    #[cfg(test)]
     pub(crate) fn line_and_column(&self, index: usize) -> (usize, usize) {
         line_and_column(&self.text, index)
     }

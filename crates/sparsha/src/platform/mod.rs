@@ -302,6 +302,7 @@ impl PlatformCapabilities {
 pub(crate) enum PlatformEffect {
     SyncTextInput,
     SyncPointerCapture,
+    SyncAccessibility,
     WriteClipboard(String),
 }
 

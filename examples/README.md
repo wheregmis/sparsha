@@ -4,7 +4,7 @@
 
 Each example is a normal Cargo binary. The examples are intended to demonstrate the stable crate-root APIs rather than internal modules.
 
-The canonical authoring surface uses a semantic split: `App::builder()`, `Router::builder()`, and `component().render(...).call()` stay bon-first; subtree-scoped typed values use `Provider::new(...)` plus `cx.use_context::<T>()`, `cx.use_context_or(...)`, or `cx.use_context_or_else(...)`, while built-in framework resources stay on dedicated accessors like `cx.viewport()` and `cx.navigator()`; structural tree widgets use semantic constructors such as `Container::column()`, `Container::row()`, `Container::main_axis_alignment(...)`, `Container::cross_axis_alignment(...)`, `Scroll::vertical(...)`, `Scroll::horizontal(...)`, `List::empty()`, and `Semantics::new(...)`; config-heavy widgets use bon builders such as `Text::builder()`, `Button::builder()`, and `List::virtualized_builder()` for the fixed-row virtualized path. Typography variants stay on that same path through `Text::builder().variant(TextVariant::Header)`.
+The canonical authoring surface uses a semantic split: `App::builder()`, `Router::builder()`, and `component().render(...).call()` stay bon-first; subtree-scoped typed values use `Provider::new(...)` plus `cx.use_context::<T>()`, `cx.use_context_or(...)`, or `cx.use_context_or_else(...)`, while built-in framework resources stay on dedicated accessors like `cx.viewport()` and `cx.navigator()`; structural tree widgets use semantic constructors such as `Container::column()`, `Container::row()`, `Container::main_axis_alignment(...)`, `Container::cross_axis_alignment(...)`, `Scroll::vertical(...)`, `Scroll::horizontal(...)`, `List::empty()`, `Semantics::new(...)`, and semantic wrappers like `Center::new(...)`, `Padding::all(...)`, `Expanded::new(...)`, `Stack::new()`, and `Positioned::new(...)`; config-heavy widgets use bon builders such as `Text::builder()`, `Button::builder()`, and `List::virtualized_builder()` for the fixed-row virtualized path. Typography variants and paragraph policy stay on that same path through `Text::builder().variant(TextVariant::Header)` and options like `line_height(...)`, `wrap(TextWrap::Word)`, `max_lines(...)`, and overflow policies such as `TextOverflow::Clip` and `TextOverflow::Ellipsis`.
 
 ## Included Examples
 
@@ -77,6 +77,12 @@ npm run web:install
 ./scripts/web-smoke.sh
 ```
 
+Run the checked-in browser wasm tests for the `sparsha` crate:
+
+```bash
+./scripts/wasm-browser-tests.sh
+```
+
 Run the lightweight web perf/startup smoke:
 
 ```bash
@@ -108,8 +114,9 @@ From the repo root, run:
 ```bash
 ./scripts/verify-foundation.sh
 ./scripts/web-smoke.sh
+./scripts/wasm-browser-tests.sh
 ./scripts/web-perf-smoke.sh
 ./scripts/release-readiness.sh
 ```
 
-That covers the native workspace checks, wasm compile checks for all eight example binaries, the showcase-focused browser smoke suite, and the lightweight perf/startup smoke path used in release readiness. Hosted automation lives in `.github/workflows/ci.yml`, `.github/workflows/release-readiness.yml`, and `.github/workflows/showcase-pages.yml`.
+That covers the native workspace checks, wasm compile checks for all seven example binaries, the multi-example browser smoke suite, the checked-in browser wasm tests, and the lightweight perf/startup smoke path used in release readiness. Hosted automation lives in `.github/workflows/ci.yml`, `.github/workflows/release-readiness.yml`, and `.github/workflows/showcase-pages.yml`.

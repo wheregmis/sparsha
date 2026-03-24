@@ -22,14 +22,16 @@ Run or confirm all of the following:
 
 Complete the manual checks that are still intentionally outside the automated gate:
 
-1. Accessibility smoke verification for the built-in widgets on native and web.
-2. Browser/native parity smoke verification for the core interaction flows that matter for 1.0.
-3. Review the examples that exercise the main product shapes:
-   - `kitchen-sink`
-   - `fractal-clock`
-   - `hybrid-overlay`
-   - `showcase`
-   - `todo`
+| Surface | Native check | Web check | Notes |
+|---|---|---|---|
+| Counter | App bar, centered copy, and FAB render on the first frame | `scripts/web-smoke.sh` counter coverage | Keep it close to the Flutter starter shape |
+| Layout probe | First frame paints without resize; teal guide and orange card overlap; delta stays at zero or HiDPI rounding tolerance | `scripts/web-smoke.sh` layout-probe coverage | Use this when debugging viewport, scaling, or startup issues |
+| Kitchen sink | Clipboard, text input, and list interaction still work | `scripts/web-smoke.sh` kitchen-sink coverage | Primary widget regression surface |
+| Hybrid overlay | GPU overlay still renders inside DOM-backed shell | `scripts/web-smoke.sh` hybrid-overlay coverage | Hybrid rendering parity check |
+| Showcase | Route switching and component samples remain interactive | `scripts/web-smoke.sh` showcase coverage | Public preview surface |
+| Todo | Route switching and worker feedback remain intact | `scripts/web-smoke.sh` todo coverage | Background-task regression surface |
+
+Accessibility smoke verification for the built-in widgets on native and web remains a manual sign-off item until a dedicated automated accessibility harness is added.
 
 ## Documentation And Release Notes
 
@@ -43,6 +45,9 @@ Before tagging a release:
 4. Confirm the platform/runtime dependency pin rationale is still accurate:
    - `winit = 0.30.12` is intentionally pinned to the current stable line
    - the pin should continue to align with `ui-events-winit` and `accesskit_winit`
+5. Confirm the browser verification entrypoints still reflect the shipped surface:
+   - `./scripts/web-smoke.sh`
+   - `./scripts/wasm-browser-tests.sh`
 
 ## Release Manager Steps
 

@@ -69,63 +69,94 @@ fn semantic_structural_widget_surface_compiles_from_the_public_crate_root() {
         let email_state = Signal::new(String::new());
         let checked_state = Signal::new(false);
         let _tree = Container::column()
-            .main_axis_alignment(MainAxisAlignment::Center)
-            .cross_axis_alignment(CrossAxisAlignment::Center)
-            .gap(12.0)
-            .padding(16.0)
+            .gap(16.0)
+            .child(Center::new(Padding::all(
+                16.0,
+                Container::column()
+                    .main_axis_alignment(MainAxisAlignment::Center)
+                    .cross_axis_alignment(CrossAxisAlignment::Center)
+                    .gap(12.0)
+                    .child(
+                        Text::builder()
+                            .content("hello")
+                            .bold(true)
+                            .line_height(1.4)
+                            .fill_width(true)
+                            .wrap(TextWrap::Word)
+                            .align(TextAlign::Center)
+                            .overflow(TextOverflow::Ellipsis)
+                            .build(),
+                    )
+                    .child(
+                        Button::builder()
+                            .label("save")
+                            .disabled(false)
+                            .on_click(|| {})
+                            .build(),
+                    )
+                    .child(
+                        Checkbox::builder()
+                            .checked(true)
+                            .on_toggle(move |next| checked_state.set(next))
+                            .build(),
+                    )
+                    .child(
+                        TextInput::builder()
+                            .placeholder("type here")
+                            .fill_width(true)
+                            .on_change(move |value| email_state.set(value.to_owned()))
+                            .on_submit(|_| {})
+                            .build(),
+                    )
+                    .child(
+                        Expanded::new(
+                            TextArea::builder()
+                                .value("notes")
+                                .fill_width(true)
+                                .on_change(|_| {})
+                                .build(),
+                        )
+                        .flex(1.0),
+                    )
+                    .child(
+                        Scroll::vertical(
+                            List::virtualized_builder()
+                                .item_count(20)
+                                .item_extent(28.0)
+                                .item_builder(|index| {
+                                    Box::new(
+                                        Text::builder().content(format!("row {index}")).build(),
+                                    )
+                                })
+                                .direction(ListDirection::Vertical)
+                                .build(),
+                        )
+                        .height(120.0)
+                        .direction(ScrollDirection::Vertical),
+                    )
+                    .child(
+                        Semantics::new(Text::builder().content("semantic label").build())
+                            .label("Semantic label"),
+                    ),
+            )))
             .child(
-                Text::builder()
-                    .content("hello")
-                    .bold(true)
-                    .fill_width(true)
-                    .align(TextAlign::Center)
-                    .build(),
-            )
-            .child(
-                Button::builder()
-                    .label("save")
-                    .disabled(false)
-                    .on_click(|| {})
-                    .build(),
-            )
-            .child(
-                Checkbox::builder()
-                    .checked(true)
-                    .on_toggle(move |next| checked_state.set(next))
-                    .build(),
-            )
-            .child(
-                TextInput::builder()
-                    .placeholder("type here")
-                    .fill_width(true)
-                    .on_change(move |value| email_state.set(value.to_owned()))
-                    .on_submit(|_| {})
-                    .build(),
-            )
-            .child(
-                TextArea::builder()
-                    .value("notes")
-                    .fill_width(true)
-                    .on_change(|_| {})
-                    .build(),
-            )
-            .child(
-                Scroll::vertical(
-                    List::virtualized_builder()
-                        .item_count(20)
-                        .item_extent(28.0)
-                        .item_builder(|index| {
-                            Box::new(Text::builder().content(format!("row {index}")).build())
-                        })
-                        .direction(ListDirection::Vertical)
-                        .build(),
-                )
-                .height(120.0)
-                .direction(ScrollDirection::Vertical),
-            )
-            .child(
-                Semantics::new(Text::builder().content("semantic label").build())
-                    .label("Semantic label"),
+                SizedBox::new().size(180.0, 120.0).child(
+                    Stack::new()
+                        .aligned(
+                            Alignment::Center,
+                            Text::builder()
+                                .content("overlay")
+                                .fill_width(true)
+                                .align(TextAlign::Center)
+                                .overflow(TextOverflow::Clip)
+                                .build(),
+                        )
+                        .positioned(
+                            Positioned::new(Button::builder().label("+").on_click(|| {}).build())
+                                .right(8.0)
+                                .bottom(8.0),
+                        ),
+                ),
             );
     });
 }

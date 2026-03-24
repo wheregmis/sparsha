@@ -14,5 +14,8 @@ echo "[release-readiness] foundation verification"
 echo "[release-readiness] browser smoke suite"
 "$ROOT_DIR/scripts/web-smoke.sh"
 
+echo "[release-readiness] wasm browser test suite"
+"$ROOT_DIR/scripts/wasm-browser-tests.sh"
+
 echo "[release-readiness] performance and startup smoke suite"
 "$ROOT_DIR/scripts/perf-smoke.sh"

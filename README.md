@@ -30,6 +30,8 @@ The built-in widget layer currently supports:
 - `List`
 - `Scroll`
 - `Provider`
+- `Center`, `Padding`, `Expanded`, `Align`, `SizedBox`, `Spacer`
+- `Stack`, `Positioned`
 - `DrawSurface`
 - `Semantics`
 
@@ -38,6 +40,8 @@ Notable current behavior:
 - `Scroll` supports vertical, horizontal, and both-axis scrolling with interactive scrollbars
 - `List` supports both simple owned-children mode and fixed-extent virtualization for large data sets
 - Default widget sizing and focus-ring behavior are aligned through shared theme control tokens
+- Semantic layout helpers cover common structure without dropping to raw flex settings: `Center`, `Padding`, `Expanded`, `Stack`, `Positioned`, `Align`, `SizedBox`, and `Spacer`
+- Paragraph text layout stays on the `Text` builder surface through `line_height(...)`, `fill_width(...)`, `wrap(TextWrap::Word)`, `max_lines(...)`, and overflow policies such as `TextOverflow::Clip` and `TextOverflow::Ellipsis`
 - Normal app screens can be authored as bon-backed function components via `component().render(...).call()` and `ComponentContext`
 - Subtree-scoped typed values can be provided with `Provider::new(...)` and read in components via `cx.use_context::<T>()`, `cx.use_context_or(...)`, or `cx.use_context_or_else(...)`
 - Built-in framework resources stay on dedicated component accessors such as `cx.viewport()`, `cx.navigator()`, and `cx.task_runtime()`
@@ -48,6 +52,7 @@ Notable current behavior:
 - Hybrid path: `DrawSurface` embeds GPU-heavy scenes into an otherwise DOM-backed UI
 - Runtime model: DOM rendering stays responsive while background work uses a worker-backed task runtime
 - Repo-owned web workflow: root build/serve/smoke scripts wrap the checked-in example `index.html`, `Trunk.toml`, and `sparsha-worker.js` assets
+- Browser wasm tests are checked in as `./scripts/wasm-browser-tests.sh` for the `sparsha` crate's `wasm_bindgen_test` entrypoints
 
 ## Task Runtime
 
@@ -87,6 +92,9 @@ fn main() -> Result<(), sparsha::AppRunError> {
                         .child(
                             Text::builder()
                                 .content("Build UI with a GPU-first stack.")
+                                .fill_width(true)
+                                .align(TextAlign::Center)
+                                .overflow(TextOverflow::Ellipsis)
                                 .build(),
                         )
                         .child(Button::builder().label("Click me").build())
@@ -200,6 +208,7 @@ Canonical verification entrypoints:
 ./scripts/verify-foundation.sh
 ./scripts/web-build-all.sh
 ./scripts/web-smoke.sh
+./scripts/wasm-browser-tests.sh
 ./scripts/web-perf-smoke.sh
 ./scripts/release-readiness.sh
 ```
@@ -210,16 +219,18 @@ Canonical verification entrypoints:
 - `cargo test --workspace`
 - `cargo check -p counter -p layout-probe -p kitchen-sink -p fractal-clock -p hybrid-overlay -p showcase -p todo --target wasm32-unknown-unknown`
 
-`web-smoke.sh` builds `examples/showcase`, serves its generated `dist/` output, and runs the Playwright showcase smoke against that page.
+`web-smoke.sh` builds and serves `examples/showcase`, `examples/todo`, `examples/kitchen-sink`, `examples/hybrid-overlay`, `examples/counter`, and `examples/layout-probe`, then runs the matching Playwright smoke suite against those pages.
+
+`wasm-browser-tests.sh` runs the checked-in `wasm_bindgen_test` browser entrypoints for `sparsha`.
 
 `web-perf-smoke.sh` builds the checked-in `todo` web example, serves it locally, and stores Lighthouse reports under `artifacts/lighthouse/`.
 
-`release-readiness.sh` composes the foundation verification, browser smoke suite, and perf/startup smoke checks into the local pre-release entrypoint that mirrors the checked-in GitHub Actions release-readiness workflow.
+`release-readiness.sh` composes the foundation verification, browser smoke suite, wasm browser tests, and perf/startup smoke checks into the local pre-release entrypoint that mirrors the checked-in GitHub Actions release-readiness workflow.
 
 GitHub Actions is the canonical hosted gate for 1.0:
 
-- `.github/workflows/ci.yml` runs formatting, clippy, workspace verification, wasm example checks, browser smoke, and macOS native verification
-- `.github/workflows/release-readiness.yml` runs the sign-off superset and uploads Playwright/perf artifacts
+- `.github/workflows/ci.yml` runs formatting, clippy, workspace verification, wasm example checks, browser smoke, wasm browser tests, and macOS native verification
+- `.github/workflows/release-readiness.yml` runs the sign-off superset, wasm browser tests, and uploads Playwright/perf artifacts
 - `.github/workflows/showcase-pages.yml` builds `examples/showcase` and publishes its static `dist/` output to GitHub Pages on pushes to `main` and on manual dispatch
 
 For repository Pages hosting, the showcase stays static-host friendly by using hash routes such as `/#/components` and `/#/rendering`.

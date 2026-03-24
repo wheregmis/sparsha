@@ -5,7 +5,7 @@ use sparsha_core::{Color, Rect};
 use sparsha_input::FocusManager;
 use sparsha_layout::{ComputedLayout, LayoutTree, WidgetId};
 use sparsha_render::DrawList;
-use sparsha_text::{TextStyle, TextSystem};
+use sparsha_text::{TextLayoutAlignment, TextLayoutOptions, TextStyle, TextSystem, TextWrap};
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 
@@ -304,6 +304,26 @@ impl<'a> LayoutContext<'a> {
     pub fn measure_text(&mut self, text: &str, style: &TextStyle) -> (f32, f32) {
         self.text.measure(text, style, self.max_width)
     }
+
+    /// Measure text with explicit layout options.
+    pub fn measure_text_layout(
+        &mut self,
+        text: &str,
+        style: &TextStyle,
+        wrap: TextWrap,
+        alignment: TextLayoutAlignment,
+        max_lines: Option<usize>,
+    ) -> (f32, f32) {
+        self.text.measure_with_options(
+            text,
+            style,
+            TextLayoutOptions::new()
+                .with_max_width(self.max_width)
+                .with_wrap(wrap)
+                .with_alignment(alignment)
+                .with_max_lines(max_lines),
+        )
+    }
 }
 
 /// Context for painting widgets.
@@ -422,6 +442,36 @@ impl<'a> PaintContext<'a> {
         self.draw_list.text_run(text.to_owned(), scaled_style, x, y);
     }
 
+    /// Draw block text inside the given bounds using the provided alignment and optional clamp.
+    pub fn draw_text_block(
+        &mut self,
+        text: &str,
+        style: &TextStyle,
+        bounds: Rect,
+        wrap: TextWrap,
+        alignment: TextLayoutAlignment,
+        max_lines: Option<usize>,
+    ) {
+        if text.is_empty() {
+            return;
+        }
+
+        let scaled_style = TextStyle {
+            font_size: style.font_size * self.scale_factor,
+            ..style.clone()
+        };
+        self.draw_list.text_run_layout(
+            text.to_owned(),
+            scaled_style,
+            bounds.x,
+            bounds.y,
+            Some(bounds.width.max(0.0)),
+            alignment,
+            max_lines,
+            wrap,
+        );
+    }
+
     /// Draw text centered within the given bounds.
     ///
     /// The text is horizontally and vertically centered within the bounds.
@@ -475,6 +525,31 @@ impl<'a> PaintContext<'a> {
             ..style.clone()
         };
         self.text_system.measure(text, &scaled_style, None)
+    }
+
+    /// Measure text with explicit width/alignment/clamp options.
+    pub fn measure_text_layout(
+        &mut self,
+        text: &str,
+        style: &TextStyle,
+        max_width: Option<f32>,
+        wrap: TextWrap,
+        alignment: TextLayoutAlignment,
+        max_lines: Option<usize>,
+    ) -> (f32, f32) {
+        let scaled_style = TextStyle {
+            font_size: style.font_size * self.scale_factor,
+            ..style.clone()
+        };
+        self.text_system.measure_with_options(
+            text,
+            &scaled_style,
+            TextLayoutOptions::new()
+                .with_max_width(max_width)
+                .with_wrap(wrap)
+                .with_alignment(alignment)
+                .with_max_lines(max_lines),
+        )
     }
 
     /// Request another animation frame after this paint.

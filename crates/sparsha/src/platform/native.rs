@@ -221,17 +221,19 @@ fn apply_effects_with_services(
                 text_input.sync_editor_state(focused_editor_state, false)
             }
             PlatformEffect::SyncPointerCapture => pointer_capture.sync_capture(has_capture),
+            PlatformEffect::SyncAccessibility => {
+                accessibility.update_accessibility(title, snapshot);
+            }
             PlatformEffect::WriteClipboard(text) => clipboard.write_text(text),
         }
     }
-
-    accessibility.update_accessibility(title, snapshot);
 }
 
 fn feature_for_effect(effect: &PlatformEffect) -> PlatformFeature {
     match effect {
         PlatformEffect::SyncTextInput => PlatformFeature::ImeComposition,
         PlatformEffect::SyncPointerCapture => PlatformFeature::PointerCapture,
+        PlatformEffect::SyncAccessibility => PlatformFeature::AccessibilityTree,
         PlatformEffect::WriteClipboard(_) => PlatformFeature::ClipboardWrite,
     }
 }
@@ -317,6 +319,7 @@ mod tests {
         let mut effects = PlatformEffects::default();
         effects.push(PlatformEffect::SyncTextInput);
         effects.push(PlatformEffect::SyncPointerCapture);
+        effects.push(PlatformEffect::SyncAccessibility);
         effects.push(PlatformEffect::WriteClipboard("copied".to_owned()));
 
         let mut clipboard = TestClipboard::default();
@@ -359,6 +362,9 @@ mod tests {
         assert!(degraded_effect_support(capabilities, &PlatformEffect::SyncTextInput).is_none());
         assert!(
             degraded_effect_support(capabilities, &PlatformEffect::SyncPointerCapture).is_none()
+        );
+        assert!(
+            degraded_effect_support(capabilities, &PlatformEffect::SyncAccessibility).is_none()
         );
     }
 }

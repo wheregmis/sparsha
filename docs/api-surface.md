@@ -11,11 +11,11 @@ Stable for 1.0:
 - `Router`, `Route`, `Navigator`, `hash_to_path`, `path_to_hash`
 - authoring lanes:
   - primary composition lane: bon-backed `App::builder()`, `Router::builder()`, `component().render(...).call()`, plus a semantic structural/widget split:
-    - structural tree widgets use semantic constructors plus fluent child/content composition, for example `Container::column()`, `Container::row()`, `Container::main_axis_alignment(...)`, `Container::cross_axis_alignment(...)`, `Scroll::vertical(...)`, `Scroll::horizontal(...)`, `List::empty()`, `Provider::new(...)`, and `Semantics::new(...)`
+    - structural tree widgets use semantic constructors plus fluent child/content composition, for example `Container::column()`, `Container::row()`, `Container::main_axis_alignment(...)`, `Container::cross_axis_alignment(...)`, `Scroll::vertical(...)`, `Scroll::horizontal(...)`, `List::empty()`, `Provider::new(...)`, `Semantics::new(...)`, and semantic wrappers such as `Center::new(...)`, `Padding::all(...)`, `Expanded::new(...)`, `Stack::new()`, `Positioned::new(...)`, `Align::center(...)`, `SizedBox::new()`, and `Spacer::new()`
     - config-heavy and leaf widgets use bon builders such as `Text::builder()`, `Button::builder()`, `Checkbox::builder()`, `TextInput::builder()`, `TextArea::builder()`, and `List::virtualized_builder()`
     - function components can read provider-scoped subtree values through `ComponentContext::use_context::<T>() -> Option<T>`, `use_context_or(...)`, and `use_context_or_else(...)`
     - built-in framework resources remain on dedicated component accessors such as `viewport()`, `navigator()`, and `task_runtime()`
-    - responsive text roles stay on the builder surface through `Text::builder().variant(TextVariant::Header)` rather than shortcut constructors
+    - responsive text roles stay on the builder surface through `Text::builder().variant(TextVariant::Header)` rather than shortcut constructors, and paragraph behavior stays on the same path via `line_height(...)`, `fill_width(...)`, `wrap(TextWrap::Word)`, `max_lines(...)`, and overflow policies such as `TextOverflow::Clip` and `TextOverflow::Ellipsis`
   - specialized lane: dedicated primitives such as `ForEach`, `DrawSurface`, animation helpers, and theme/style value types
   - expert lane: low-level `Widget` and context APIs for manual custom widgets
 - component authoring helpers: `component`, `Component`, `ComponentContext`, `TaskHook`
@@ -119,7 +119,7 @@ Stable for 1.0:
 - editing/accessibility widgets: `TextArea`, `Semantics`
 - accessibility metadata types: `AccessibilityInfo`, `AccessibilityRole`, `AccessibilityAction`
 - `IntoWidget`
-- widget/theme/context types re-exported from the crate root, including `MainAxisAlignment` and `CrossAxisAlignment`
+- widget/theme/context types re-exported from the crate root, including `MainAxisAlignment`, `CrossAxisAlignment`, `Alignment`, `TextWrap`, and `TextOverflow`
 - `styles`, `taffy`, and `WidgetId` convenience re-exports
 
 Internal/provisional:

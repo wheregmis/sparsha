@@ -12,7 +12,9 @@ use crate::router::Router;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::router::RouterHost;
 #[cfg(not(target_arch = "wasm32"))]
-use crate::runtime_core::{focused_text_editor_state, RuntimeCoreContext, RuntimeHost};
+use crate::runtime_core::{
+    focused_text_editor_state, RuntimeCoreContext, RuntimeHost, RuntimePlatformUpdate,
+};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::runtime_widget::{WidgetPath, WidgetRuntimeRegistry};
 use bon::bon;
@@ -474,6 +476,20 @@ impl AppState {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl AppRunner {
+    fn apply_runtime_update(&mut self, update: RuntimePlatformUpdate) {
+        let Some(state) = self.state.as_mut() else {
+            return;
+        };
+        state.platform.apply_effects(
+            state.window,
+            &self.config.title,
+            &update.effects,
+            update.focused_editor_state.as_ref(),
+            update.has_capture,
+            &update.accessibility,
+        );
+    }
+
     fn new(
         config: AppConfig,
         theme: AppTheme,
@@ -512,21 +528,11 @@ impl AppRunner {
         let Some(state) = self.state.as_mut() else {
             return;
         };
-        let (snapshot, focused_editor_state, has_capture) = {
+        let update = {
             let mut host = state.runtime_host();
-            let snapshot = host.refresh_accessibility();
-            let focused_editor_state = host.focused_text_editor_state().cloned();
-            let has_capture = host.has_pointer_capture();
-            (snapshot, focused_editor_state, has_capture)
+            host.refresh_platform_update()
         };
-        state.platform.apply_effects(
-            state.window,
-            &self.config.title,
-            &crate::platform::PlatformEffects::default(),
-            focused_editor_state.as_ref(),
-            has_capture,
-            &snapshot,
-        );
+        self.apply_runtime_update(update);
     }
 
     fn update_control_flow(&self, event_loop: &winit::event_loop::ActiveEventLoop) {
@@ -545,23 +551,11 @@ impl AppRunner {
         let Some(state) = self.state.as_mut() else {
             return;
         };
-        let (effects, snapshot, focused_editor_state, has_capture) = {
+        let update = {
             let mut host = state.runtime_host();
-            let effects =
-                host.handle_accessibility_action(request.node_id, request.action, request.value);
-            let snapshot = host.refresh_accessibility();
-            let focused_editor_state = host.focused_text_editor_state().cloned();
-            let has_capture = host.has_pointer_capture();
-            (effects, snapshot, focused_editor_state, has_capture)
+            host.handle_accessibility_action_update(request.node_id, request.action, request.value)
         };
-        state.platform.apply_effects(
-            state.window,
-            &self.config.title,
-            &effects,
-            focused_editor_state.as_ref(),
-            has_capture,
-            &snapshot,
-        );
+        self.apply_runtime_update(update);
         if let Some(state) = self.state.as_ref() {
             if state.needs_layout || state.needs_repaint {
                 state.window.request_redraw();
@@ -573,22 +567,11 @@ impl AppRunner {
         let Some(state) = self.state.as_mut() else {
             return;
         };
-        let (effects, snapshot, focused_editor_state, has_capture) = {
+        let update = {
             let mut host = state.runtime_host();
-            let effects = host.build_layout();
-            let snapshot = host.refresh_accessibility();
-            let focused_editor_state = host.focused_text_editor_state().cloned();
-            let has_capture = host.has_pointer_capture();
-            (effects, snapshot, focused_editor_state, has_capture)
+            host.build_layout_update()
         };
-        state.platform.apply_effects(
-            state.window,
-            &self.config.title,
-            &effects,
-            focused_editor_state.as_ref(),
-            has_capture,
-            &snapshot,
-        );
+        self.apply_runtime_update(update);
     }
 
     fn paint(&mut self) {
@@ -704,22 +687,11 @@ impl AppRunner {
             return;
         };
         let clipboard_text = state.platform.read_clipboard_text();
-        let (effects, snapshot, focused_editor_state, has_capture) = {
+        let update = {
             let mut host = state.runtime_host();
-            let effects = host.handle_input_event(event, clipboard_text);
-            let snapshot = host.refresh_accessibility();
-            let focused_editor_state = host.focused_text_editor_state().cloned();
-            let has_capture = host.has_pointer_capture();
-            (effects, snapshot, focused_editor_state, has_capture)
+            host.handle_input_event_update(event, clipboard_text)
         };
-        state.platform.apply_effects(
-            state.window,
-            &self.config.title,
-            &effects,
-            focused_editor_state.as_ref(),
-            has_capture,
-            &snapshot,
-        );
+        self.apply_runtime_update(update);
         if let Some(state) = self.state.as_ref() {
             if state.needs_repaint || state.needs_layout {
                 state.window.request_redraw();

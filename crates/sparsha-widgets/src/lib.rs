@@ -4,6 +4,7 @@
 
 mod accessibility;
 mod animation;
+mod app_shell;
 mod button;
 mod checkbox;
 mod container;
@@ -13,6 +14,7 @@ mod control_state;
 mod draw_surface;
 mod for_each;
 mod into_widget;
+mod layout_helpers;
 mod list;
 mod provider;
 mod scroll;
@@ -21,6 +23,7 @@ mod semantics;
 mod text;
 mod text_area;
 mod text_editor;
+mod text_editor_widget;
 mod text_input;
 mod theme;
 mod viewport;
@@ -28,6 +31,7 @@ mod widget;
 
 pub use accessibility::{AccessibilityAction, AccessibilityInfo, AccessibilityRole};
 pub use animation::{lerp_color, AnimationEasing, ImplicitAnimation, Tween};
+pub use app_shell::{AppBar, FloatingActionButton, Scaffold};
 pub use button::{Button, ButtonState, ButtonStyle};
 pub use checkbox::{Checkbox, CheckboxStyle};
 pub use container::{Container, CrossAxisAlignment, MainAxisAlignment};
@@ -37,11 +41,15 @@ pub use context::{
 pub use draw_surface::{DrawSurface, DrawSurfaceContext};
 pub use for_each::ForEach;
 pub use into_widget::IntoWidget;
+pub use layout_helpers::{
+    Align, Alignment, Center, Expanded, Padding, Positioned, SizedBox, Spacer, Stack,
+};
 pub use list::{List, ListDirection};
 pub use provider::Provider;
 pub use scroll::{Scroll, ScrollDirection, ScrollbarStyle};
 pub use semantics::Semantics;
-pub use text::{Text, TextAlign, TextVariant};
+pub use sparsha_text::TextWrap;
+pub use text::{Text, TextAlign, TextOverflow, TextVariant};
 pub use text_area::{TextArea, TextAreaStyle};
 pub use text_editor::TextEditorState;
 pub use text_input::{TextInput, TextInputStyle};

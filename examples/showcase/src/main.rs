@@ -965,7 +965,7 @@ fn build_typography_card(layout: ShowcaseLayout) -> Container {
     let theme = current_theme();
     section_card(
         "Typography",
-        "A small read on heading, body, and caption scales inside the same surface.\nThis makes the default rhythm easy to judge at a glance.",
+        "A small read on heading, body, caption, and paragraph overflow inside the same surface.\nThis makes the default rhythm easy to judge at a glance.",
         Container::column()
             .gap(14.0)
             .child(
@@ -987,6 +987,7 @@ fn build_typography_card(layout: ShowcaseLayout) -> Container {
                                 "Body copy should stay legible in denser panels without losing hierarchy.",
                             )
                             .font_size(15.0)
+                            .line_height(1.45)
                             .build(),
                     )
                     .child(
@@ -997,11 +998,39 @@ fn build_typography_card(layout: ShowcaseLayout) -> Container {
                     ),
             )
             .child(
+                Container::column()
+                    .gap(10.0)
+                    .padding(16.0)
+                    .background(theme.colors.surface)
+                    .border(1.0, theme.colors.border)
+                    .corner_radius(12.0)
+                    .child(
+                        Text::builder()
+                            .content("Paragraph lane")
+                            .font_size(13.0)
+                            .bold(true)
+                            .build(),
+                    )
+                    .child(
+                        Text::builder()
+                            .content(
+                                "This paragraph demonstrates fill-width wrapping, explicit line height, and a three-line ellipsis clamp inside a narrow content lane so the behavior is visible without a debugger.",
+                            )
+                            .fill_width(true)
+                            .wrap(TextWrap::Word)
+                            .line_height(1.5)
+                            .max_lines(3)
+                            .overflow(TextOverflow::Ellipsis)
+                            .build(),
+                    ),
+            )
+            .child(
                 Text::builder()
                     .content(
                         "Typography is doing the structural work here.\nThere is no extra ornament needed for the preview.",
                     )
                     .font_size(13.0)
+                    .line_height(1.4)
                     .color(theme.colors.text_muted)
                     .build(),
             ),

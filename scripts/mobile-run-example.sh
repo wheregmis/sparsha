@@ -45,7 +45,7 @@ ensure_mobile_project_initialized() {
     echo "Initializing cargo-mobile2 project for $EXAMPLE..." >&2
     (
       cd "$EXAMPLE_DIR"
-      cargo mobile init --non-interactive
+      cargo mobile init --non-interactive --skip-dev-tools
     )
   fi
 }

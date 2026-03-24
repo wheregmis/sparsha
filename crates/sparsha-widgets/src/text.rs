@@ -10,7 +10,7 @@ use bon::bon;
 use sparsha_core::Color;
 use sparsha_input::InputEvent;
 use sparsha_layout::WidgetId;
-use sparsha_text::{TextLayoutAlignment, TextLayoutOptions, TextStyle, TextWrap};
+use sparsha_text::{TextBreakMode, TextLayoutAlignment, TextLayoutOptions, TextStyle, TextWrap};
 use taffy::prelude::*;
 
 /// Text alignment options.
@@ -54,6 +54,7 @@ pub struct Text {
     variant: TextVariant,
     fill_width: bool,
     wrap: TextWrap,
+    break_mode: TextBreakMode,
     max_lines: Option<usize>,
     overflow: TextOverflow,
 }
@@ -72,6 +73,7 @@ impl Text {
             variant: TextVariant::Body,
             fill_width: false,
             wrap: TextWrap::NoWrap,
+            break_mode: TextBreakMode::Normal,
             max_lines: None,
             overflow: TextOverflow::Visible,
         }
@@ -155,6 +157,7 @@ impl Text {
         #[builder(default = TextAlign::Left)] align: TextAlign,
         #[builder(default)] fill_width: bool,
         #[builder(default = TextWrap::NoWrap)] wrap: TextWrap,
+        #[builder(default = TextBreakMode::Normal)] break_mode: TextBreakMode,
         max_lines: Option<usize>,
         #[builder(default = TextOverflow::Visible)] overflow: TextOverflow,
     ) -> Self {
@@ -171,6 +174,7 @@ impl Text {
         text.align = align;
         text.fill_width = fill_width;
         text.wrap = wrap;
+        text.break_mode = break_mode;
         text.max_lines = max_lines;
         text.overflow = overflow;
         text
@@ -226,6 +230,7 @@ impl Widget for Text {
                             TextLayoutOptions::new()
                                 .with_max_width(Some(bounds.width.max(0.0)))
                                 .with_wrap(self.wrap)
+                                .with_break_mode(self.break_mode)
                                 .with_alignment(self.layout_alignment())
                                 .with_max_lines(max_lines),
                         ),
@@ -241,6 +246,7 @@ impl Widget for Text {
                 &style,
                 bounds,
                 self.wrap,
+                self.break_mode,
                 self.layout_alignment(),
                 max_lines,
             );
@@ -285,6 +291,7 @@ impl Widget for Text {
                 &self.content,
                 &style,
                 self.wrap,
+                self.break_mode,
                 self.layout_alignment(),
                 self.effective_max_lines(),
             )
@@ -314,7 +321,7 @@ mod tests {
     use sparsha_input::FocusManager;
     use sparsha_layout::LayoutTree;
     use sparsha_render::{DrawCommand, DrawList};
-    use sparsha_text::TextSystem;
+    use sparsha_text::{TextBreakMode, TextSystem};
 
     #[test]
     fn text_defaults_follow_current_theme() {
@@ -384,6 +391,7 @@ mod tests {
             .align(TextAlign::Center)
             .fill_width(true)
             .wrap(TextWrap::Word)
+            .break_mode(TextBreakMode::BreakWord)
             .max_lines(2)
             .overflow(TextOverflow::Clip)
             .build();
@@ -398,6 +406,7 @@ mod tests {
         assert_eq!(text.align, TextAlign::Center);
         assert!(text.fill_width);
         assert_eq!(text.wrap, TextWrap::Word);
+        assert_eq!(text.break_mode, TextBreakMode::BreakWord);
         assert_eq!(text.max_lines, Some(2));
         assert_eq!(text.overflow, TextOverflow::Clip);
     }

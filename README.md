@@ -41,7 +41,7 @@ Notable current behavior:
 - `List` supports both simple owned-children mode and fixed-extent virtualization for large data sets
 - Default widget sizing and focus-ring behavior are aligned through shared theme control tokens
 - Semantic layout helpers cover common structure without dropping to raw flex settings: `Center`, `Padding`, `Expanded`, `Stack`, `Positioned`, `Align`, `SizedBox`, and `Spacer`
-- Paragraph text layout stays on the `Text` builder surface through `line_height(...)`, `fill_width(...)`, `wrap(TextWrap::Word)`, `max_lines(...)`, and overflow policies such as `TextOverflow::Clip` and `TextOverflow::Ellipsis`
+- Paragraph text layout stays on the `Text` builder surface through `line_height(...)`, `fill_width(...)`, `wrap(TextWrap::Word)`, `break_mode(TextBreakMode::BreakWord)`, `max_lines(...)`, and overflow policies such as `TextOverflow::Clip` and `TextOverflow::Ellipsis`
 - Normal app screens can be authored as bon-backed function components via `component().render(...).call()` and `ComponentContext`
 - Subtree-scoped typed values can be provided with `Provider::new(...)` and read in components via `cx.use_context::<T>()`, `cx.use_context_or(...)`, or `cx.use_context_or_else(...)`
 - Built-in framework resources stay on dedicated component accessors such as `cx.viewport()`, `cx.navigator()`, and `cx.task_runtime()`
@@ -93,6 +93,8 @@ fn main() -> Result<(), sparsha::AppRunError> {
                             Text::builder()
                                 .content("Build UI with a GPU-first stack.")
                                 .fill_width(true)
+                                .wrap(TextWrap::Word)
+                                .break_mode(TextBreakMode::BreakWord)
                                 .align(TextAlign::Center)
                                 .overflow(TextOverflow::Ellipsis)
                                 .build(),

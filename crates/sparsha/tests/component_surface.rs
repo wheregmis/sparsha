@@ -83,6 +83,7 @@ fn semantic_structural_widget_surface_compiles_from_the_public_crate_root() {
                             .line_height(1.4)
                             .fill_width(true)
                             .wrap(TextWrap::Word)
+                            .break_mode(TextBreakMode::BreakWord)
                             .align(TextAlign::Center)
                             .overflow(TextOverflow::Ellipsis)
                             .build(),

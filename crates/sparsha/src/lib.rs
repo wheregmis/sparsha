@@ -75,9 +75,9 @@ pub use sparsha_widgets::{
     AccessibilityRole, Align, Alignment, AnimationEasing, AppBar, Center, CrossAxisAlignment,
     Expanded, FloatingActionButton, ForEach, ImplicitAnimation, IntoWidget, MainAxisAlignment,
     Padding, Positioned, Provider, Scaffold, Semantics, SizedBox, Spacer, Stack, TextArea,
-    TextAreaStyle, TextEditorState, TextInput, TextInputStyle, TextOverflow, TextWrap, Theme,
-    ThemeColors, ThemeControls, ThemeRadii, ThemeSpacing, ThemeTypography, Tween, ViewportClass,
-    ViewportInfo, ViewportOrientation, WidgetChildMode,
+    TextAreaStyle, TextBreakMode, TextEditorState, TextInput, TextInputStyle, TextOverflow,
+    TextWrap, Theme, ThemeColors, ThemeControls, ThemeRadii, ThemeSpacing, ThemeTypography, Tween,
+    ViewportClass, ViewportInfo, ViewportOrientation, WidgetChildMode,
 };
 pub use tasks::{
     Generation, TaskHandle, TaskId, TaskKey, TaskPayload, TaskPolicy, TaskResult,
@@ -108,9 +108,10 @@ pub mod prelude {
         EventCommands, Expanded, FloatingActionButton, ForEach, ImplicitAnimation, IntoWidget,
         List, ListDirection, MainAxisAlignment, Padding, Positioned, Provider, Scaffold, Scroll,
         ScrollDirection, Semantics, SizedBox, Spacer, Stack, Text, TextAlign, TextArea,
-        TextAreaStyle, TextEditorState, TextInput, TextInputStyle, TextOverflow, TextVariant,
-        TextWrap, Theme, ThemeColors, ThemeControls, ThemeRadii, ThemeSpacing, ThemeTypography,
-        Tween, ViewportClass, ViewportInfo, ViewportOrientation, Widget, WidgetChildMode,
+        TextAreaStyle, TextBreakMode, TextEditorState, TextInput, TextInputStyle, TextOverflow,
+        TextVariant, TextWrap, Theme, ThemeColors, ThemeControls, ThemeRadii, ThemeSpacing,
+        ThemeTypography, Tween, ViewportClass, ViewportInfo, ViewportOrientation, Widget,
+        WidgetChildMode,
     };
 }
 

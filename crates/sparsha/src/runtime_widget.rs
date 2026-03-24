@@ -731,7 +731,7 @@ mod tests {
     use sparsha_input::{InputEvent, PointerButton};
     use sparsha_layout::taffy::{self, prelude::*};
     use sparsha_render::{DrawCommand, DrawList};
-    use sparsha_text::{TextLayoutAlignment, TextWrap};
+    use sparsha_text::{TextBreakMode, TextLayoutAlignment, TextWrap};
     use sparsha_widgets::{
         Button, Container, CrossAxisAlignment, MainAxisAlignment, PaintCommands, PaintContext,
         Semantics, Text, TextAlign, TextInput, WidgetChildMode,
@@ -1640,6 +1640,36 @@ mod tests {
         assert_eq!(run.alignment, TextLayoutAlignment::Center);
         assert_eq!(run.max_lines, None);
         assert_eq!(run.wrap, TextWrap::Word);
+        assert_eq!(run.break_mode, TextBreakMode::Normal);
+    }
+
+    #[test]
+    fn break_word_text_emits_explicit_break_policy() {
+        let mut root = Container::column().fill().child(
+            Container::column().width(120.0).child(
+                Text::builder()
+                    .content("very-long-identifier-without-natural-breaks")
+                    .fill_width(true)
+                    .wrap(TextWrap::Word)
+                    .break_mode(TextBreakMode::BreakWord)
+                    .build(),
+            ),
+        );
+
+        let (layout_tree, _) = build_registry(&mut root);
+        let draw_list = paint_widget_subtree(&root, &layout_tree);
+        let run = draw_list
+            .commands()
+            .iter()
+            .find_map(|command| match command {
+                DrawCommand::TextRun { run } => Some(run),
+                _ => None,
+            })
+            .expect("expected text run");
+
+        assert_eq!(run.max_width, Some(120.0));
+        assert_eq!(run.wrap, TextWrap::Word);
+        assert_eq!(run.break_mode, TextBreakMode::BreakWord);
     }
 
     #[test]

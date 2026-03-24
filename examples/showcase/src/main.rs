@@ -1018,6 +1018,7 @@ fn build_typography_card(layout: ShowcaseLayout) -> Container {
                             )
                             .fill_width(true)
                             .wrap(TextWrap::Word)
+                            .break_mode(TextBreakMode::BreakWord)
                             .line_height(1.5)
                             .max_lines(3)
                             .overflow(TextOverflow::Ellipsis)

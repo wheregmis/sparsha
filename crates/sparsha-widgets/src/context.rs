@@ -5,7 +5,9 @@ use sparsha_core::{Color, Rect};
 use sparsha_input::FocusManager;
 use sparsha_layout::{ComputedLayout, LayoutTree, WidgetId};
 use sparsha_render::DrawList;
-use sparsha_text::{TextLayoutAlignment, TextLayoutOptions, TextStyle, TextSystem, TextWrap};
+use sparsha_text::{
+    TextBreakMode, TextLayoutAlignment, TextLayoutOptions, TextStyle, TextSystem, TextWrap,
+};
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 
@@ -311,6 +313,7 @@ impl<'a> LayoutContext<'a> {
         text: &str,
         style: &TextStyle,
         wrap: TextWrap,
+        break_mode: TextBreakMode,
         alignment: TextLayoutAlignment,
         max_lines: Option<usize>,
     ) -> (f32, f32) {
@@ -320,6 +323,7 @@ impl<'a> LayoutContext<'a> {
             TextLayoutOptions::new()
                 .with_max_width(self.max_width)
                 .with_wrap(wrap)
+                .with_break_mode(break_mode)
                 .with_alignment(alignment)
                 .with_max_lines(max_lines),
         )
@@ -449,6 +453,7 @@ impl<'a> PaintContext<'a> {
         style: &TextStyle,
         bounds: Rect,
         wrap: TextWrap,
+        break_mode: TextBreakMode,
         alignment: TextLayoutAlignment,
         max_lines: Option<usize>,
     ) {
@@ -469,6 +474,7 @@ impl<'a> PaintContext<'a> {
             alignment,
             max_lines,
             wrap,
+            break_mode,
         );
     }
 
@@ -534,6 +540,7 @@ impl<'a> PaintContext<'a> {
         style: &TextStyle,
         max_width: Option<f32>,
         wrap: TextWrap,
+        break_mode: TextBreakMode,
         alignment: TextLayoutAlignment,
         max_lines: Option<usize>,
     ) -> (f32, f32) {
@@ -547,6 +554,7 @@ impl<'a> PaintContext<'a> {
             TextLayoutOptions::new()
                 .with_max_width(max_width)
                 .with_wrap(wrap)
+                .with_break_mode(break_mode)
                 .with_alignment(alignment)
                 .with_max_lines(max_lines),
         )

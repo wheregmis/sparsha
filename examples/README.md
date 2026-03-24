@@ -30,6 +30,23 @@ cargo run -p showcase
 cargo run -p todo
 ```
 
+## Mobile (cargo-mobile2)
+
+Install `cargo-mobile2` once:
+
+```bash
+cargo install --git https://github.com/tauri-apps/cargo-mobile2
+```
+
+Then run any example on Android/iOS:
+
+```bash
+./scripts/mobile-run-example.sh kitchen-sink android run
+./scripts/mobile-run-example.sh kitchen-sink ios run
+```
+
+`ios` commands require macOS.
+
 ## Web
 
 Each example directory still contains the checked-in files needed for a Trunk flow:

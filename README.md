@@ -131,6 +131,19 @@ cargo run -p showcase
 cargo run -p todo
 ```
 
+Run an example on mobile with `cargo-mobile2`:
+
+```bash
+# one-time tool install
+cargo install --git https://github.com/tauri-apps/cargo-mobile2
+
+# Android
+./scripts/mobile-run-example.sh kitchen-sink android run
+
+# iOS (macOS only)
+./scripts/mobile-run-example.sh kitchen-sink ios run
+```
+
 Build and serve a web example from the repo root:
 
 ```bash

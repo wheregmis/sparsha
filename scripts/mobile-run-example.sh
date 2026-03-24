@@ -9,6 +9,7 @@ ACTION="${3:-run}"
 if [[ -z "$EXAMPLE" || -z "$PLATFORM" ]]; then
   echo "usage: $0 <example> <android|ios> [cargo-mobile2-action]" >&2
   echo "example: $0 kitchen-sink android run" >&2
+  echo "note: action is forwarded directly to cargo-mobile2 (for example: run, build, open)." >&2
   exit 1
 fi
 
@@ -18,21 +19,22 @@ if [[ ! -d "$EXAMPLE_DIR" ]]; then
   exit 1
 fi
 
+ensure_mobile2_subcommand() {
+  local subcommand="$1"
+  if ! cargo "$subcommand" --help >/dev/null 2>&1; then
+    echo "cargo-mobile2 is required. Install it with:" >&2
+    echo "  cargo install --git https://github.com/tauri-apps/cargo-mobile2" >&2
+    exit 1
+  fi
+}
+
 case "$PLATFORM" in
   android)
-    if ! cargo android --help >/dev/null 2>&1; then
-      echo "cargo-mobile2 is required. Install it with:" >&2
-      echo "  cargo install --git https://github.com/tauri-apps/cargo-mobile2" >&2
-      exit 1
-    fi
+    ensure_mobile2_subcommand android
     MOBILE_CMD=(cargo android "$ACTION")
     ;;
   ios)
-    if ! cargo apple --help >/dev/null 2>&1; then
-      echo "cargo-mobile2 is required. Install it with:" >&2
-      echo "  cargo install --git https://github.com/tauri-apps/cargo-mobile2" >&2
-      exit 1
-    fi
+    ensure_mobile2_subcommand apple
     if [[ "$(uname -s)" != "Darwin" ]]; then
       echo "iOS builds require macOS (Darwin)." >&2
       exit 1

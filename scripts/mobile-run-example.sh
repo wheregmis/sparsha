@@ -43,7 +43,7 @@ ensure_mobile_config_template() {
   local config_file="$EXAMPLE_DIR/cargo-mobile2.toml"
   if [[ ! -f "$config_file" ]]; then
     local identifier_suffix
-    identifier_suffix="$(printf '%s' "$EXAMPLE" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '_')"
+    identifier_suffix="$(printf '%s' "$EXAMPLE" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '_' | tr -s '_')"
     identifier_suffix="${identifier_suffix#_}"
     identifier_suffix="${identifier_suffix%_}"
     if [[ -z "$identifier_suffix" ]]; then
@@ -61,7 +61,7 @@ EOF
   fi
 
   if grep -q "$APP_SECTION_PATTERN" "$config_file"; then
-    awk -v template="$TEMPLATE_PACK" '
+    awk -v template="$TEMPLATE_PACK" -v app_section="$APP_SECTION_PATTERN" '
       BEGIN { in_app = 0; has_template = 0 }
       /^[[:space:]]*\[/ {
         if (in_app && !has_template) {
@@ -81,7 +81,7 @@ EOF
           print "template-pack = \"" template "\""
         }
       }
-    ' app_section="$APP_SECTION_PATTERN" "$config_file" >"$config_file.tmp"
+    ' "$config_file" >"$config_file.tmp"
     mv "$config_file.tmp" "$config_file"
   else
     echo "warning: could not find [app] in cargo-mobile2.toml; keeping existing template-pack settings." >&2

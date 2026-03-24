@@ -43,10 +43,11 @@ Then run any example on Android/iOS:
 ```bash
 ./scripts/mobile-run-example.sh kitchen-sink android run
 ./scripts/mobile-run-example.sh kitchen-sink ios run
+./scripts/mobile-run-example.sh kitchen-sink android run wgpu
 ```
 
 `ios` commands require macOS.
-If an example has not been initialized for mobile yet, the helper script runs `cargo mobile init --non-interactive` for that example first.
+If an example has not been initialized for mobile yet, the helper script runs `cargo mobile init --non-interactive` for that example first and enforces `template-pack = "winit"` by default (or `wgpu` when passed explicitly as the 4th argument).
 
 ## Web
 

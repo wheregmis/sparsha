@@ -150,9 +150,12 @@ cargo install --git https://github.com/tauri-apps/cargo-mobile2
 
 # iOS (macOS only)
 ./scripts/mobile-run-example.sh kitchen-sink ios run
+
+# Force wgpu wrapper template during first init (optional)
+./scripts/mobile-run-example.sh kitchen-sink android run wgpu
 ```
 
-The helper script auto-runs `cargo mobile init --non-interactive` inside the selected example when the mobile project files do not exist yet.
+The helper script auto-runs `cargo mobile init --non-interactive` inside the selected example when the mobile project files do not exist yet, and sets `template-pack` to `winit` by default (or `wgpu` when passed as the 4th argument).
 
 Build and serve a web example from the repo root:
 

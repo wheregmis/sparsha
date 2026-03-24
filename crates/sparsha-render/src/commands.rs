@@ -1,7 +1,7 @@
 //! Draw commands that represent what to render.
 
 use sparsha_core::{Color, GlyphInstance, Rect};
-use sparsha_text::{TextLayoutAlignment, TextStyle, TextWrap};
+use sparsha_text::{TextBreakMode, TextLayoutAlignment, TextStyle, TextWrap};
 
 /// A logical text run that can be consumed by different render backends.
 #[derive(Clone, Debug)]
@@ -20,6 +20,8 @@ pub struct TextRun {
     pub max_lines: Option<usize>,
     /// Wrapping behavior for the text run.
     pub wrap: TextWrap,
+    /// Word-breaking behavior for the text run.
+    pub break_mode: TextBreakMode,
 }
 
 /// A single draw command representing a primitive to render.
@@ -177,6 +179,7 @@ impl DrawList {
                     alignment: TextLayoutAlignment::Start,
                     max_lines: None,
                     wrap: TextWrap::NoWrap,
+                    break_mode: TextBreakMode::Normal,
                 },
             });
         }
@@ -193,6 +196,7 @@ impl DrawList {
         alignment: TextLayoutAlignment,
         max_lines: Option<usize>,
         wrap: TextWrap,
+        break_mode: TextBreakMode,
     ) {
         let text = text.into();
         if !text.is_empty() {
@@ -205,6 +209,7 @@ impl DrawList {
                     alignment,
                     max_lines,
                     wrap,
+                    break_mode,
                 },
             });
         }

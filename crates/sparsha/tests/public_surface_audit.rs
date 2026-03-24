@@ -254,6 +254,8 @@ fn shipped_surface_documents_the_bon_authoring_paths() {
     assert!(api_surface.contains("line_height(...)"));
     assert!(api_surface.contains("TextWrap"));
     assert!(api_surface.contains("wrap(TextWrap::Word)"));
+    assert!(api_surface.contains("TextBreakMode"));
+    assert!(api_surface.contains("break_mode(...)"));
     assert!(api_surface.contains("TextOverflow::Ellipsis"));
     assert!(todo.contains("component().render("));
     assert!(todo.contains("App::builder()"));
@@ -274,6 +276,7 @@ fn shipped_surface_documents_the_bon_authoring_paths() {
     assert!(readme.contains("Provider::new("));
     assert!(readme.contains("line_height(...)"));
     assert!(readme.contains("TextWrap::Word"));
+    assert!(readme.contains("TextBreakMode"));
     assert!(readme.contains("TextOverflow::Ellipsis"));
     assert!(readme.contains("main_axis_alignment(MainAxisAlignment::Center)"));
     assert!(readme.contains("cross_axis_alignment(CrossAxisAlignment::Center)"));
@@ -283,6 +286,7 @@ fn shipped_surface_documents_the_bon_authoring_paths() {
     assert!(examples_readme.contains("cx.use_context_or_else(...)"));
     assert!(examples_readme.contains("line_height(...)"));
     assert!(examples_readme.contains("TextWrap::Word"));
+    assert!(examples_readme.contains("TextBreakMode"));
     assert!(examples_readme.contains("TextOverflow::Ellipsis"));
     assert!(examples_readme.contains("Container::main_axis_alignment(...)"));
     assert!(examples_readme.contains("Container::cross_axis_alignment(...)"));

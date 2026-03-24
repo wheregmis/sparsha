@@ -4,7 +4,7 @@
 
 Each example is a normal Cargo binary. The examples are intended to demonstrate the stable crate-root APIs rather than internal modules.
 
-The canonical authoring surface uses a semantic split: `App::builder()`, `Router::builder()`, and `component().render(...).call()` stay bon-first; subtree-scoped typed values use `Provider::new(...)` plus `cx.use_context::<T>()`, `cx.use_context_or(...)`, or `cx.use_context_or_else(...)`, while built-in framework resources stay on dedicated accessors like `cx.viewport()` and `cx.navigator()`; structural tree widgets use semantic constructors such as `Container::column()`, `Container::row()`, `Container::main_axis_alignment(...)`, `Container::cross_axis_alignment(...)`, `Scroll::vertical(...)`, `Scroll::horizontal(...)`, `List::empty()`, `Semantics::new(...)`, and semantic wrappers like `Center::new(...)`, `Padding::all(...)`, `Expanded::new(...)`, `Stack::new()`, and `Positioned::new(...)`; config-heavy widgets use bon builders such as `Text::builder()`, `Button::builder()`, and `List::virtualized_builder()` for the fixed-row virtualized path. Typography variants and paragraph policy stay on that same path through `Text::builder().variant(TextVariant::Header)` and options like `line_height(...)`, `wrap(TextWrap::Word)`, `max_lines(...)`, and overflow policies such as `TextOverflow::Clip` and `TextOverflow::Ellipsis`.
+The canonical authoring surface uses a semantic split: `App::builder()`, `Router::builder()`, and `component().render(...).call()` stay bon-first; subtree-scoped typed values use `Provider::new(...)` plus `cx.use_context::<T>()`, `cx.use_context_or(...)`, or `cx.use_context_or_else(...)`, while built-in framework resources stay on dedicated accessors like `cx.viewport()` and `cx.navigator()`; structural tree widgets use semantic constructors such as `Container::column()`, `Container::row()`, `Container::main_axis_alignment(...)`, `Container::cross_axis_alignment(...)`, `Scroll::vertical(...)`, `Scroll::horizontal(...)`, `List::empty()`, `Semantics::new(...)`, and semantic wrappers like `Center::new(...)`, `Padding::all(...)`, `Expanded::new(...)`, `Stack::new()`, and `Positioned::new(...)`; config-heavy widgets use bon builders such as `Text::builder()`, `Button::builder()`, and `List::virtualized_builder()` for the fixed-row virtualized path. Typography variants and paragraph policy stay on that same path through `Text::builder().variant(TextVariant::Header)` and options like `line_height(...)`, `wrap(TextWrap::Word)`, `break_mode(TextBreakMode::BreakWord)`, `max_lines(...)`, and overflow policies such as `TextOverflow::Clip` and `TextOverflow::Ellipsis`.
 
 ## Included Examples
 
@@ -29,6 +29,25 @@ cargo run -p hybrid-overlay
 cargo run -p showcase
 cargo run -p todo
 ```
+
+## Mobile (cargo-mobile2)
+
+Install `cargo-mobile2` once:
+
+```bash
+cargo install --git https://github.com/tauri-apps/cargo-mobile2
+```
+
+Then run any example on Android/iOS:
+
+```bash
+./scripts/mobile-run-example.sh kitchen-sink android run
+./scripts/mobile-run-example.sh kitchen-sink ios run
+./scripts/mobile-run-example.sh kitchen-sink android run wgpu
+```
+
+`ios` commands require macOS.
+If an example has not been initialized for mobile yet, the helper script runs `cargo mobile init --non-interactive` for that example first and enforces `template-pack = "winit"` by default (or `wgpu` when passed explicitly as the 4th argument).
 
 ## Web
 

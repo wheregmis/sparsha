@@ -15,7 +15,7 @@ Stable for 1.0:
     - config-heavy and leaf widgets use bon builders such as `Text::builder()`, `Button::builder()`, `Checkbox::builder()`, `TextInput::builder()`, `TextArea::builder()`, and `List::virtualized_builder()`
     - function components can read provider-scoped subtree values through `ComponentContext::use_context::<T>() -> Option<T>`, `use_context_or(...)`, and `use_context_or_else(...)`
     - built-in framework resources remain on dedicated component accessors such as `viewport()`, `navigator()`, and `task_runtime()`
-    - responsive text roles stay on the builder surface through `Text::builder().variant(TextVariant::Header)` rather than shortcut constructors, and paragraph behavior stays on the same path via `line_height(...)`, `fill_width(...)`, `wrap(TextWrap::Word)`, `max_lines(...)`, and overflow policies such as `TextOverflow::Clip` and `TextOverflow::Ellipsis`
+    - responsive text roles stay on the builder surface through `Text::builder().variant(TextVariant::Header)` rather than shortcut constructors, and paragraph behavior stays on the same path via `line_height(...)`, `fill_width(...)`, `wrap(TextWrap::Word)`, `break_mode(...)` such as `break_mode(TextBreakMode::BreakWord)`, `max_lines(...)`, and overflow policies such as `TextOverflow::Clip` and `TextOverflow::Ellipsis`
   - specialized lane: dedicated primitives such as `ForEach`, `DrawSurface`, animation helpers, and theme/style value types
   - expert lane: low-level `Widget` and context APIs for manual custom widgets
 - component authoring helpers: `component`, `Component`, `ComponentContext`, `TaskHook`
@@ -119,7 +119,7 @@ Stable for 1.0:
 - editing/accessibility widgets: `TextArea`, `Semantics`
 - accessibility metadata types: `AccessibilityInfo`, `AccessibilityRole`, `AccessibilityAction`
 - `IntoWidget`
-- widget/theme/context types re-exported from the crate root, including `MainAxisAlignment`, `CrossAxisAlignment`, `Alignment`, `TextWrap`, and `TextOverflow`
+- widget/theme/context types re-exported from the crate root, including `MainAxisAlignment`, `CrossAxisAlignment`, `Alignment`, `TextWrap`, `TextBreakMode`, and `TextOverflow`
 - `styles`, `taffy`, and `WidgetId` convenience re-exports
 
 Internal/provisional:

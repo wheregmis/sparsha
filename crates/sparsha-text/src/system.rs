@@ -8,7 +8,7 @@ use parley::{
     layout::{Alignment, GlyphRun, PositionedLayoutItem},
     style::{
         FontFamily, FontStack, FontStyle, FontWeight, GenericFamily, LineHeight, OverflowWrap,
-        StyleProperty, TextWrapMode,
+        StyleProperty, TextWrapMode, WordBreakStrength,
     },
     FontContext, Layout, LayoutContext,
 };
@@ -50,6 +50,15 @@ pub enum TextWrap {
     Anywhere,
 }
 
+/// Additional word-breaking policy for constrained text layout.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum TextBreakMode {
+    #[default]
+    Normal,
+    BreakWord,
+    BreakAll,
+}
+
 /// Layout options for shaped or measured text.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct TextLayoutOptions {
@@ -57,6 +66,7 @@ pub struct TextLayoutOptions {
     pub alignment: TextLayoutAlignment,
     pub max_lines: Option<usize>,
     pub wrap: TextWrap,
+    pub break_mode: TextBreakMode,
 }
 
 /// A single visual line in a constrained text layout.
@@ -101,6 +111,11 @@ impl TextLayoutOptions {
 
     pub fn with_wrap(mut self, wrap: TextWrap) -> Self {
         self.wrap = wrap;
+        self
+    }
+
+    pub fn with_break_mode(mut self, break_mode: TextBreakMode) -> Self {
+        self.break_mode = break_mode;
         self
     }
 }
@@ -220,6 +235,7 @@ struct TextCacheKey {
     alignment: TextLayoutAlignment,
     max_lines: Option<usize>,
     wrap: TextWrap,
+    break_mode: TextBreakMode,
 }
 
 impl TextCacheKey {
@@ -241,6 +257,7 @@ impl TextCacheKey {
             alignment: options.alignment,
             max_lines: options.max_lines,
             wrap: options.wrap,
+            break_mode: options.break_mode,
         }
     }
 }
@@ -334,20 +351,25 @@ impl TextSystem {
             .into(),
         )));
 
-        match options.wrap {
-            TextWrap::NoWrap => {
-                builder.push_default(StyleProperty::TextWrapMode(TextWrapMode::NoWrap));
-                builder.push_default(StyleProperty::OverflowWrap(OverflowWrap::Normal));
+        let (text_wrap_mode, mut overflow_wrap) = match options.wrap {
+            TextWrap::NoWrap => (TextWrapMode::NoWrap, OverflowWrap::Normal),
+            TextWrap::Word => (TextWrapMode::Wrap, OverflowWrap::Normal),
+            TextWrap::Anywhere => (TextWrapMode::Wrap, OverflowWrap::Anywhere),
+        };
+        let word_break = match options.break_mode {
+            TextBreakMode::Normal => WordBreakStrength::Normal,
+            TextBreakMode::BreakWord => {
+                if options.wrap != TextWrap::NoWrap {
+                    overflow_wrap = OverflowWrap::BreakWord;
+                }
+                WordBreakStrength::Normal
             }
-            TextWrap::Word => {
-                builder.push_default(StyleProperty::TextWrapMode(TextWrapMode::Wrap));
-                builder.push_default(StyleProperty::OverflowWrap(OverflowWrap::Normal));
-            }
-            TextWrap::Anywhere => {
-                builder.push_default(StyleProperty::TextWrapMode(TextWrapMode::Wrap));
-                builder.push_default(StyleProperty::OverflowWrap(OverflowWrap::Anywhere));
-            }
-        }
+            TextBreakMode::BreakAll => WordBreakStrength::BreakAll,
+        };
+
+        builder.push_default(StyleProperty::TextWrapMode(text_wrap_mode));
+        builder.push_default(StyleProperty::OverflowWrap(overflow_wrap));
+        builder.push_default(StyleProperty::WordBreak(word_break));
 
         if style.bold {
             builder.push_default(StyleProperty::FontWeight(FontWeight::BOLD));
@@ -1054,6 +1076,66 @@ mod tests {
         assert!(
             anywhere_height > word_height,
             "expected anywhere-wrap to break a long word into more lines: {word_height} vs {anywhere_height}"
+        );
+    }
+
+    #[test]
+    fn break_word_wraps_long_words_more_aggressively_than_normal() {
+        let mut system = TextSystem::new_headless();
+        let style = TextStyle::default().with_family("Inter").with_size(16.0);
+        let text = "very-long-identifier-without-natural-breaks";
+        let constrained = Some(96.0);
+
+        let (_, normal_height) = system.measure_with_options(
+            text,
+            &style,
+            TextLayoutOptions::new()
+                .with_max_width(constrained)
+                .with_wrap(TextWrap::Word)
+                .with_break_mode(TextBreakMode::Normal),
+        );
+        let (_, break_word_height) = system.measure_with_options(
+            text,
+            &style,
+            TextLayoutOptions::new()
+                .with_max_width(constrained)
+                .with_wrap(TextWrap::Word)
+                .with_break_mode(TextBreakMode::BreakWord),
+        );
+
+        assert!(
+            break_word_height > normal_height,
+            "expected break-word to create more wrapped height: {normal_height} vs {break_word_height}"
+        );
+    }
+
+    #[test]
+    fn break_all_wraps_dense_identifiers_more_aggressively() {
+        let mut system = TextSystem::new_headless();
+        let style = TextStyle::default().with_family("Inter").with_size(16.0);
+        let text = "sparshaTextBreakModeDemonstration";
+        let constrained = Some(88.0);
+
+        let (_, break_word_height) = system.measure_with_options(
+            text,
+            &style,
+            TextLayoutOptions::new()
+                .with_max_width(constrained)
+                .with_wrap(TextWrap::Word)
+                .with_break_mode(TextBreakMode::BreakWord),
+        );
+        let (_, break_all_height) = system.measure_with_options(
+            text,
+            &style,
+            TextLayoutOptions::new()
+                .with_max_width(constrained)
+                .with_wrap(TextWrap::Word)
+                .with_break_mode(TextBreakMode::BreakAll),
+        );
+
+        assert!(
+            break_all_height >= break_word_height,
+            "expected break-all to be at least as aggressive as break-word: {break_word_height} vs {break_all_height}"
         );
     }
 

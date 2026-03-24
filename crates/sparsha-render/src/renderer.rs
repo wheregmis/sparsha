@@ -171,7 +171,8 @@ impl Renderer {
                             .with_max_width(run.max_width)
                             .with_alignment(run.alignment)
                             .with_max_lines(run.max_lines)
-                            .with_wrap(run.wrap),
+                            .with_wrap(run.wrap)
+                            .with_break_mode(run.break_mode),
                     );
                     if shaped.glyphs.is_empty() {
                         continue;

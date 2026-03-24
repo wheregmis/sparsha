@@ -48,7 +48,7 @@ pub use list::{List, ListDirection};
 pub use provider::Provider;
 pub use scroll::{Scroll, ScrollDirection, ScrollbarStyle};
 pub use semantics::Semantics;
-pub use sparsha_text::TextWrap;
+pub use sparsha_text::{TextBreakMode, TextWrap};
 pub use text::{Text, TextAlign, TextOverflow, TextVariant};
 pub use text_area::{TextArea, TextAreaStyle};
 pub use text_editor::TextEditorState;

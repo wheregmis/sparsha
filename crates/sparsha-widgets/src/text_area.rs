@@ -14,7 +14,7 @@ use bon::bon;
 use sparsha_core::Color;
 use sparsha_input::{Action, ActionMapper, InputEvent, Key, NamedKey, StandardAction};
 use sparsha_layout::WidgetId;
-use sparsha_text::{TextLayoutInfo, TextLayoutOptions, TextStyle, TextWrap};
+use sparsha_text::{TextBreakMode, TextLayoutInfo, TextLayoutOptions, TextStyle, TextWrap};
 use std::cell::RefCell;
 use taffy::prelude::*;
 
@@ -289,6 +289,7 @@ impl Widget for TextArea {
                     &placeholder_style,
                     content_bounds,
                     TextWrap::Word,
+                    TextBreakMode::Normal,
                     sparsha_text::TextLayoutAlignment::Start,
                     None,
                 );
@@ -330,6 +331,7 @@ impl Widget for TextArea {
                 &text_style,
                 content_bounds,
                 TextWrap::Word,
+                TextBreakMode::Normal,
                 sparsha_text::TextLayoutAlignment::Start,
                 None,
             );

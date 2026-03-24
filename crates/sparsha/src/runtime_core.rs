@@ -3,9 +3,9 @@ use crate::app::AppTheme;
 use crate::component::ComponentStateStore;
 use crate::platform::{PlatformEffect, PlatformEffects};
 use crate::runtime_widget::{
-    add_widget_to_layout, apply_focus_change, collect_accessibility_tree, dispatch_widget_event,
-    move_focus_path, remap_path, sync_focus_manager, with_widget_mut, WidgetPath,
-    WidgetRuntimeRegistry,
+    add_widget_to_layout, apply_focus_change, apply_post_layout_measurements,
+    collect_accessibility_tree, dispatch_widget_event, move_focus_path, remap_path,
+    sync_focus_manager, with_widget_mut, WidgetPath, WidgetRuntimeRegistry,
 };
 use sparsha_input::{
     with_shortcut_profile, Action, ActionMapper, FocusManager, InputEvent, ShortcutProfile,
@@ -18,6 +18,14 @@ use sparsha_widgets::{
     set_current_theme, set_current_viewport, AccessibilityAction, BuildContext, TextEditorState,
     ViewportInfo, Widget,
 };
+
+pub(crate) struct RuntimePlatformUpdate {
+    pub(crate) effects: PlatformEffects,
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    pub(crate) accessibility: AccessibilityTreeSnapshot,
+    pub(crate) focused_editor_state: Option<TextEditorState>,
+    pub(crate) has_capture: bool,
+}
 
 pub(crate) struct RuntimeCoreContext<'a> {
     pub(crate) theme: &'a AppTheme,
@@ -84,6 +92,16 @@ impl<'a> From<RuntimeCoreContext<'a>> for RuntimeHost<'a> {
 }
 
 impl RuntimeHost<'_> {
+    fn platform_update(&mut self, mut effects: PlatformEffects) -> RuntimePlatformUpdate {
+        effects.push(PlatformEffect::SyncAccessibility);
+        RuntimePlatformUpdate {
+            effects,
+            accessibility: self.refresh_accessibility(),
+            focused_editor_state: self.focused_text_editor_state().cloned(),
+            has_capture: self.has_pointer_capture(),
+        }
+    }
+
     pub(crate) fn focused_text_editor_state(&self) -> Option<&TextEditorState> {
         focused_text_editor_state(self.widget_registry, self.focused_path.as_deref())
     }
@@ -99,6 +117,10 @@ impl RuntimeHost<'_> {
             self.layout_tree,
             self.focused_path.as_ref(),
         )
+    }
+
+    pub(crate) fn refresh_platform_update(&mut self) -> RuntimePlatformUpdate {
+        self.platform_update(PlatformEffects::default())
     }
 
     pub(crate) fn build_layout(&mut self) -> PlatformEffects {
@@ -185,6 +207,10 @@ impl RuntimeHost<'_> {
         *self.widget_registry = widget_registry;
         self.layout_tree
             .compute_layout(self.viewport.width.max(1.0), self.viewport.height.max(1.0));
+        if apply_post_layout_measurements(self.root_widget, self.layout_tree, self.text_system) {
+            self.layout_tree
+                .compute_layout(self.viewport.width.max(1.0), self.viewport.height.max(1.0));
+        }
         *self.focused_path = remap_path(self.focused_path.take(), self.widget_registry);
         *self.capture_path = remap_path(self.capture_path.take(), self.widget_registry);
         sync_focus_manager(
@@ -199,6 +225,11 @@ impl RuntimeHost<'_> {
         effects.push(PlatformEffect::SyncTextInput);
         effects.push(PlatformEffect::SyncPointerCapture);
         effects
+    }
+
+    pub(crate) fn build_layout_update(&mut self) -> RuntimePlatformUpdate {
+        let effects = self.build_layout();
+        self.platform_update(effects)
     }
 
     pub(crate) fn handle_input_event(
@@ -303,6 +334,15 @@ impl RuntimeHost<'_> {
         effects
     }
 
+    pub(crate) fn handle_input_event_update(
+        &mut self,
+        event: InputEvent,
+        clipboard_text: Option<String>,
+    ) -> RuntimePlatformUpdate {
+        let effects = self.handle_input_event(event, clipboard_text);
+        self.platform_update(effects)
+    }
+
     pub(crate) fn handle_accessibility_action(
         &mut self,
         node_id: u64,
@@ -350,6 +390,16 @@ impl RuntimeHost<'_> {
         run_signal_effects(&self.signal_runtime, self.needs_layout, self.needs_repaint);
 
         effects
+    }
+
+    pub(crate) fn handle_accessibility_action_update(
+        &mut self,
+        node_id: u64,
+        action: AccessibilityAction,
+        value: Option<String>,
+    ) -> RuntimePlatformUpdate {
+        let effects = self.handle_accessibility_action(node_id, action, value);
+        self.platform_update(effects)
     }
 }
 

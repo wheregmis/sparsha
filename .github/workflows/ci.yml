@@ -52,8 +52,14 @@ jobs:
         run: npm ci
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
+      - name: Install wasm browser test runtime
+        run: cargo install wasm-bindgen-cli --version 0.2.114 --locked
+      - name: Install Chromium for wasm browser tests
+        run: sudo apt-get update && sudo apt-get install -y chromium chromium-driver
       - name: Run web smoke suite
         run: ./scripts/web-smoke.sh
+      - name: Run wasm browser test suite
+        run: ./scripts/wasm-browser-tests.sh
       - name: Upload web artifacts
         if: always()
         uses: actions/upload-artifact@v4

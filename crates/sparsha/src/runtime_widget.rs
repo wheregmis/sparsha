@@ -155,6 +155,58 @@ pub(crate) fn add_widget_to_layout(
     id
 }
 
+pub(crate) fn apply_post_layout_measurements(
+    widget: &mut dyn Widget,
+    tree: &mut LayoutTree,
+    text_system: &mut TextSystem,
+) -> bool {
+    let mut changed = false;
+    for child in widget.children_mut() {
+        changed |= apply_post_layout_measurements(child.as_mut(), tree, text_system);
+    }
+
+    if !widget.requires_post_layout_measurement() {
+        return changed;
+    }
+
+    let Some(layout) = tree.get_layout(widget.id()) else {
+        return changed;
+    };
+    if !(layout.bounds.width.is_finite() && layout.bounds.width > 0.0) {
+        return changed;
+    }
+
+    let mut style = widget.style();
+    if !style.size.height.is_auto() {
+        return changed;
+    }
+
+    let mut layout_ctx = LayoutContext {
+        text: text_system,
+        max_width: Some(layout.bounds.width),
+        max_height: Some(layout.bounds.height),
+    };
+    let Some((_, measured_height)) = widget.measure(&mut layout_ctx) else {
+        return changed;
+    };
+    if !(measured_height.is_finite() && measured_height > 0.0) {
+        return changed;
+    }
+
+    let current_min_height = if style.min_size.height.is_auto() {
+        0.0
+    } else {
+        style.min_size.height.value()
+    };
+    if (current_min_height - measured_height).abs() <= 0.5 {
+        return changed;
+    }
+
+    style.min_size.height = Dimension::length(measured_height);
+    tree.set_style(widget.id(), style);
+    true
+}
+
 pub(crate) fn sync_focus_manager(
     focus_manager: &mut FocusManager,
     registry: &WidgetRuntimeRegistry,
@@ -678,10 +730,11 @@ mod tests {
     use super::*;
     use sparsha_input::{InputEvent, PointerButton};
     use sparsha_layout::taffy::{self, prelude::*};
-    use sparsha_render::DrawList;
+    use sparsha_render::{DrawCommand, DrawList};
+    use sparsha_text::{TextLayoutAlignment, TextWrap};
     use sparsha_widgets::{
         Button, Container, CrossAxisAlignment, MainAxisAlignment, PaintCommands, PaintContext,
-        Semantics, Text, TextInput, WidgetChildMode,
+        Semantics, Text, TextAlign, TextInput, WidgetChildMode,
     };
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
@@ -1113,6 +1166,9 @@ mod tests {
         );
         tree.set_root(root_id);
         tree.compute_layout(480.0, 320.0);
+        if apply_post_layout_measurements(root, &mut tree, &mut text) {
+            tree.compute_layout(480.0, 320.0);
+        }
         (tree, registry)
     }
 
@@ -1476,5 +1532,142 @@ mod tests {
 
         assert_eq!(text_layout.bounds.x, 0.0);
         assert_eq!(text_layout.bounds.width, root_layout.bounds.width);
+    }
+
+    #[test]
+    fn wrapped_text_uses_resolved_width_for_layout_height() {
+        let mut root = Container::column()
+            .fill()
+            .cross_axis_alignment(CrossAxisAlignment::Center)
+            .child(
+                Container::column().width(160.0).child(
+                    Text::builder()
+                        .content(
+                            "Sparsha now wraps this sentence using the resolved container width.",
+                        )
+                        .fill_width(true)
+                        .wrap(TextWrap::Word)
+                        .build(),
+                ),
+            );
+
+        let (layout_tree, registry) = build_registry(&mut root);
+        let text_layout = layout_tree
+            .get_layout(registry.id_for_path(&[0, 0]).expect("text id"))
+            .expect("text layout");
+
+        assert_eq!(text_layout.bounds.width, 160.0);
+        assert!(
+            text_layout.bounds.height > 24.0,
+            "wrapped text should consume multiple lines, got height {}",
+            text_layout.bounds.height
+        );
+    }
+
+    #[test]
+    fn wrapped_text_line_height_affects_layout_height() {
+        let content =
+            "Paragraph line height should affect wrapped text height once width is constrained.";
+
+        let mut default_root = Container::column().fill().child(
+            Container::column().width(180.0).child(
+                Text::builder()
+                    .content(content)
+                    .fill_width(true)
+                    .wrap(TextWrap::Word)
+                    .build(),
+            ),
+        );
+        let mut spacious_root = Container::column().fill().child(
+            Container::column().width(180.0).child(
+                Text::builder()
+                    .content(content)
+                    .fill_width(true)
+                    .wrap(TextWrap::Word)
+                    .line_height(1.8)
+                    .build(),
+            ),
+        );
+
+        let (default_layout_tree, default_registry) = build_registry(&mut default_root);
+        let (spacious_layout_tree, spacious_registry) = build_registry(&mut spacious_root);
+        let default_text_layout = default_layout_tree
+            .get_layout(
+                default_registry
+                    .id_for_path(&[0, 0])
+                    .expect("default text id"),
+            )
+            .expect("default text layout");
+        let spacious_text_layout = spacious_layout_tree
+            .get_layout(
+                spacious_registry
+                    .id_for_path(&[0, 0])
+                    .expect("spacious text id"),
+            )
+            .expect("spacious text layout");
+
+        assert!(
+            spacious_text_layout.bounds.height > default_text_layout.bounds.height,
+            "expected larger line height to increase wrapped paragraph height: {} -> {}",
+            default_text_layout.bounds.height,
+            spacious_text_layout.bounds.height
+        );
+    }
+
+    #[test]
+    fn wrapped_text_emits_constrained_center_aligned_text_run() {
+        let mut root = Container::column().fill().child(
+            Text::builder()
+                .content("Wrapped centered paragraph for paint testing.")
+                .fill_width(true)
+                .wrap(TextWrap::Word)
+                .align(TextAlign::Center)
+                .build(),
+        );
+
+        let (layout_tree, _) = build_registry(&mut root);
+        let draw_list = paint_widget_subtree(&root, &layout_tree);
+        let run = draw_list
+            .commands()
+            .iter()
+            .find_map(|command| match command {
+                DrawCommand::TextRun { run } => Some(run),
+                _ => None,
+            })
+            .expect("expected text run");
+
+        assert_eq!(run.max_width, Some(480.0));
+        assert_eq!(run.alignment, TextLayoutAlignment::Center);
+        assert_eq!(run.max_lines, None);
+        assert_eq!(run.wrap, TextWrap::Word);
+    }
+
+    #[test]
+    fn ellipsized_text_emits_truncated_single_line_run() {
+        let mut root = Container::column().fill().child(
+            Container::column().width(180.0).child(
+                Text::builder()
+                    .content("Sparsha should ellipsize this sentence inside a narrow lane.")
+                    .overflow(sparsha_widgets::TextOverflow::Ellipsis)
+                    .align(TextAlign::Center)
+                    .build(),
+            ),
+        );
+
+        let (layout_tree, _) = build_registry(&mut root);
+        let draw_list = paint_widget_subtree(&root, &layout_tree);
+        let run = draw_list
+            .commands()
+            .iter()
+            .find_map(|command| match command {
+                DrawCommand::TextRun { run } => Some(run),
+                _ => None,
+            })
+            .expect("expected text run");
+
+        assert!(run.text.ends_with('\u{2026}'));
+        assert_eq!(run.max_width, Some(180.0));
+        assert_eq!(run.alignment, TextLayoutAlignment::Center);
+        assert_eq!(run.max_lines, Some(1));
     }
 }

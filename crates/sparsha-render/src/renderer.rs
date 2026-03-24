@@ -2,7 +2,7 @@
 
 use crate::{DrawCommand, DrawList, ShapePass, TextPass};
 use sparsha_core::{GlobalUniforms, Point, Rect};
-use sparsha_text::TextSystem;
+use sparsha_text::{TextLayoutOptions, TextSystem};
 use wgpu::{CommandEncoder, Device, Queue, TextureFormat, TextureView};
 
 /// The main renderer that processes draw lists and renders to the screen.
@@ -162,7 +162,17 @@ impl Renderer {
                 }
                 DrawCommand::TextRun { run } => {
                     let translation = self.translation_stack.last().copied().unwrap_or((0.0, 0.0));
-                    let shaped = text_system.shape(device, queue, &run.text, &run.style, None);
+                    let shaped = text_system.shape_with_options(
+                        device,
+                        queue,
+                        &run.text,
+                        &run.style,
+                        TextLayoutOptions::new()
+                            .with_max_width(run.max_width)
+                            .with_alignment(run.alignment)
+                            .with_max_lines(run.max_lines)
+                            .with_wrap(run.wrap),
+                    );
                     if shaped.glyphs.is_empty() {
                         continue;
                     }

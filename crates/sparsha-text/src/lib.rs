@@ -8,7 +8,10 @@ mod metrics_backend;
 mod system;
 
 pub use atlas::GlyphAtlas;
-pub use system::{ShapedText, TextStyle, TextSystem};
+pub use system::{
+    ShapedText, TextLayoutAlignment, TextLayoutInfo, TextLayoutLine, TextLayoutOptions, TextStyle,
+    TextSystem, TextWrap,
+};
 
 // Re-export parley for advanced font configuration
 pub use parley;

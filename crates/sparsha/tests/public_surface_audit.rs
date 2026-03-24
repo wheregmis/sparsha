@@ -113,6 +113,7 @@ fn structural_widgets_do_not_reintroduce_parallel_public_builders() {
     let semantics = read_repo_file("crates/sparsha-widgets/src/semantics.rs");
     let list = read_repo_file("crates/sparsha-widgets/src/list.rs");
     let provider = read_repo_file("crates/sparsha-widgets/src/provider.rs");
+    let layout_helpers = read_repo_file("crates/sparsha-widgets/src/layout_helpers.rs");
 
     assert!(!container.contains("pub fn new("));
     assert!(!container.contains("impl Default for Container {"));
@@ -143,6 +144,15 @@ fn structural_widgets_do_not_reintroduce_parallel_public_builders() {
     assert!(list.contains("start_fn(name = virtualized_builder"));
     assert!(provider.contains("pub fn new(value: T, child: impl IntoWidget) -> Self"));
     assert!(provider.contains("ctx.push_context(self.value.clone())"));
+    assert!(layout_helpers.contains("pub struct Center"));
+    assert!(layout_helpers.contains("pub struct Padding"));
+    assert!(layout_helpers.contains("pub struct Expanded"));
+    assert!(layout_helpers.contains("pub struct Stack"));
+    assert!(layout_helpers.contains("pub struct Positioned"));
+    assert!(layout_helpers.contains("pub fn all(amount: f32, child: impl IntoWidget) -> Self"));
+    assert!(layout_helpers.contains("pub fn new(child: impl IntoWidget) -> Self"));
+    assert!(layout_helpers.contains("pub fn positioned(mut self, child: Positioned) -> Self"));
+    assert!(layout_helpers.contains("pub fn fill(child: impl IntoWidget) -> Self"));
 }
 
 #[test]
@@ -179,6 +189,7 @@ fn leaf_widgets_do_not_reintroduce_legacy_public_constructors() {
     assert!(!text.contains("pub fn center("));
     assert!(!text.contains("pub fn right("));
     assert!(!text.contains("pub fn variant("));
+    assert!(text.contains("pub enum TextOverflow"));
     assert!(!button.contains("pub fn new("));
     assert!(!button.contains("pub fn with_style("));
     assert!(!button.contains("pub fn on_click("));
@@ -240,6 +251,10 @@ fn shipped_surface_documents_the_bon_authoring_paths() {
     assert!(api_surface.contains("Semantics::new(...)"));
     assert!(api_surface.contains("List::virtualized_builder()"));
     assert!(api_surface.contains("TextVariant::Header"));
+    assert!(api_surface.contains("line_height(...)"));
+    assert!(api_surface.contains("TextWrap"));
+    assert!(api_surface.contains("wrap(TextWrap::Word)"));
+    assert!(api_surface.contains("TextOverflow::Ellipsis"));
     assert!(todo.contains("component().render("));
     assert!(todo.contains("App::builder()"));
     assert!(showcase.contains("Router::builder()"));
@@ -257,14 +272,25 @@ fn shipped_surface_documents_the_bon_authoring_paths() {
     assert!(widgets_lib.contains("MainAxisAlignment"));
     assert!(readme.contains("Button::builder()"));
     assert!(readme.contains("Provider::new("));
+    assert!(readme.contains("line_height(...)"));
+    assert!(readme.contains("TextWrap::Word"));
+    assert!(readme.contains("TextOverflow::Ellipsis"));
     assert!(readme.contains("main_axis_alignment(MainAxisAlignment::Center)"));
     assert!(readme.contains("cross_axis_alignment(CrossAxisAlignment::Center)"));
     assert!(examples_readme.contains("Provider::new(...)"));
     assert!(examples_readme.contains("cx.use_context::<T>()"));
     assert!(examples_readme.contains("cx.use_context_or(...)"));
     assert!(examples_readme.contains("cx.use_context_or_else(...)"));
+    assert!(examples_readme.contains("line_height(...)"));
+    assert!(examples_readme.contains("TextWrap::Word"));
+    assert!(examples_readme.contains("TextOverflow::Ellipsis"));
     assert!(examples_readme.contains("Container::main_axis_alignment(...)"));
     assert!(examples_readme.contains("Container::cross_axis_alignment(...)"));
+    assert!(examples_readme.contains("seven example binaries"));
+    assert!(examples_readme.contains("multi-example browser smoke suite"));
+    assert!(examples_readme.contains("wasm-browser-tests.sh"));
+    assert!(readme.contains("wasm-browser-tests.sh"));
+    assert!(readme.contains("web-smoke.sh` builds and serves"));
     assert!(readme.contains("cx.viewport()"));
     assert!(examples_readme.contains("cx.viewport()"));
 }

@@ -11,7 +11,9 @@ use crate::{
     platform::events::WebEventTranslator,
     platform::WebPlatform,
     router::{hash_to_path, path_to_hash, Navigator, Router, RouterHost},
-    runtime_core::{focused_text_editor_state, RuntimeCoreContext, RuntimeHost},
+    runtime_core::{
+        focused_text_editor_state, RuntimeCoreContext, RuntimeHost, RuntimePlatformUpdate,
+    },
     runtime_widget::{WidgetPath, WidgetRuntimeRegistry},
     web_surface_manager::{HybridSurfaceManager, HybridSurfaceStatus, SurfaceFrame},
 };
@@ -37,8 +39,7 @@ use web_sys::{
     Window,
 };
 
-#[wasm_bindgen::prelude::wasm_bindgen(
-    inline_js = r#"
+#[wasm_bindgen::prelude::wasm_bindgen(inline_js = r#"
 export function startRouteViewTransition(document) {
   const startViewTransition = document?.startViewTransition;
   if (typeof startViewTransition !== "function") {
@@ -60,8 +61,7 @@ export function startRouteViewTransition(document) {
     // Ignore unsupported and timing-related failures.
   }
 }
-"#
-)]
+"#)]
 extern "C" {
     fn startRouteViewTransition(document: &web_sys::Document);
 }
@@ -286,6 +286,16 @@ fn paint_widget_subtree(
 }
 
 impl WebAppState {
+    fn apply_runtime_update(&mut self, update: RuntimePlatformUpdate) {
+        let suppress_bridge = self.accessibility_text_focus_matches_widget_focus();
+        self.platform.apply_effects(
+            &update.effects,
+            update.focused_editor_state.as_ref(),
+            update.has_capture,
+            suppress_bridge,
+        );
+    }
+
     fn logical_viewport(&self) -> ViewportInfo {
         web_viewport_info(self.viewport_width, self.viewport_height)
     }
@@ -350,7 +360,11 @@ impl WebAppState {
 
     #[allow(dead_code)]
     fn refresh_accessibility(&mut self) {
-        let _ = self.runtime_host().refresh_accessibility();
+        let update = {
+            let mut host = self.runtime_host();
+            host.refresh_platform_update()
+        };
+        self.apply_runtime_update(update);
     }
 
     fn accessibility_text_focus_matches_widget_focus(&self) -> bool {
@@ -381,21 +395,11 @@ impl WebAppState {
         action: AccessibilityAction,
         value: Option<String>,
     ) {
-        let (effects, focused_editor_state, has_capture) = {
+        let update = {
             let mut host = self.runtime_host();
-            let effects = host.handle_accessibility_action(node_id, action, value);
-            let _ = host.refresh_accessibility();
-            let focused_editor_state = host.focused_text_editor_state().cloned();
-            let has_capture = host.has_pointer_capture();
-            (effects, focused_editor_state, has_capture)
+            host.handle_accessibility_action_update(node_id, action, value)
         };
-        let suppress_bridge = self.accessibility_text_focus_matches_widget_focus();
-        self.platform.apply_effects(
-            &effects,
-            focused_editor_state.as_ref(),
-            has_capture,
-            suppress_bridge,
-        );
+        self.apply_runtime_update(update);
     }
 
     fn update_viewport(&mut self) {
@@ -449,21 +453,11 @@ impl WebAppState {
     }
 
     fn build_layout(&mut self) {
-        let (effects, focused_editor_state, has_capture) = {
+        let update = {
             let mut host = self.runtime_host();
-            let effects = host.build_layout();
-            let _ = host.refresh_accessibility();
-            let focused_editor_state = host.focused_text_editor_state().cloned();
-            let has_capture = host.has_pointer_capture();
-            (effects, focused_editor_state, has_capture)
+            host.build_layout_update()
         };
-        let suppress_bridge = self.accessibility_text_focus_matches_widget_focus();
-        self.platform.apply_effects(
-            &effects,
-            focused_editor_state.as_ref(),
-            has_capture,
-            suppress_bridge,
-        );
+        self.apply_runtime_update(update);
     }
 
     fn paint(&mut self) {
@@ -494,21 +488,11 @@ impl WebAppState {
     }
 
     fn handle_event(&mut self, event: InputEvent) {
-        let (effects, focused_editor_state, has_capture) = {
+        let update = {
             let mut host = self.runtime_host();
-            let effects = host.handle_input_event(event, None);
-            let _ = host.refresh_accessibility();
-            let focused_editor_state = host.focused_text_editor_state().cloned();
-            let has_capture = host.has_pointer_capture();
-            (effects, focused_editor_state, has_capture)
+            host.handle_input_event_update(event, None)
         };
-        let suppress_bridge = self.accessibility_text_focus_matches_widget_focus();
-        self.platform.apply_effects(
-            &effects,
-            focused_editor_state.as_ref(),
-            has_capture,
-            suppress_bridge,
-        );
+        self.apply_runtime_update(update);
     }
 
     fn frame(&mut self) {

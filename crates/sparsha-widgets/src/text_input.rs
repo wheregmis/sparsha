@@ -1,21 +1,32 @@
 //! Text input widget.
 
 use crate::text_editor::{EditorCore, TextEditorState};
+use crate::text_editor_widget::{
+    apply_standard_action, compute_prefix_widths, editor_placeholder_style, editor_text_style,
+    editor_widget_style, paint_editor_frame, persist_editor_build_state, resolve_editor_style,
+    restore_editor_build_state, set_editor_value,
+};
 use crate::{
-    control_state::{focus_ring_border_width, focus_ring_bounds, focus_ring_color},
-    current_theme, responsive_theme_controls, responsive_typography, AccessibilityAction,
-    AccessibilityInfo, AccessibilityRole, EventContext, PaintContext, Widget,
+    AccessibilityAction, AccessibilityInfo, AccessibilityRole, EventContext, PaintContext, Widget,
 };
 use bon::bon;
 use sparsha_core::Color;
 use sparsha_input::{Action, ActionMapper, InputEvent, Key, NamedKey, StandardAction};
 use sparsha_layout::WidgetId;
-use sparsha_text::TextStyle;
+use sparsha_text::{TextLayoutInfo, TextLayoutOptions, TextStyle, TextWrap};
 use std::cell::RefCell;
 use taffy::prelude::*;
 
 /// Callback type for text change and submit handlers.
 type TextInputCallback = Box<dyn FnMut(&str)>;
+
+#[derive(Clone, Debug)]
+struct LineMetrics {
+    x_offset: f32,
+    y_offset: f32,
+    height: f32,
+    widths: Vec<(usize, f32)>,
+}
 
 /// Style configuration for text input.
 #[derive(Clone, Debug)]
@@ -66,13 +77,7 @@ pub struct TextInput {
     on_submit: Option<TextInputCallback>,
     fill_width: bool,
     use_theme_defaults: bool,
-    prefix_widths: RefCell<Vec<(usize, f32)>>,
-}
-
-#[derive(Clone)]
-struct TextInputBuildState {
-    editor: EditorCore,
-    declared_value: Option<String>,
+    line_metrics: RefCell<LineMetrics>,
 }
 
 impl TextInput {
@@ -87,7 +92,12 @@ impl TextInput {
             on_submit: None,
             fill_width: false,
             use_theme_defaults: true,
-            prefix_widths: RefCell::new(vec![(0, 0.0)]),
+            line_metrics: RefCell::new(LineMetrics {
+                x_offset: 0.0,
+                y_offset: 0.0,
+                height: 0.0,
+                widths: vec![(0, 0.0)],
+            }),
         }
     }
 
@@ -108,68 +118,92 @@ impl TextInput {
         }
     }
 
-    fn compute_prefix_widths(
-        text: &str,
-        mut measure_width: impl FnMut(&str) -> f32,
-    ) -> Vec<(usize, f32)> {
-        if text.is_empty() {
-            return vec![(0, 0.0)];
+    fn update_line_metrics(
+        &self,
+        layout_info: &TextLayoutInfo,
+        style: &TextStyle,
+        mut measure_prefix: impl FnMut(&str) -> f32,
+    ) {
+        if self.editor.text().is_empty() {
+            *self.line_metrics.borrow_mut() = LineMetrics {
+                x_offset: 0.0,
+                y_offset: 0.0,
+                height: style.font_size * style.line_height,
+                widths: vec![(0, 0.0)],
+            };
+            return;
         }
 
-        let mut boundaries = Vec::with_capacity(text.chars().count() + 1);
-        boundaries.push(0);
-        for (idx, _) in text.char_indices().skip(1) {
-            boundaries.push(idx);
-        }
-        if boundaries.last().copied() != Some(text.len()) {
-            boundaries.push(text.len());
-        }
-
-        boundaries
-            .into_iter()
-            .map(|idx| (idx, measure_width(&text[..idx])))
-            .collect()
+        let Some(line) = layout_info.lines.first().cloned() else {
+            *self.line_metrics.borrow_mut() = LineMetrics {
+                x_offset: 0.0,
+                y_offset: 0.0,
+                height: style.font_size * style.line_height,
+                widths: vec![(0, 0.0)],
+            };
+            return;
+        };
+        let widths = compute_prefix_widths(self.editor.text(), 0, |prefix| measure_prefix(prefix));
+        *self.line_metrics.borrow_mut() = LineMetrics {
+            x_offset: line.offset,
+            y_offset: line.min_coord,
+            height: line.line_height,
+            widths,
+        };
     }
 
-    fn update_prefix_width_cache_with_paint_ctx(&self, ctx: &mut PaintContext, style: &TextStyle) {
-        let cache = Self::compute_prefix_widths(self.editor.text(), |prefix| {
-            self.measure_width(ctx, style, prefix) / ctx.scale_factor.max(1.0)
+    fn update_line_metrics_with_paint_ctx(&self, ctx: &mut PaintContext, style: &TextStyle) {
+        let layout = ctx.text_system.layout_info(
+            self.editor.text(),
+            style,
+            TextLayoutOptions::new()
+                .with_wrap(TextWrap::NoWrap)
+                .with_max_lines(Some(1)),
+        );
+        self.update_line_metrics(&layout, style, |prefix| {
+            ctx.text_system.measure(prefix, style, None).0
         });
-        *self.prefix_widths.borrow_mut() = cache;
     }
 
-    fn update_prefix_width_cache_with_layout_ctx(
+    fn update_line_metrics_with_layout_ctx(
         &self,
         ctx: &mut crate::LayoutContext,
         style: &TextStyle,
     ) {
-        let cache = Self::compute_prefix_widths(self.editor.text(), |prefix| {
-            ctx.measure_text(prefix, style).0
+        let layout = ctx.text.layout_info(
+            self.editor.text(),
+            style,
+            TextLayoutOptions::new()
+                .with_wrap(TextWrap::NoWrap)
+                .with_max_lines(Some(1)),
+        );
+        self.update_line_metrics(&layout, style, |prefix| {
+            ctx.text.measure(prefix, style, None).0
         });
-        *self.prefix_widths.borrow_mut() = cache;
     }
 
     fn cursor_index_for_x(&self, x: f32) -> usize {
         if self.editor.text().is_empty() {
             return 0;
         }
-        let prefix = self.prefix_widths.borrow();
-        if prefix.is_empty() {
+        let line = self.line_metrics.borrow();
+        if line.widths.is_empty() {
             return self.editor.text().len();
         }
 
-        if x <= 0.0 {
+        if x <= line.x_offset {
             return 0;
         }
-        if let Some((last_idx, last_x)) = prefix.last() {
-            if x >= *last_x {
+        let local_x = (x - line.x_offset).max(0.0);
+        if let Some((last_idx, last_x)) = line.widths.last() {
+            if local_x >= *last_x {
                 return *last_idx;
             }
         }
 
         let mut best = (self.editor.text().len(), f32::MAX);
-        for (idx, width) in prefix.iter() {
-            let dist = (*width - x).abs();
+        for (idx, width) in &line.widths {
+            let dist = (*width - local_x).abs();
             if dist < best.1 {
                 best = (*idx, dist);
             }
@@ -178,173 +212,37 @@ impl TextInput {
     }
 
     fn prefix_width_for(&self, index: usize) -> Option<f32> {
-        self.prefix_widths
+        self.line_metrics
             .borrow()
+            .widths
             .iter()
             .find_map(|(idx, width)| (*idx == index).then_some(*width))
     }
 
+    fn range_width_for(&self, start: usize, end: usize) -> f32 {
+        let start_x = self.prefix_width_for(start).unwrap_or_default();
+        let end_x = self.prefix_width_for(end).unwrap_or(start_x);
+        (end_x - start_x).max(0.0)
+    }
+
     fn cursor_offset_for(&self, ctx: &mut PaintContext, style: &TextStyle) -> f32 {
         if let Some(width) = self.prefix_width_for(self.editor.cursor()) {
-            return width * ctx.scale_factor;
+            return (self.line_metrics.borrow().x_offset + width) * ctx.scale_factor;
         }
         let text_before_cursor = &self.editor.text()[..self.editor.cursor()];
-        self.measure_width(ctx, style, text_before_cursor)
-    }
-
-    fn measure_width(&self, ctx: &mut PaintContext, style: &TextStyle, text: &str) -> f32 {
-        ctx.measure_text(text, style).0
-    }
-
-    fn themed_default_style() -> TextInputStyle {
-        let theme = current_theme();
-        let controls = responsive_theme_controls(&theme);
-        let typography = responsive_typography(&theme);
-        TextInputStyle {
-            background: theme.colors.input_background,
-            background_focused: theme.colors.surface,
-            text_color: theme.colors.text_primary,
-            placeholder_color: theme.colors.input_placeholder,
-            border_color: theme.colors.border,
-            border_color_focused: theme.colors.primary,
-            border_width: 1.0,
-            corner_radius: theme.radii.md,
-            padding_h: controls.control_padding_x,
-            padding_v: controls.control_padding_y,
-            font_size: typography.body_size,
-            min_width: 180.0,
-            min_height: controls.control_height,
-        }
+        self.line_metrics.borrow().x_offset * ctx.scale_factor
+            + ctx.measure_text(text_before_cursor, style).0
     }
 
     fn resolved_style(&self) -> TextInputStyle {
-        if self.use_theme_defaults {
-            Self::themed_default_style()
-        } else {
-            self.style.clone()
-        }
+        resolve_editor_style(&self.style, self.use_theme_defaults, false)
     }
 
     fn handle_action(&mut self, ctx: &mut EventContext, action: StandardAction) -> bool {
-        let changed = match action {
-            StandardAction::SelectAll => {
-                self.editor.select_all();
-                ctx.request_paint();
-                false
-            }
-            StandardAction::Copy => {
-                if let Some(text) = self.editor.copy_selection() {
-                    ctx.write_clipboard(text);
-                }
-                ctx.request_paint();
-                false
-            }
-            StandardAction::Cut => {
-                if let Some(text) = self.editor.cut_selection() {
-                    ctx.write_clipboard(text);
-                    self.fire_change();
-                    ctx.request_layout();
-                    true
-                } else {
-                    false
-                }
-            }
-            StandardAction::Undo => {
-                let changed = self.editor.undo();
-                if changed {
-                    self.fire_change();
-                    ctx.request_layout();
-                }
-                changed
-            }
-            StandardAction::Redo => {
-                let changed = self.editor.redo();
-                if changed {
-                    self.fire_change();
-                    ctx.request_layout();
-                }
-                changed
-            }
-            StandardAction::Backspace => {
-                let changed = self.editor.backspace();
-                if changed {
-                    self.fire_change();
-                    ctx.request_layout();
-                }
-                changed
-            }
-            StandardAction::Delete => {
-                let changed = self.editor.delete_forward();
-                if changed {
-                    self.fire_change();
-                    ctx.request_layout();
-                }
-                changed
-            }
-            StandardAction::MoveLeft => {
-                self.editor.move_left(false);
-                ctx.request_paint();
-                false
-            }
-            StandardAction::MoveRight => {
-                self.editor.move_right(false);
-                ctx.request_paint();
-                false
-            }
-            StandardAction::SelectLeft => {
-                self.editor.move_left(true);
-                ctx.request_paint();
-                false
-            }
-            StandardAction::SelectRight => {
-                self.editor.move_right(true);
-                ctx.request_paint();
-                false
-            }
-            StandardAction::MoveWordLeft => {
-                self.editor.move_word_left(false);
-                ctx.request_paint();
-                false
-            }
-            StandardAction::MoveWordRight => {
-                self.editor.move_word_right(false);
-                ctx.request_paint();
-                false
-            }
-            StandardAction::SelectWordLeft => {
-                self.editor.move_word_left(true);
-                ctx.request_paint();
-                false
-            }
-            StandardAction::SelectWordRight => {
-                self.editor.move_word_right(true);
-                ctx.request_paint();
-                false
-            }
-            StandardAction::MoveToStart => {
-                self.editor.move_to_start(false);
-                ctx.request_paint();
-                false
-            }
-            StandardAction::MoveToEnd => {
-                self.editor.move_to_end(false);
-                ctx.request_paint();
-                false
-            }
-            StandardAction::SelectToStart => {
-                self.editor.move_to_start(true);
-                ctx.request_paint();
-                false
-            }
-            StandardAction::SelectToEnd => {
-                self.editor.move_to_end(true);
-                ctx.request_paint();
-                false
-            }
-            _ => false,
-        };
-
-        ctx.stop_propagation();
+        let changed = apply_standard_action(&mut self.editor, ctx, action, false);
+        if changed {
+            self.fire_change();
+        }
         changed
     }
 }
@@ -401,103 +299,39 @@ impl Widget for TextInput {
     }
 
     fn rebuild(&mut self, ctx: &mut crate::BuildContext) {
-        if let Some(state) = ctx
-            .take_boxed_state()
-            .and_then(|state| state.downcast::<TextInputBuildState>().ok())
-            .map(|state| *state)
-        {
-            if state.declared_value == self.declared_value {
-                self.editor = state.editor;
-            }
-        }
-
-        ctx.store_boxed_state(Box::new(TextInputBuildState {
-            editor: self.editor.clone(),
-            declared_value: self.declared_value.clone(),
-        }));
+        restore_editor_build_state(&mut self.editor, &self.declared_value, false, ctx);
+        persist_editor_build_state(&self.editor, &self.declared_value, false, ctx);
     }
 
     fn persist_build_state(&self, ctx: &mut crate::BuildContext) {
-        ctx.store_boxed_state(Box::new(TextInputBuildState {
-            editor: self.editor.clone(),
-            declared_value: self.declared_value.clone(),
-        }));
+        persist_editor_build_state(&self.editor, &self.declared_value, false, ctx);
     }
 
     fn style(&self) -> Style {
-        let style = self.resolved_style();
-        Style {
-            size: Size {
-                width: if self.fill_width {
-                    percent(1.0)
-                } else {
-                    auto()
-                },
-                height: auto(),
-            },
-            padding: Rect {
-                left: length(style.padding_h),
-                right: length(style.padding_h),
-                top: length(style.padding_v),
-                bottom: length(style.padding_v),
-            },
-            min_size: Size {
-                width: length(style.min_width),
-                height: length(style.min_height),
-            },
-            ..Default::default()
-        }
+        editor_widget_style(&self.resolved_style(), self.fill_width)
     }
 
     fn paint(&self, ctx: &mut PaintContext) {
         let style = self.resolved_style();
         let bounds = ctx.bounds();
-        let focused = ctx.has_focus();
         let scale = ctx.scale_factor;
-
-        let bg = if focused {
-            style.background_focused
-        } else {
-            style.background
-        };
-
-        let border = if focused {
-            style.border_color_focused
-        } else {
-            style.border_color
-        };
-
-        ctx.fill_bordered_rect(bounds, bg, style.corner_radius, style.border_width, border);
-
-        if focused {
-            let controls = current_theme().controls;
-            let focus_bounds = focus_ring_bounds(bounds, scale, &controls);
-            ctx.fill_bordered_rect(
-                focus_bounds,
-                Color::TRANSPARENT,
-                style.corner_radius + 2.0,
-                focus_ring_border_width(scale, &controls),
-                focus_ring_color(current_theme().colors.border_focus),
-            );
-        }
+        let focused = ctx.has_focus();
+        paint_editor_frame(ctx, bounds, &style);
 
         let padding_h = style.padding_h * scale;
         let text_x = bounds.x + padding_h;
         let text_width = bounds.width - padding_h * 2.0;
 
-        let text_style = TextStyle::default()
-            .with_family(current_theme().typography.font_family.clone())
-            .with_size(style.font_size)
-            .with_color(style.text_color);
+        let text_style = editor_text_style(&style);
+        let placeholder_style = editor_placeholder_style(&style);
 
-        let placeholder_style = TextStyle::default()
-            .with_family(current_theme().typography.font_family)
-            .with_size(style.font_size)
-            .with_color(style.placeholder_color);
+        self.update_line_metrics_with_paint_ctx(ctx, &text_style);
 
-        self.update_prefix_width_cache_with_paint_ctx(ctx, &text_style);
-
-        let (_, text_height) = ctx.measure_text("Ay", &text_style);
+        let line_metrics = self.line_metrics.borrow().clone();
+        let text_height = line_metrics
+            .height
+            .max(text_style.font_size * text_style.line_height)
+            * scale;
         let text_y = bounds.y + (bounds.height - text_height) / 2.0;
 
         if self.editor.text().is_empty() {
@@ -506,22 +340,25 @@ impl Widget for TextInput {
             }
         } else {
             if let Some((start, end)) = self.editor.selection_range() {
-                let text_before_sel = &self.editor.text()[..start];
-                let sel_x_start = self.measure_width(ctx, &text_style, text_before_sel);
-                let selected_text = &self.editor.text()[start..end];
-                let sel_width = self.measure_width(ctx, &text_style, selected_text);
+                let sel_x_start = self.prefix_width_for(start).unwrap_or_default();
+                let sel_width = self.range_width_for(start, end);
                 if sel_width > 0.0 {
                     let sel_rect = sparsha_core::Rect::new(
-                        text_x + sel_x_start,
-                        text_y,
-                        sel_width.min(text_width - sel_x_start),
+                        text_x + (line_metrics.x_offset + sel_x_start) * scale,
+                        text_y + line_metrics.y_offset * scale,
+                        (sel_width.min(text_width / scale - sel_x_start)).max(0.0) * scale,
                         text_height,
                     );
                     ctx.fill_rect(sel_rect, Color::from_hex(0x3B82F6).with_alpha(0.3));
                 }
             }
 
-            ctx.draw_text(self.editor.text(), &text_style, text_x, text_y);
+            ctx.draw_text(
+                self.editor.text(),
+                &text_style,
+                text_x + line_metrics.x_offset * scale,
+                text_y,
+            );
         }
 
         if focused {
@@ -638,10 +475,8 @@ impl Widget for TextInput {
 
     fn measure(&self, ctx: &mut crate::LayoutContext) -> Option<(f32, f32)> {
         let style = self.resolved_style();
-        let text_style = TextStyle::default()
-            .with_family(current_theme().typography.font_family)
-            .with_size(style.font_size);
-        self.update_prefix_width_cache_with_layout_ctx(ctx, &text_style);
+        let text_style = editor_text_style(&style);
+        self.update_line_metrics_with_layout_ctx(ctx, &text_style);
         let sample = if self.editor.text().is_empty() {
             if self.placeholder.is_empty() {
                 "M"
@@ -651,7 +486,17 @@ impl Widget for TextInput {
         } else {
             self.editor.text()
         };
-        let (text_width, text_height) = ctx.measure_text(sample, &text_style);
+        let layout = ctx.text.layout_info(
+            sample,
+            &text_style,
+            TextLayoutOptions::new()
+                .with_wrap(TextWrap::NoWrap)
+                .with_max_lines(Some(1)),
+        );
+        let text_width = layout.width;
+        let text_height = layout
+            .height
+            .max(text_style.font_size * text_style.line_height);
 
         let width =
             (text_width + style.padding_h * 2.0 + style.border_width * 2.0).max(style.min_width);
@@ -689,13 +534,11 @@ impl Widget for TextInput {
         action: AccessibilityAction,
         value: Option<String>,
     ) -> bool {
-        if matches!(action, AccessibilityAction::SetValue) {
-            let next = value.unwrap_or_default();
-            if self.editor.text() != next {
-                self.editor.set_text(next);
-                self.fire_change();
-                return true;
-            }
+        if matches!(action, AccessibilityAction::SetValue)
+            && set_editor_value(&mut self.editor, value)
+        {
+            self.fire_change();
+            return true;
         }
         false
     }
@@ -752,8 +595,9 @@ mod tests {
         assert_eq!(input.editor.cursor(), 0);
 
         let mid_prefix_width = input
-            .prefix_widths
+            .line_metrics
             .borrow()
+            .widths
             .iter()
             .find_map(|(idx, width)| (*idx == 3).then_some(*width))
             .unwrap_or_default();
@@ -784,8 +628,9 @@ mod tests {
         assert!(down_ctx.commands.capture_pointer);
 
         let width = input
-            .prefix_widths
+            .line_metrics
             .borrow()
+            .widths
             .iter()
             .find_map(|(idx, width)| (*idx == 5).then_some(*width))
             .unwrap_or_default();
@@ -970,22 +815,52 @@ mod tests {
     }
 
     #[test]
-    fn prefix_cache_tracks_trailing_space_width() {
+    fn line_metrics_track_trailing_space_width() {
         reset_viewport();
         let input = TextInput::builder().value("a ").build();
         prepare_input_with_cache(&input);
 
-        let prefix = input.prefix_widths.borrow();
+        let prefix = input.line_metrics.borrow();
         let width_after_a = prefix
+            .widths
             .iter()
             .find_map(|(idx, width)| (*idx == 1).then_some(*width))
             .expect("width after first glyph");
         let width_after_space = prefix
+            .widths
             .iter()
             .find_map(|(idx, width)| (*idx == 2).then_some(*width))
             .expect("width after trailing space");
 
         assert!(width_after_space > width_after_a);
+    }
+
+    #[test]
+    fn single_line_measurement_stays_single_line_under_width_constraint() {
+        reset_viewport();
+        let input = TextInput::builder()
+            .value("this should remain on one line")
+            .build();
+
+        let mut text = TextSystem::new_headless();
+        let mut constrained = crate::LayoutContext {
+            text: &mut text,
+            max_width: Some(40.0),
+            max_height: None,
+        };
+        let constrained_size = input.measure(&mut constrained).expect("constrained size");
+
+        let mut text = TextSystem::new_headless();
+        let mut unconstrained = crate::LayoutContext {
+            text: &mut text,
+            max_width: None,
+            max_height: None,
+        };
+        let unconstrained_size = input
+            .measure(&mut unconstrained)
+            .expect("unconstrained size");
+
+        assert_eq!(constrained_size, unconstrained_size);
     }
 
     #[test]

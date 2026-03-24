@@ -193,6 +193,7 @@ fn apply_effects_with_services(
                 text_input.sync_editor_state(focused_editor_state, suppress_bridge)
             }
             PlatformEffect::SyncPointerCapture => pointer_capture.sync_capture(has_capture),
+            PlatformEffect::SyncAccessibility => {}
             PlatformEffect::WriteClipboard(text) => clipboard.write_text(text),
         }
     }
@@ -202,6 +203,7 @@ fn feature_for_effect(effect: &PlatformEffect) -> PlatformFeature {
     match effect {
         PlatformEffect::SyncTextInput => PlatformFeature::TextInputBridge,
         PlatformEffect::SyncPointerCapture => PlatformFeature::PointerCapture,
+        PlatformEffect::SyncAccessibility => PlatformFeature::AccessibilityTree,
         PlatformEffect::WriteClipboard(_) => PlatformFeature::ClipboardWrite,
     }
 }
@@ -577,6 +579,9 @@ mod wasm_tests {
         assert!(degraded_effect_support(capabilities, &PlatformEffect::SyncTextInput).is_none());
         assert!(
             degraded_effect_support(capabilities, &PlatformEffect::SyncPointerCapture).is_none()
+        );
+        assert!(
+            degraded_effect_support(capabilities, &PlatformEffect::SyncAccessibility).is_none()
         );
     }
 }

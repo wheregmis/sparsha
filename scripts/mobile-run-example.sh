@@ -29,17 +29,42 @@ ensure_mobile2_subcommand() {
   fi
 }
 
+ensure_mobile_project_initialized() {
+  local platform="$1"
+  local gen_dir
+  case "$platform" in
+    android) gen_dir="$EXAMPLE_DIR/gen/android" ;;
+    ios) gen_dir="$EXAMPLE_DIR/gen/apple" ;;
+    *)
+      echo "unsupported platform: $platform (expected android or ios)" >&2
+      exit 1
+      ;;
+  esac
+
+  if [[ ! -d "$gen_dir" ]]; then
+    echo "Initializing cargo-mobile2 project for $EXAMPLE..." >&2
+    (
+      cd "$EXAMPLE_DIR"
+      cargo mobile init --non-interactive
+    )
+  fi
+}
+
 case "$PLATFORM" in
   android)
+    ensure_mobile2_subcommand mobile
     ensure_mobile2_subcommand android
+    ensure_mobile_project_initialized android
     MOBILE_CMD=(cargo android "$ACTION")
     ;;
   ios)
-    ensure_mobile2_subcommand apple
     if [[ "$(uname -s)" != "Darwin" ]]; then
       echo "iOS builds require macOS (Darwin)." >&2
       exit 1
     fi
+    ensure_mobile2_subcommand mobile
+    ensure_mobile2_subcommand apple
+    ensure_mobile_project_initialized ios
     MOBILE_CMD=(cargo apple "$ACTION")
     ;;
   *)

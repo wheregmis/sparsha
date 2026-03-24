@@ -46,6 +46,7 @@ Then run any example on Android/iOS:
 ```
 
 `ios` commands require macOS.
+If an example has not been initialized for mobile yet, the helper script runs `cargo mobile init --non-interactive` for that example first.
 
 ## Web
 

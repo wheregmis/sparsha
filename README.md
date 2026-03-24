@@ -152,6 +152,8 @@ cargo install --git https://github.com/tauri-apps/cargo-mobile2
 ./scripts/mobile-run-example.sh kitchen-sink ios run
 ```
 
+The helper script auto-runs `cargo mobile init --non-interactive` inside the selected example when the mobile project files do not exist yet.
+
 Build and serve a web example from the repo root:
 
 ```bash
